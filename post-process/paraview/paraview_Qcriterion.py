@@ -44,29 +44,29 @@ paraview.simple._DisableFirstRenderCameraReset()
 
 # ----------------------------------- USER PARAMETERS ------------------------------------- #
 
-ISOVALUE = 0.15             # Q-criterion magnitude
-SAVE_VIDEO = True           # Save mode flag (True: saves video / False: saves png sequence)
-FRAME_STRIDE = 1           # Number of frames to skip for export
-FRAME_RATE = 100             # Frame rate of the exported animation
-START_FRAME = 2000
-END_FRAME = 5999
-BG_COLOR = [0.1, 0.1, 0.1]  # Color of display background
-FONT_SIZE = 30              # Font size for text
+ISOVALUE     = 0.15             # Q-criterion magnitude
+SAVE_VIDEO   = True             # Save mode flag (True: saves video / False: saves png sequence)
+FRAME_STRIDE = 1                # Number of frames to skip for export
+FRAME_RATE   = 100              # Frame rate of the exported animation
+START_FRAME  = 50000            # Frame to start saving animations
+END_FRAME    = 52000            # Frame to end saving animations
+BG_COLOR     = [0.1, 0.1, 0.1]  # Color of display background
+FONT_SIZE    = 30               # Font size for text
 
 
 
 # ----------------------------------- DEFINE PATHS ------------------------------------- #
 # Directory that contains your .xdmf and linked .h5 files
-DATA_DIR = "/scratch/ranbar/PT/PT_Ramp/unsteady/CFD/results_trillium/PTSeg028_base_0p64_ts10000_cy3_Q=2t_saveFreq5"   
+DATA_DIR = "/scratch/ranbar/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq2"   
 
 # Name of the .xdmf file you want to open
-XDMF_FILE = "art_PTSeg028_base_0p64_I2_FC_VENOUS_Q557_Per915_Newt370_ts10000_cy3_uO1.xdmf"                 
+XDMF_FILE = "PTSeg028_base_0p64_ts10000_cy6.xdmf"                 
 
                               
-# Where to save the animation (video or image sequence)
-OUTPUT_PATH = "/scratch/ranbar/PT/PT_Ramp/unsteady/post-process/PTSeg028_ts10000_cy3_Q=2t_saveFreq5"
-VIDEO_FILE  = f"Qcriterion_iso{ISOVALUE}_frames{START_FRAME}to{END_FRAME}_FS{FRAME_STRIDE}.avi"         #for video
-IMG_FILE    = "Qcriterion_tstep.png"   #for images
+# Path and filenames to save the animation (video or image sequence)
+OUTPUT_PATH = "/scratch/ranbar/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Videos"
+VIDEO_FILE  = f"Qcriterion_ISO{ISOVALUE}_FRAMES{START_FRAME}-{END_FRAME}_FS{FRAME_STRIDE}_FR{FRAME_RATE}.avi" #name of video file
+IMG_FILE    = "Qcriterion_tstep.png"   #name of images
 
 # Full path assembled
 XDMF_PATH = f"{DATA_DIR}/{XDMF_FILE}"    

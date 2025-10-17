@@ -27,7 +27,7 @@
 # Requesting resources
 #SBATCH --partition=compute
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=150
+#SBATCH --ntasks-per-node=100
 #SBATCH --time=23:59:00
 
 # Export all environment vars
@@ -44,4 +44,4 @@ module load StdEnv/2023 gcc/12.3 openmpi/4.1.5 paraview/6.0.0
 
 # Process the scripts in parallel
 #srun pvbatch --force-offscreen-rendering --opengl-window-backend OSMesa paraview_velocity_isosurface.py
-mpirun -np 150 pvbatch --force-offscreen-rendering --opengl-window-backend OSMesa paraview_Qcriterion.py
+mpirun -np 100 pvbatch --force-offscreen-rendering --opengl-window-backend OSMesa paraview_Qcriterion.py
