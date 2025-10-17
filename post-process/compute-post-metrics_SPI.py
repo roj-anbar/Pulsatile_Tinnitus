@@ -1,6 +1,6 @@
 # -----------------------------------------------------------------------------------------------------------------------
 # compute-post-metrics_SPI.py 
-# To calculate Spectral Power Index (SPI) of pressure on vessel wall from Oasis/BSLSolver CFD outputs.
+# To calculate windowed Spectral Power Index (SPI) of pressure on vessel wall from Oasis/BSLSolver CFD outputs.
 #
 # __author__: Rojin Anbarafshan <rojin.anbar@gmail.com>
 # __date__:   2025-10
@@ -45,16 +45,17 @@
 # Copyright (C) 2025 University of Toronto, Biomedical Simulation Lab.
 # -----------------------------------------------------------------------------------------------------------------------
 
-import os
+#import os
 import sys
 import gc
-import glob
+#import glob
 import h5py
 import warnings
 import argparse
+from pathlib import Path
 import multiprocessing as mp
 from multiprocessing import sharedctypes
-from pathlib import Path
+
 
 import vtk
 import numpy as np
@@ -94,6 +95,9 @@ def assemble_mesh(mesh_file):
 
     return surf
 
+
+# ---------------------------------------- Helper Utilities -----------------------------------------------------
+
 def extract_timestep_from_h5(h5_file):
         """
         Extract integer timestep from filename pattern '*_ts=<int>_...'.
@@ -102,16 +106,39 @@ def extract_timestep_from_h5(h5_file):
         return int(h5_file.stem.split('_ts=')[1].split('_')[0])
 
 
+def generate_windows(n_snapshots, window_size, window_overlap_frac):
+    """
+    Generate (start, end) index pairs for windowed processing.
+
+    window_overlap_frac : float in [0,1]  (fractional overlap)
+    Returns list of (start_idx, end_idx)
+    """
+    if window_size > n_snapshots:
+        return [(0, n_snapshots)]
+
+    step = int(window_size * (1 - window_overlap_frac))
+    windows = []
+    start = 0
+    while start + window_size <= n_snapshots:
+        end = start + window_size
+        windows.append((start, end))
+        start += step
+
+    # Add final window if partial remainder
+    if windows[-1][1] < n_snapshots:
+        windows.append((n_snapshots - window_size, n_snapshots))
+
+    return windows
+
+
+
+
 # -------------------------------- Shared-memory Utilities ---------------------------------------------
 
 def create_shared_array(size, dtype = np.float64):
     """Create a ctypes-backed shared array filled with zeros."""
-    a = np.ctypeslib.as_ctypes( np.zeros(size, dtype=dtype) )
-    return sharedctypes.Array(a._type_, a,  lock=False)
-
-#def get_shared_var(a):
-#    """Return a shared ctypes array from an existing ctypes array."""
-#    return sharedctypes.Array(a._type_, a,  lock=False)
+    ctype_array = np.ctypeslib.as_ctypes( np.zeros(size, dtype=dtype) )
+    return sharedctypes.Array(ctype_array._type_, ctype_array,  lock=False)
 
 def view_shared_array(shared_obj):
     """Get a NumPy view (no copy) onto a shared ctypes array created by create_shared_array."""
@@ -183,17 +210,16 @@ def filter_SPI(signal, ind_freq_zero, ind_freq_below_cutoff, mean_tag):
     return Power_below_cutoff/Power_above_zero
 
 
-################################################################
-def compute_SPI(ids, shared_pressure_ctype, shared_SPI_ctype, ind_freq_zero, ind_freq_below_cutoff):
-    """Computes SPI for a *block of wall points* and writes back into the shared SPI array."""
+def compute_SPI(pids, shared_pressure_ctype, shared_SPI_ctype,
+                ind_freq_zero, ind_freq_below_cutoff, start_idx, end_idx, with_mean=False):
+    """Computes SPI for the given points (pids) over time window [start_idx:end_idx] and writes back into shared SPI array."""
     
     pressure = view_shared_array(shared_pressure_ctype) # (n_points, n_times)
-    SPI      = view_shared_array(shared_SPI_ctype)   # (n_points,)
+    SPI      = view_shared_array(shared_SPI_ctype)      # (n_points,)
 
-    #print ('    working on', len(ids), 'points:', ids)
-
-    for j in ids:
-        SPI[j] = filter_SPI(pressure[j], ind_freq_zero, ind_freq_below_cutoff, "withoutmean")
+    for point in pids:
+        pressure_window = pressure[point, start_idx:end_idx]
+        SPI[point] = filter_SPI(pressure_window, ind_freq_zero, ind_freq_below_cutoff, "withmean" if with_mean else "withoutmean")
 
 
 
@@ -206,8 +232,13 @@ def hemodynamics(surf: pv.PolyData,
                  case_name: str,
                  n_process: int,
                  period_seconds: float,
-                 freq_cut: float):
-    """Main driver: read pressures, compute SPI, and write a VTP.
+                 window_size: int,
+                 with_mean: bool,
+                 window_overlap_frac: float = 0.25,
+                 freq_cut: float=25.0
+                 ):
+    """
+    Main driver: Reads time-series pressures, computes windowed SPI, and writes it to a VTP file.
 
     Args:
       surf           : PyVista PolyData for the wall surface
@@ -217,16 +248,15 @@ def hemodynamics(surf: pv.PolyData,
       n_process      : number of processes for parallel file reading
       period_seconds : physical period of the cycle (seconds)
       freq_cut       : cutoff frequency (Hz)
+      window_size
+      window_overlap_frac
     """
 
-    # 1) Find & sort snapshot files by timestep
+    # 1) Gather files
+    # Find & sort snapshot files by timestep 
     snapshot_h5_files = sorted(Path(input_folder).glob('*_curcyc_*up.h5'), key = extract_timestep_from_h5)
-    
-    id_start = 34000
-    id_end   = 35000
-    snapshot_h5_files = snapshot_h5_files[id_start:id_end-1] # timesteps: 26155-27155
-
     n_snapshots = len(snapshot_h5_files)
+
     if n_snapshots==0:
         print('No files found in {}!'.format(input_folder))
         sys.exit()
@@ -235,16 +265,17 @@ def hemodynamics(surf: pv.PolyData,
     wall_pids = surf.point_data['vtkOriginalPtIds']
     n_points  = len(surf.points)
 
-    #print ('Allocating %5.2f'%(n_points*n_snapshots*8/(1024*1024))+'MB of memory ...', end='')
 
-    # 2) Create shared array to hold pressures: shape [n_points, n_times]
+    # 2) Create shared arrays
+    # Array to hold pressures (n_points, n_times)
     shared_pressure_ctype = create_shared_array([n_points, n_snapshots])
 
 
-    # 3) Parallel reading: split file indices into groups and spawn processes
+
+    # 3) Parallel reading
     print ('Reading in parallel', n_snapshots, 'files into 1 array of shape', [n_points, n_snapshots],' ...')
 
-    # divide all snapshot files into chunks
+    # divide all snapshot files into groups and spread across processes
     time_indices    = list(range(n_snapshots))
     time_chunk_size = max(n_snapshots // n_process, 1)
     time_groups     = [time_indices[i : i + time_chunk_size] for i in range(0, n_snapshots, time_chunk_size)]
@@ -266,43 +297,59 @@ def hemodynamics(surf: pv.PolyData,
     gc.collect()
 
 
-    # 4) Build frequency axis
-    dt_seconds = period_seconds/10000 #float(n_snapshots-1)
-    freqs = fftfreq(n_snapshots, d = dt_seconds) # [Hz]
-    
-    # Find indices for DC and <25 Hz
-    ind_freq_zero = np.where( np.abs(freqs) == 0 )
-    ind_freq_below_cutoff = np.where( np.abs(freqs) < freq_cut)
 
-    print ('period (s)=', period_seconds, '  n_snapshots=', n_snapshots, '  dt (s)=', dt_seconds) # '  frequencies=',freqs
-    print (f'min/max frequency= {np.min(freqs):.2f} / {np.max(freqs):.2f}')
-
-    np.set_printoptions(threshold=sys.maxsize)
-
-    # 5) Compute SPI in parallel
-    print ('Now computing SPI in parallel ...')
+    # 4) Compute windowed SPI 
+    print ('Now computing windowed SPI in parallel ...')
 
     shared_SPI_ctype = create_shared_array([n_points,]) # 1D
 
-    # divide all snapshot files into chunks
-    point_indices    = list(range(n_points))
-    point_chunk_size = max(int(n_points // n_process), 1)
-    point_groups     = [point_indices[i : i + point_chunk_size] for i in range(0, n_points, point_chunk_size)]
+    # Generate windows 
+    if window_size is None:
+        window_size = n_snapshots  # use entire signal
 
-    for idx, group in enumerate(point_groups):
-        compute_SPI(group, shared_pressure_ctype, shared_SPI_ctype, ind_freq_zero, ind_freq_below_cutoff)
+    windows = generate_windows(n_snapshots, window_size, window_overlap_frac)
+    print(f"Generated {len(windows)} windows of size {window_size} with {window_overlap_frac*100:.0f}% overlap.\n")
 
-    # Free up memory
-    gc.collect()
 
-    # 6) Attach SPI to surface and save VTP
-    SPI = view_shared_array(shared_SPI_ctype)
-    surf.point_data['SPI_p'] = SPI
+    # Loop over windows
+    for window_idx, (start_idx, end_idx) in enumerate(windows, 1):
+        print(f"Computing SPI for window {window_idx}/{len(windows)}: frames {start_idx}–{end_idx}")
 
-    output_file = Path(output_folder) / f"{case_name}_tstep{id_start}to{id_end}.vtp"
+        # Set up frequencies
+        dt_seconds = period_seconds/10000 #float(n_snapshots-1)
 
-    surf.save(str(output_file))
-    print (f'Finished writing SPI to {output_file}.')
+        #if window_size: # windowed fft
+        freqs = fftfreq(end_idx-start_idx, d = dt_seconds) # [Hz]
+        #else: # entire signal
+        #    freqs = fftfreq(n_snapshots, d = dt_seconds) # [Hz]
+        # Find indices for DC and <25 Hz
+        ind_freq_zero = np.where( np.abs(freqs) == 0 )
+        ind_freq_below_cutoff = np.where( np.abs(freqs) < freq_cut)
+
+        print ('period (s)=', period_seconds, '  n_snapshots=', n_snapshots, '  dt (s)=', dt_seconds) # '  frequencies=',freqs
+        print (f'min/max frequency= {np.min(freqs):.2f} / {np.max(freqs):.2f}')
+
+  
+        # divide all snapshot files into chunks
+        point_indices    = list(range(n_points))
+        point_chunk_size = max(int(n_points // n_process), 1)
+        point_groups     = [point_indices[i : i + point_chunk_size] for i in range(0, n_points, point_chunk_size)]
+
+        for group in point_groups:
+            compute_SPI(group, shared_pressure_ctype, shared_SPI_ctype, ind_freq_zero, ind_freq_below_cutoff, start_idx, end_idx, with_mean)
+
+        # Free up memory
+        gc.collect()
+        
+        # 6) Attach SPI to surface and save VTP
+        SPI = view_shared_array(shared_SPI_ctype)
+        surf.point_data['SPI_p'] = SPI
+
+        output_file = Path(output_folder) / f"{case_name}_SPIp_FRAMES{start_idx}-{end_idx}.vtp"
+
+        surf.save(str(output_file))
+    
+    print (f'Finished writing windowed SPI files to {output_folder}.')
 
 
 
@@ -310,17 +357,18 @@ def hemodynamics(surf: pv.PolyData,
 # ---------------------------------------- Run the script -----------------------------------------------------
 
 def parse_args():
-    ap = argparse.ArgumentParser(
-        description="Compute SPI pressure on wall from Oasis HDF5 snapshots."
-    )
-    ap.add_argument("--input_folder",  required=True, help="Results folder with CFD .h5 files")
-    ap.add_argument("--mesh_folder",   required=True, help="Case mesh folder containing HDF5 mesh file")
-    ap.add_argument("--case_name",     required=True, help="Case name")
-    ap.add_argument("--output_folder", required=True, help="Output directory for SPI VTP file")
-    ap.add_argument("--period",        type=float,    help="Period in seconds (default: 0.915)", default=0.915)
-    ap.add_argument("--n_process",     type=int,      help="Number of parallel processes", default=max(1, mp.cpu_count() - 1))
-    ap.add_argument("--freq_cut",      type=float,    help="Cutoff frequency in Hz", default=25.0, dest="freq_cut", )
-    ap.add_argument("--with-mean",     action="store_true", help="Keep mean in FFT (default subtract mean)")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--input_folder",  required=True,       help="Results folder with CFD .h5 files")
+    ap.add_argument("--mesh_folder",   required=True,       help="Case mesh folder containing HDF5 mesh file")
+    ap.add_argument("--case_name",     required=True,       help="Case name")
+    ap.add_argument("--output_folder", required=True,       help="Output directory for SPI VTP file")
+    ap.add_argument("--period",        type=float,          help="Period in seconds (default: 0.915)", default=0.915)
+    ap.add_argument("--window_size",   type=int,            help="Size of window (number of snapshots for each window)")
+    ap.add_argument("--window_overlap",type=float,          help="Fraction of overlap between windows (0 to 1)", default=0)
+    ap.add_argument("--n_process",     type=int,            help="Number of parallel processes", default=max(1, mp.cpu_count() - 1))
+    ap.add_argument("--freq_cut",      type=float,          help="Cutoff frequency in Hz", default=25.0)
+    ap.add_argument("--with_mean",     action="store_true", help="Flag to keep mean in FFT or not")
+    
     return ap.parse_args()
 
 
@@ -340,10 +388,9 @@ def main():
     print(f"Processing on {args.n_process} processes…")
 
     #print ('Performing hemodynamics computation on %d core%s.'%(ncore,'s' if ncore>1 else '') )
-    hemodynamics(surf, input_folder, output_folder, case_name = args.case_name, \
-                 n_process = args.n_process, period_seconds = args.period, freq_cut = args.freq_cut)
-
-
+    hemodynamics(surf, input_folder, output_folder, case_name = args.case_name,
+                 n_process = args.n_process, period_seconds = args.period, freq_cut = args.freq_cut,
+                 window_size = args.window_size, window_overlap_frac = args.window_overlap, with_mean = args.with_mean)
 
 
 
