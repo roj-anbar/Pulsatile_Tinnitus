@@ -326,8 +326,10 @@ def hemodynamics(surf: pv.PolyData,
         ind_freq_zero = np.where( np.abs(freqs) == 0 )
         ind_freq_below_cutoff = np.where( np.abs(freqs) < freq_cut)
 
-        print ('period (s)=', period_seconds, '  n_snapshots=', n_snapshots, '  dt (s)=', dt_seconds) # '  frequencies=',freqs
-        print (f'min/max frequency= {np.min(freqs):.2f} / {np.max(freqs):.2f}')
+        
+        if window_idx == 1:
+            print ('period (s)=', period_seconds, '  n_snapshots=', n_snapshots, '  dt (s)=', dt_seconds) # '  frequencies=',freqs
+            print (f'min/max frequency= {np.min(freqs):.2f} / {np.max(freqs):.2f}')
 
   
         # divide all snapshot files into chunks
@@ -345,7 +347,7 @@ def hemodynamics(surf: pv.PolyData,
         SPI = view_shared_array(shared_SPI_ctype)
         surf.point_data['SPI_p'] = SPI
 
-        output_file = Path(output_folder) / f"{case_name}_SPIp_FRAMES{start_idx}-{end_idx}.vtp"
+        output_file = Path(output_folder) / f"{case_name}_SPIp_win{window_idx:03d}.vtp"
 
         surf.save(str(output_file))
     
@@ -382,7 +384,7 @@ def main():
         Path(output_folder).mkdir(parents=True, exist_ok=True)
 
     mesh_file = list(Path(mesh_folder).glob('*.h5'))[0]
-    print(f"Loading wall mesh: {mesh_file}")
+    print(f"Loading mesh: {mesh_file}")
     surf = assemble_mesh(mesh_file)
 
     print(f"Processing on {args.n_process} processes…")
