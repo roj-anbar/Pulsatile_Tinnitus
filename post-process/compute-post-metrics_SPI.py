@@ -29,7 +29,7 @@
 #   - case         Case name (used only in output filename)
 #   - out          Output directory for the VTP result
 #   - period       Period in seconds (e.g., 0.915)
-#   - nproc        Number of worker processes (default: #logical CPUs)
+#   - n_process        Number of worker processes (default: #logical CPUs)
 #   - f-cut        Frequency cutoff in Hz (default: 25.0)
 #   - with-mean    Keep the mean when computing FFT (default: subtract mean)
 #
@@ -65,28 +65,12 @@ import pyvista as pv
 warnings.filterwarnings("ignore", category=DeprecationWarning) 
 
 
-# -------------------------------- Shared-memory Helper Functions ---------------------------------------------
 
-
-def create_shared_var(size, dtype=np.float64):
-    """Create a ctypes-backed shared array and return the raw shared object."""
-    a = np.ctypeslib.as_ctypes( np.zeros(size, dtype=dtype) )
-    return sharedctypes.Array(a._type_, a,  lock=False)
-
-def get_shared_var(a):
-    """Return a shared ctypes array from an existing ctypes array."""
-    return sharedctypes.Array(a._type_, a,  lock=False)
-
-def get_array(shared_var):
-    """Create a NumPy view on top of the shared ctypes array."""
-    return np.ctypeslib.as_array(shared_var)
-
-
-# ---------------------------------------- Mesh I/O -----------------------------------------------------
+# ---------------------------------------- Mesh Utilities -----------------------------------------------------
 
 def assemble_mesh(mesh_file):
     """
-    Create a PolyData surface (UnstructuredGrid) from the wall mesh stored in a BSLSolver-style HDF5.
+    Create a Pyvista PolyData surface from the wall mesh stored in a BSLSolver-style HDF5.
 
     Expects datasets:
       Mesh/Wall/coordinates : (Npoints, 3) float
@@ -95,193 +79,230 @@ def assemble_mesh(mesh_file):
     """
     
     with h5py.File(mesh_file, 'r') as hf:
-        coords    = np.array(hf['Mesh/Wall/coordinates'])  # coords of wall points 
-        elems     = np.array(hf['Mesh/Wall/topology'])     # connectivity of wall points
-        point_ids = np.array(hf['Mesh/Wall/pointIds'])     # mapping to volume point IDs
+        wall_coords = np.array(hf['Mesh/Wall/coordinates'])  # coords of wall points (n_points, 3)
+        wall_elems  = np.array(hf['Mesh/Wall/topology'])     # connectivity of wall points (n_cells, 3) -> triangles
+        wall_pids   = np.array(hf['Mesh/Wall/pointIds'])     # mapping to volume point IDs (n_points,)
         
-    # Create VTK connectivity ()
-    n_elems = elems.shape[0]
-    elem_type = np.ones((n_elems, 1), dtype=int) * 3
-    elems = np.concatenate([elem_type, elems], axis = 1)
+    # Create VTK connectivity --> requires a size prefix per cell (here '3' for triangles)
+    n_elems      = wall_elems.shape[0]
+    tri_size     = np.ones((n_elems, 1), dtype=int) * 3 # array of 3
+    vtk_elems    = np.concatenate([tri_size, wall_elems], axis = 1).ravel() #ravel(): flattens the array into a 1d array
         
-    # Build surface and attach point IDs
-    surf = pv.PolyData(coords, elems.ravel())
-    surf.point_data['vtkOriginalPtIds'] = point_ids
+    # Build surface and attach point ID
+    surf = pv.PolyData(wall_coords, vtk_elems)
+    surf.point_data['vtkOriginalPtIds'] = wall_pids
 
     return surf
 
-def get_ts(h5_file):
-        """ Given a simulation h5_file, get ts. """
+def extract_timestep_from_h5(h5_file):
+        """
+        Extract integer timestep from filename pattern '*_ts=<int>_...'.
+        Used to sort snapshot files chronologically.
+        """
         return int(h5_file.stem.split('_ts=')[1].split('_')[0])
 
 
-# --------------------------------- Parallel file reading -----------------------------------------------
+# -------------------------------- Shared-memory Utilities ---------------------------------------------
 
-# Read all h5 files
-def read_h5_files(ids, wallids, h5_files, _press_):
+def create_shared_array(size, dtype = np.float64):
+    """Create a ctypes-backed shared array filled with zeros."""
+    a = np.ctypeslib.as_ctypes( np.zeros(size, dtype=dtype) )
+    return sharedctypes.Array(a._type_, a,  lock=False)
+
+#def get_shared_var(a):
+#    """Return a shared ctypes array from an existing ctypes array."""
+#    return sharedctypes.Array(a._type_, a,  lock=False)
+
+def view_shared_array(shared_obj):
+    """Get a NumPy view (no copy) onto a shared ctypes array created by create_shared_array."""
+    return np.ctypeslib.as_array(shared_obj)
+
+
+# --------------------------------- Parallel File Reader -----------------------------------------------
+
+
+def read_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype):
     """
-    Read a chunk of time files and place wall pressures into the shared 2D array.
+    Reads a *chunk* of time-snapshot HDF5 files, extracts wall pressures, and writes into the shared array.
 
     Arguments:
-      ids      : list of snapshot indices to read
-      wallids  : wall point indices (to slice pressure field)
+      file_ids   : list of snapshot indices to read
+      wall_pids  : wall point indices (to slice pressure field)
       h5_files : list of Path objects to HDF5 snapshots
-      _press_  : shared ctypes array; viewed as press_[n_points, n_times]
+      shared_pressure_ctype  : shared ctypes array; viewed as press_[n_points, n_times]
     """
-    press_ = get_array(_press_)
-    for i in ids:
-        with h5py.File(h5_files[i], 'r') as hw:
-            pn = np.array(hw['Solution']['p'])[wallids]
-            pn = pn.flatten()
-            # Write each wall-point value into column 'i' (time index i)
-            for j in range(pn.shape[0]):
-                press_[j][i] = pn[j]
+    
+    # Create a shared (across processes) array of wall-pressure time-series
+    shared_pressure = view_shared_array(shared_pressure_ctype)
+    
+    for t_index in file_ids:
+        with h5py.File(h5_files[t_index], 'r') as h5:
+            pressure = np.array(h5['Solution']['p'])
+            pressure_wall = pressure[wall_pids].flatten() # shape: (n_points,)
+            
+            # For each wall point j, set shared_pressure[j, t_index] = p_wall[j]
+            for j in range(pressure_wall.shape[0]):
+                shared_pressure[j][t_index] = pressure_wall[j]
 
 
 # ---------------------------------------- Compute SPI -----------------------------------------------------
-################################################################
-def filter_SPI(U, W_low_cut, tag):
-    """
-    Compute SPI for one time series U using frequency masks in W_low_cut.
 
-    Behavior:
-      - If tag == "withmean": use raw U
-        else: subtract mean before FFT.
-      - Zero DC bin:          U_fft[W_low_cut[0]] = 0
-      - Zero <25 Hz bins:     U_fft_25Hz[W_low_cut[1]] = 0
-      - SPI = Power(>=25Hz) / Power(non-DC)
+def filter_SPI(signal, ind_freq_zero, ind_freq_below_cutoff, mean_tag):
     """
-    #for HI
-    if tag=="withmean":
-        U_fft = fft(U)
+    Compute SPI for a single time series using frequency masks in W_low_cut.
+
+    Arguments:
+      signal                : 1D numpy array of length n_times (pressure vs time at a wall point)
+      ind_freq_zero         : index of where frequency is zero --> np.where(|f| == 0)
+      ind_freq_below_cutoff : index of where frequency is below cutoff freq --> np.where(|f| < f_cutoff)
+      mean_tag              : choose between "withmean" or "withoutmean" -> use raw signal; otherwise subtract mean
+
+    """
+
+    # Subtract mean unless instructed otherwise
+    if mean_tag == "withmean":
+        fft_signal = fft(signal)
     else:
-        U_fft = fft(U-np.mean(U))
+        fft_signal = fft(signal - np.mean(signal))
 
     # Filter any amplitude corresponding to frequency equal to 0Hz
-    U_fft[W_low_cut[0]] = 0
+    fft_signal_above_zero = fft_signal.copy()
+    fft_signal_above_zero[ind_freq_zero] = 0
 
-    # Filter any amplitude corresponding to frequency lower to 25Hz
-    U_fft_25Hz = U_fft.copy()
-    U_fft_25Hz[W_low_cut[1]] = 0
+    # Filter any amplitude corresponding to frequency lower than cutoff frequecy (f_cutoff=25Hz)
+    fft_signal_below_cutoff = fft_signal.copy()
+    fft_signal_below_cutoff[ind_freq_below_cutoff] = 0
 
     # Compute the absolute value (power)
-    Power_25Hz = np.sum ( np.power( np.absolute(U_fft_25Hz),2))
-    Power_0Hz  = np.sum ( np.power( np.absolute(U_fft     ),2))
-    if Power_0Hz < 1e-5:
+    Power_below_cutoff = np.sum ( np.power( np.absolute(fft_signal_below_cutoff),2))
+    Power_above_zero   = np.sum ( np.power( np.absolute(fft_signal_above_zero),2))
+    
+    if Power_above_zero < 1e-5:
         return 0
-    return Power_25Hz/Power_0Hz
+    
+    return Power_below_cutoff/Power_above_zero
 
 
 ################################################################
-def compute_SPI(ids,_press,_SPI,W_low_cut):
-    """Compute SPI for a subset of wall points (ids) and write into shared SPI array."""
+def compute_SPI(ids, shared_pressure_ctype, shared_SPI_ctype, ind_freq_zero, ind_freq_below_cutoff):
+    """Computes SPI for a *block of wall points* and writes back into the shared SPI array."""
     
-    press_ = get_array(_press)
-    SPI = get_array(_SPI)
+    pressure = view_shared_array(shared_pressure_ctype) # (n_points, n_times)
+    SPI      = view_shared_array(shared_SPI_ctype)   # (n_points,)
 
-    print ('    working on', len(ids), 'points:', ids)
+    #print ('    working on', len(ids), 'points:', ids)
 
     for j in ids:
-        SPI[j] = filter_SPI(press_[j], W_low_cut, "withoutmean")
+        SPI[j] = filter_SPI(pressure[j], ind_freq_zero, ind_freq_below_cutoff, "withoutmean")
 
 
 
 
 # ---------------------------------------- Compute Hemodynamics Metrics -------------------------------------
 
-def hemodynamics(surf, input_folder, outfolder, case_name, nproc, period):
+def hemodynamics(surf: pv.PolyData,
+                 input_folder: Path,
+                 output_folder: Path,
+                 case_name: str,
+                 n_process: int,
+                 period_seconds: float,
+                 freq_cut: float):
     """Main driver: read pressures, compute SPI, and write a VTP.
 
     Args:
-      surf         : PyVista PolyData for the wall surface
-      input_folder : folder containing '*_curcyc_*up.h5' snapshots
-      outfolder    : output folder for VTP
-      case_name    : prefix for output filename
-      nproc        : number of processes for parallel file reading
-      period       : physical period of the cycle (seconds)
+      surf           : PyVista PolyData for the wall surface
+      input_folder   : folder containing '*_curcyc_*up.h5' snapshots
+      output_folder  : output folder for VTP
+      case_name      : prefix for output filename
+      n_process      : number of processes for parallel file reading
+      period_seconds : physical period of the cycle (seconds)
+      freq_cut       : cutoff frequency (Hz)
     """
 
     # 1) Find & sort snapshot files by timestep
-    h5_files = sorted(Path(input_folder).glob('*_curcyc_*up.h5'), key  get_ts)
+    snapshot_h5_files = sorted(Path(input_folder).glob('*_curcyc_*up.h5'), key = extract_timestep_from_h5)
     
     id_start = 34000
     id_end   = 35000
-    h5_files = h5_files[id_start:id_end-1] # timesteps: 26155-27155
+    snapshot_h5_files = snapshot_h5_files[id_start:id_end-1] # timesteps: 26155-27155
 
-    file_count = len(h5_files)
-    if file_count==0:
+    n_snapshots = len(snapshot_h5_files)
+    if n_snapshots==0:
         print('No files found in {}!'.format(input_folder))
         sys.exit()
     
     # Wall point IDs and sizes
-    wall_ids = surf.point_data['vtkOriginalPtIds']
-    number_of_points = len(surf.points)
+    wall_pids = surf.point_data['vtkOriginalPtIds']
+    n_points  = len(surf.points)
 
-    print ('   found', file_count, 'pressure files for', number_of_points, 'points.')
-    #print ('Allocating %5.2f'%(number_of_points*file_count*8/(1024*1024))+'MB of memory ...', end='')
+    #print ('Allocating %5.2f'%(n_points*n_snapshots*8/(1024*1024))+'MB of memory ...', end='')
 
-    # 2) Shared array to hold pressures: shape [n_points, n_times]
-    press_ = create_shared_var([number_of_points, file_count])
+    # 2) Create shared array to hold pressures: shape [n_points, n_times]
+    shared_pressure_ctype = create_shared_array([n_points, n_snapshots])
 
-    #print ('done.', flush=True)
 
-    # 3) Parallel read: split file indices into groups and spawn processes
-    print ('Reading in parallel', file_count, 'files into 1 array of shape', [number_of_points, file_count],' ...')#, end='')
+    # 3) Parallel reading: split file indices into groups and spawn processes
+    print ('Reading in parallel', n_snapshots, 'files into 1 array of shape', [n_points, n_snapshots],' ...')
 
-    # make group and divide the procedure
-    step = max(int(file_count / nproc), 1)
-    rng = list(range(0,file_count))
-    groups = [rng[i:i+step] for i  in range(rng[0], rng[-1]+1, step)]
+    # divide all snapshot files into chunks
+    time_indices    = list(range(n_snapshots))
+    time_chunk_size = max(n_snapshots // n_process, 1)
+    time_groups     = [time_indices[i : i + time_chunk_size] for i in range(0, n_snapshots, time_chunk_size)]
     
-    p_list=[]
-    for i,g in enumerate(groups):
-        p = mp.Process(target=read_h5_files, name='Process'+str(i), args=(g,wall_ids,h5_files,press_))
-        p_list.append(p)
+    processes_list=[]
+    for idx, group in enumerate(time_groups):
+        proc = mp.Process(target = read_h5_files, name=f"Reader{idx}", args=(group, wall_pids, snapshot_h5_files, shared_pressure_ctype))
+        processes_list.append(proc)
 
-    for p in p_list: p.start()
+    # Start all readers
+    for proc in processes_list:
+        proc.start()
 
-    # Wait for all the processes to finish
-    for p in p_list: p.join()
+    # Wait for all readers to finish
+    for proc in processes_list:
+        proc.join()
+
+    # Free up memory
     gc.collect()
 
-    #print (' done.', flush=True)
-    
+
     # 4) Build frequency axis
-    dt = period/10000 #float(file_count-1)
-    W = fftfreq(file_count, d=dt)
+    dt_seconds = period_seconds/10000 #float(n_snapshots-1)
+    freqs = fftfreq(n_snapshots, d = dt_seconds) # [Hz]
     
     # Find indices for DC and <25 Hz
-    W_low_cut = np.where( np.abs(W) == 0 ) + np.where( np.abs(W) < 25.0 )
+    ind_freq_zero = np.where( np.abs(freqs) == 0 )
+    ind_freq_below_cutoff = np.where( np.abs(freqs) < freq_cut)
 
-    print ('period=',period, '  file_count=',file_count, '  dt=', dt, '  frequencies=',W)
-    print ('max frequency=',np.max(W))
-    print ('min frequency=',np.min(W))
+    print ('period (s)=', period_seconds, '  n_snapshots=', n_snapshots, '  dt (s)=', dt_seconds) # '  frequencies=',freqs
+    print (f'min/max frequency= {np.min(freqs):.2f} / {np.max(freqs):.2f}')
 
     np.set_printoptions(threshold=sys.maxsize)
-    print ( 'w_low_cut:', W_low_cut )
 
-    # 5) Compute SPI per point
-    print ('Now computing  SPI ...')
+    # 5) Compute SPI in parallel
+    print ('Now computing SPI in parallel ...')
 
-    SPI = create_shared_var([number_of_points])
+    shared_SPI_ctype = create_shared_array([n_points,]) # 1D
 
-    # make group and divide the procedure
-    step = max(int(number_of_points / nproc), 1)
-    rng = list(range(0,number_of_points))
-    groups = [rng[i:i+step] for i  in range(rng[0], rng[-1]+1, step)]
+    # divide all snapshot files into chunks
+    point_indices    = list(range(n_points))
+    point_chunk_size = max(int(n_points // n_process), 1)
+    point_groups     = [point_indices[i : i + point_chunk_size] for i in range(0, n_points, point_chunk_size)]
 
-    for i,g in enumerate(groups):
-        compute_SPI(g,press_,SPI, W_low_cut)
+    for idx, group in enumerate(point_groups):
+        compute_SPI(group, shared_pressure_ctype, shared_SPI_ctype, ind_freq_zero, ind_freq_below_cutoff)
 
+    # Free up memory
     gc.collect()
 
     # 6) Attach SPI to surface and save VTP
-    SPI = get_array(SPI)
-    #print ('done.', flush=True)
-    #print to file
+    SPI = view_shared_array(shared_SPI_ctype)
     surf.point_data['SPI_p'] = SPI
-    surf.save(f'{outfolder}/{case_name}_SPIp_tstep{id_start}to{id_end}.vtp')
-    #print (' done.')
+
+    output_file = Path(output_folder) / f"{case_name}_tstep{id_start}to{id_end}.vtp"
+
+    surf.save(str(output_file))
+    print (f'Finished writing SPI to {output_file}.')
 
 
 
@@ -297,8 +318,8 @@ def parse_args():
     ap.add_argument("--case_name",     required=True, help="Case name")
     ap.add_argument("--output_folder", required=True, help="Output directory for SPI VTP file")
     ap.add_argument("--period",        type=float,    help="Period in seconds (default: 0.915)", default=0.915)
-    ap.add_argument("--nproc",         type=int,      help="Number of parallel processes", default=max(1, mp.cpu_count() - 1))
-    ap.add_argument("--f-cut",         type=float,    help="Cutoff frequency in Hz", default=25.0, dest="f_cut", )
+    ap.add_argument("--n_process",     type=int,      help="Number of parallel processes", default=max(1, mp.cpu_count() - 1))
+    ap.add_argument("--freq_cut",      type=float,    help="Cutoff frequency in Hz", default=25.0, dest="freq_cut", )
     ap.add_argument("--with-mean",     action="store_true", help="Keep mean in FFT (default subtract mean)")
     return ap.parse_args()
 
@@ -316,10 +337,11 @@ def main():
     print(f"Loading wall mesh: {mesh_file}")
     surf = assemble_mesh(mesh_file)
 
-    print(f"Processing on {args.nproc} processes…")
+    print(f"Processing on {args.n_process} processes…")
 
     #print ('Performing hemodynamics computation on %d core%s.'%(ncore,'s' if ncore>1 else '') )
-    hemodynamics(surf, input_folder, output_folder, case_name=args.case_name, nproc=args.nproc, period=args.period)
+    hemodynamics(surf, input_folder, output_folder, case_name = args.case_name, \
+                 n_process = args.n_process, period_seconds = args.period, freq_cut = args.freq_cut)
 
 
 
