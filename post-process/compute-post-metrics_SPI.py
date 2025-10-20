@@ -79,18 +79,19 @@ def assemble_wall_mesh(mesh_file):
       Mesh/Wall/pointIds    : (Npoints,) int  (mapping back to volume point numbering)
     """
     
-    with h5py.File(mesh_file, 'r') as hf:
-        wall_coords = np.array(hf['Mesh/Wall/coordinates'])  # coords of wall points (n_points, 3)
-        wall_elems  = np.array(hf['Mesh/Wall/topology'])     # connectivity of wall points (n_cells, 3) -> triangles
-        wall_pids   = np.array(hf['Mesh/Wall/pointIds'])     # mapping to volume point IDs (n_points,)
+    with h5py.File(mesh_file, 'r') as h5:
+        wall_coords = np.array(h5['Mesh/Wall/coordinates'])  # coords of wall points (n_points, 3)
+        wall_cells  = np.array(h5['Mesh/Wall/topology'])     # connectivity of wall points (n_cells, 3) -> triangles
+        wall_pids   = np.array(h5['Mesh/Wall/pointIds'])     # mapping to volume point IDs (n_points,)
         
     # Create VTK connectivity --> requires a size prefix per cell (here '3' for triangles)
-    n_elems      = wall_elems.shape[0]
-    tri_size     = np.ones((n_elems, 1), dtype=int) * 3 # array of 3
-    vtk_elems    = np.concatenate([tri_size, wall_elems], axis = 1).ravel() #ravel(): flattens the array into a 1d array
+    cell_size      = 3  # the surface cells are triangles with size of 3 (3 nodes per elem)
+    n_cells        = wall_cells.shape[0]
+    cell_type_tri  = np.full((n_cells, 1), cell_size, dtype=np.int64) # array of size (n_cells, 1) filled with 3 
+    vtk_cells      = np.concatenate([cell_type_tri, wall_cells], axis = 1).ravel() #ravel(): flattens the array into a 1d array
         
     # Build surface and attach point ID
-    surf = pv.PolyData(wall_coords, vtk_elems)
+    surf = pv.PolyData(wall_coords, vtk_cells)
     surf.point_data['vtkOriginalPtIds'] = wall_pids
 
     return surf
