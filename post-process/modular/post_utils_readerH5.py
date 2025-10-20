@@ -71,8 +71,8 @@ def read_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype):
             pressure_wall = pressure[wall_pids].flatten() # shape: (n_points,)
             
             # For each wall point j, set shared_pressure[j, t_index] = p_wall[j]
-            for j in range(pressure_wall.shape[0]):
-                shared_pressure[j][t_index] = pressure_wall[j]
+            #for j in range(pressure_wall.shape[0]):
+            #    shared_pressure[j][t_index] = pressure_wall[j]
 
-            #shared_pressure[:, t_index] = pressure_wall 
+            shared_pressure[:, t_index] = pressure_wall 
 
