@@ -69,7 +69,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # ---------------------------------------- Mesh Utilities -----------------------------------------------------
 
-def assemble_mesh(mesh_file):
+def assemble_wall_mesh(mesh_file):
     """
     Create a Pyvista PolyData surface from the wall mesh stored in a BSLSolver-style HDF5.
 
@@ -385,7 +385,7 @@ def main():
 
     mesh_file = list(Path(mesh_folder).glob('*.h5'))[0]
     print(f"Loading mesh: {mesh_file}")
-    surf = assemble_mesh(mesh_file)
+    surf = assemble_wall_mesh(mesh_file)
 
     print(f"Processing on {args.n_process} processes…")
 
