@@ -92,18 +92,25 @@ def assemble_volume_mesh(mesh_file):
     # Build grid and attach points
     vol_mesh = pv.UnstructuredGrid(cells_vtk, cell_types, coords)
 
-    return vol_mesh
+    return vol_mesh, coords, cells
 
 
 # ---------------------------------------- Helper Utilities -----------------------------------------------------
 
-def extract_timestep_from_h5(h5_file):
+def extract_timestep_from_h5(h5_filename):
         """
-        Extract integer timestep from filename pattern '*_ts=<int>_...'.
+        Extract (integer_timestep, physical_time) from filename pattern '*t=<float>_ts=<int>_up.h5'.
         Used to sort snapshot files chronologically.
         """
-        return int(h5_file.stem.split('_ts=')[1].split('_')[0])
+        name = str(h5_filename)
 
+        tstep_str = name.split("_ts=")[1].split("_")[0]
+        tstep = int(tstep_str)
+
+        time_str = name.split("_t=")[1].split("_")[0]
+        time = float(time_str)
+
+        return (tstep, time)
 
 
 # --------------------------------- Parallel File Reader -----------------------------------------------
@@ -166,6 +173,29 @@ def read_h5_files_parallel(n_process, snapshot_h5_files, velocity_ctype):
 
 
 
+# --------------------------------- Output Utilities -----------------------------------------------
+def create_h5_output(vol_mesh, topology, n_points: int, n_snapshots: int, output_h5_path: Path):
+    
+    f = h5py.File(output_h5_path, "w")
+
+    # Ensure Mesh group exists, then write exact arrays with proper shapes
+    group_mesh = f.create_group("Mesh")
+    coords = np.asarray(vol_mesh.points, dtype=np.float64)           # (Npoints, 3)
+    topo   = np.asarray(topology, dtype=np.int32)                    # (Ncells, 4)
+
+    group_mesh.create_dataset("coordinates", data=coords, dtype="f8", compression="gzip",shuffle=True) # (n_points, 3)
+    group_mesh.create_dataset("topology", data=topo, dtype="i4", compression="gzip",shuffle=True) # (n_points, 3)
+   
+
+    # Time values placeholder; we’ll fill it later
+    #f.create_dataset("Time/values", shape=(n_snapshots,), dtype="f8")
+
+    # Data (point-centered): shape (n_points, n_snapshots)
+    f.create_group("Data")
+
+    #dataset = f.create_dataset("Data/", shape=(n_points, n_snapshots), dtype="f4", chunks=(n_points,1), compression="gzip",shuffle=True)
+
+    return f
 
 
 
@@ -213,7 +243,7 @@ def compute_Qcriterion_parallel(vol_mesh, snapshot_h5_files, output_folder, n_pr
         minimal.point_data["QCriterion"] = q_array
 
         # use timestep from filename for naming
-        ts = extract_timestep_from_h5(Path(snapshot_h5_files[t_index]))
+        ts = extract_timestep_from_h5(snapshot_h5_files[t_index])
         output_file = Path(output_folder) / f"Q_{ts:06d}.vtu"
         minimal.save(str(output_file))
 
@@ -228,6 +258,7 @@ def compute_Qcriterion_parallel(vol_mesh, snapshot_h5_files, output_folder, n_pr
 # ---------------------------------------- Compute Hemodynamics Metrics -------------------------------------
 
 def hemodynamics(vol_mesh: pv.UnstructuredGrid,
+                 mesh_topology: np.array,
                  input_folder: Path,
                  output_folder: Path,
                  case_name: str,
@@ -261,17 +292,68 @@ def hemodynamics(vol_mesh: pv.UnstructuredGrid,
     
     
     # 3) Reading snapshots (parallel)
-    print ('Reading in parallel', n_snapshots, 'velocity files into 1 array of shape', [n_points, 3, n_snapshots],' ...')
-
-
-    # 4) Compute Q-criterion (serial)
-    print ('Now computing Q-criterion ...')
-
-    compute_Qcriterion_parallel(vol_mesh, snapshot_h5_files, output_folder, n_process)
-
-    # 6) Attach the metric to mesh and save VTU file
-
+    print (f'Reading in parallel {n_snapshots} velocity files into 1 array of shape [{n_points}, 3, {n_snapshots}] ... \n')
     
+    # parallel read of velocity
+    velocity_ctype = create_shared_array([n_points, 3, n_snapshots])
+    read_h5_files_parallel(n_process, snapshot_h5_files, velocity_ctype)
+    velocity = np_shared_array(velocity_ctype)  # (n_points, 3, Nt)
+
+
+    # 4) Compute Qcriterion (serial)
+    print ('Now computing Qcriterion:')
+
+    output_folder = Path(output_folder)
+    output_folder.mkdir(parents=True, exist_ok=True)
+
+    output_h5_path   = output_folder / f"{case_name}_Qcriterion.h5"      # Q-only
+    output_xdmf_path = output_folder / f"{case_name}_Qcriterion.xdmf"
+
+    # --- NEW: create Q-only HDF5 ---
+    h5f = create_h5_output(vol_mesh, mesh_topology, n_points, n_snapshots, output_h5_path)
+    group_data = h5f["Data"]
+
+    # collect physical times (or fallback)
+    time_values = np.zeros((n_snapshots,), dtype=np.float64)
+
+
+    for t_index in range(n_snapshots):
+        
+        print(f'Computing Qcriterion for frame {t_index} ...')
+
+        U = velocity[:, :, t_index]
+        vol_mesh.point_data.clear()
+        vol_mesh.point_data["Velocity"] = U
+        vol_mesh.set_active_vectors("Velocity")
+
+        qgrid_full = vol_mesh.compute_derivative(qcriterion=True, progress_bar=False)
+        q_array = np.asarray(qgrid_full.point_data["qcriterion"], dtype=np.float32)
+
+        # Create a dataset per timestep under /Data/<ts> with shape (Npoints, 1)
+        ts, time_val = extract_timestep_from_h5(snapshot_h5_files[t_index])
+
+        q_dataset = group_data.create_dataset(
+            str(ts),
+            shape=(n_points, 1),
+            dtype="f4",
+            chunks=(n_points, 1),
+            compression="gzip",
+            shuffle=True)
+        q_dataset[:, 0] = q_array.astype(np.float32, copy=False)
+
+
+        #time_values[t_index] = time_val
+
+        del qgrid_full
+        gc.collect()
+
+    # close H5
+    #h5f["Time/values"][:] = time_values
+    h5f.close()
+
+
+    #compute_Qcriterion_parallel(vol_mesh, snapshot_h5_files, output_folder, n_process)
+
     print ('Finished calculating post metrics and save them to the files.')
 
 
@@ -301,7 +383,7 @@ def main():
 
     mesh_file = list(Path(mesh_folder).glob('*.h5'))[0]
     #print(f"Loading mesh: {mesh_file}")
-    vol_mesh = assemble_volume_mesh(mesh_file)
+    vol_mesh, mesh_coords, mesh_topology = assemble_volume_mesh(mesh_file)
 
     print(f"[info] Mesh file:    {mesh_file}")
     print(f"[info] Reading from: {input_folder}")
@@ -310,8 +392,8 @@ def main():
 
 
 
-    print(f"Performing hemodynamics computation on {args.n_process} processes…")
-    hemodynamics(vol_mesh, input_folder, output_folder, case_name = args.case_name, n_process = args.n_process)
+    #print(f"Performing hemodynamics computation on {args.n_process} processes ...")
+    hemodynamics(vol_mesh, mesh_topology, input_folder, output_folder, case_name = args.case_name, n_process = args.n_process)
 
 
 
