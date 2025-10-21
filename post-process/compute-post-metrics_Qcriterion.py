@@ -120,9 +120,9 @@ def read_velocity_from_h5_files(file_ids, h5_files, velocity_ctype):
     """
     
     # Create a shared (across processes) array of velocity time-series
-    velocity = np_shared_array(velocity_ctype)
+    velocity = np_shared_array(velocity_ctype) # (n_points, 3, n_snapshots)
     
-    """
+    
     for t_index in file_ids:
         with h5py.File(h5_files[t_index], 'r') as h5:
             U = np.asarray(h5['Solution']['u']) # shape: (n_points, 3, n_times)
@@ -131,17 +131,15 @@ def read_velocity_from_h5_files(file_ids, h5_files, velocity_ctype):
             #for j in range(pressure_wall.shape[0]):
             #    solution_shared[j][:][t_index] = velocity[j,:]
             velocity[:,:,t_index] = U
-    """
 
-    with h5py.File(h5_files, 'r') as h5:
-        U = np.asarray(h5['Solution']['u'])
-        velocity[:,:] = U
 
     return velocity
 
 
-def read_h5_files_parallel(n_snapshots, n_process):
-        
+def read_h5_files_parallel(n_process, snapshot_h5_files, velocity_ctype):
+
+    n_snapshots = len(snapshot_h5_files)
+
     # divide all snapshot files into groups and spread across processes
     time_indices    = list(range(n_snapshots))
     time_chunk_size = max(n_snapshots // n_process, 1)
@@ -149,48 +147,81 @@ def read_h5_files_parallel(n_snapshots, n_process):
     
     processes_list=[]
     for idx, group in enumerate(time_groups):
-        proc = mp.Process(target = read_velocity_from_h5_files, name=f"Reader{idx}", args=(group, pids, snapshot_h5_files, velocity_ctype))
+        proc = mp.Process(
+                target = read_velocity_from_h5_files,
+                name = f"Reader{idx}",
+                args=(group, snapshot_h5_files, velocity_ctype))
+        
         processes_list.append(proc)
-
-    # Start all readers
-    for proc in processes_list:
         proc.start()
 
+    # Start all readers
+    #for proc in processes_list: proc.start()
+
     # Wait for all readers to finish
-    for proc in processes_list:
-        proc.join()
+    for proc in processes_list: proc.join()
 
     # Free up memory
     gc.collect()
 
 
-# ---------------------------------------- Compute SPI -----------------------------------------------------
 
-def compute_Qcriterion(vol_mesh, snapshot_h5_file):
+
+
+
+
+# -------------------------------- Compute Qcriterion -----------------------------------------------------
+
+
+def compute_Qcriterion_parallel(vol_mesh, snapshot_h5_files, output_folder, n_process):
     """Computes Q-criterion for the given points (pids) and writes back into shared array."""
     
     n_points = vol_mesh.n_points
+    n_snapshots = len(snapshot_h5_files)
 
     # 2) Create shared arrays
     # Array to hold velocity fiels (n_points, n_times)
-    velocity_ctype = create_shared_array([n_points, 3]) #, n_snapshots])
+    velocity_ctype = create_shared_array([n_points, 3, n_snapshots])
 
-    velocity_snapshot = read_velocity_from_h5_files([1], snapshot_h5_file, velocity_ctype)
+    read_h5_files_parallel(n_process, snapshot_h5_files, velocity_ctype)
 
-    vol_mesh.point_data.clear()
-    vol_mesh.point_data["Velocity"] = velocity_snapshot
-    vol_mesh.set_active_vectors("Velocity")
+    velocity = np_shared_array(velocity_ctype)  # (n_points, 3, n_snapshots)
 
-    qgrid = vol_mesh.compute_derivative(qcriterion=True) # (n_points, 1)
+    # reuse geometry arrays to avoid copying VTK objects between processes
+    base_cells  = vol_mesh.cells.copy()
+    base_types  = vol_mesh.celltypes.copy()
+    base_points = vol_mesh.points.copy()
 
 
-    minimal = pv.UnstructuredGrid(vol_mesh.cells, vol_mesh.celltypes, vol_mesh.points)
-    minimal.point_data.clear()
-    q_array = np.asarray(qgrid.point_data["qcriterion"])
-    minimal.point_data["qcriterion"] = q_array  # only one scalar array
+    for t_index in range(n_snapshots):
+        if t_index%10 == 0:
+            print (f'Computing Q-criterion for frame {t_index} ...')
 
-    return minimal
-    
+        # Build a fresh grid per frame
+        U = velocity[:, :, t_index]
+
+        vol_mesh.point_data.clear()
+        vol_mesh.point_data["Velocity"] = U
+        vol_mesh.set_active_vectors("Velocity")
+
+        qgrid_full = vol_mesh.compute_derivative(qcriterion=True, progress_bar=False)
+        q_array = np.asarray(qgrid_full.point_data["qcriterion"])
+
+        # minimal grid with ONLY Q
+        minimal = pv.UnstructuredGrid(base_cells, base_types, base_points)
+        minimal.point_data.clear()
+        minimal.point_data["QCriterion"] = q_array
+
+        # use timestep from filename for naming
+        ts = extract_timestep_from_h5(Path(snapshot_h5_files[t_index]))
+        output_file = Path(output_folder) / f"Q_{ts:06d}.vtu"
+        minimal.save(str(output_file))
+
+
+        # cleanup
+        del qgrid_full, minimal
+        gc.collect()
+
 
 
 
@@ -214,27 +245,20 @@ def hemodynamics(vol_mesh: pv.UnstructuredGrid,
     """
 
 
-
     
     # Mesh point IDs and sizes
-    pids = vol_mesh.n_points
     n_points  = len(vol_mesh.points)
 
     # 1) Gather files
     # Find & sort snapshot files by timestep 
-    #snapshot_h5_files = sorted(Path(input_folder).glob('*_curcyc_*up.h5'), key = extract_timestep_from_h5)
-    n_snapshots = 1 #len(snapshot_h5_files)
-
-    snapshot_h5_file_10 = f"{input_folder}/art_PTSeg028_base_0p64_I2_FC_VENOUS_Q557_Per915_Newt370_ts10000_cy6_uO1_curcyc_6_t=5490.0000_ts=060000_up.h5"
-
+    snapshot_h5_files = sorted(Path(input_folder).glob('*_curcyc_*up.h5'), key = extract_timestep_from_h5)
+    n_snapshots = len(snapshot_h5_files)
+ 
 
     if n_snapshots==0:
         print('No files found in {}!'.format(input_folder))
         sys.exit()
     
-
-
-
     
     # 3) Reading snapshots (parallel)
     print ('Reading in parallel', n_snapshots, 'velocity files into 1 array of shape', [n_points, 3, n_snapshots],' ...')
@@ -243,17 +267,10 @@ def hemodynamics(vol_mesh: pv.UnstructuredGrid,
     # 4) Compute Q-criterion (serial)
     print ('Now computing Q-criterion ...')
 
-    #Qcriterion_ctype = create_shared_array([n_points, n_snapshots]) # 1D
-
-    qgrid = compute_Qcriterion(vol_mesh, snapshot_h5_file_10)
-
+    compute_Qcriterion_parallel(vol_mesh, snapshot_h5_files, output_folder, n_process)
 
     # 6) Attach the metric to mesh and save VTU file
 
-    output_file = Path(output_folder) / f"{case_name}_Qcriterion_tstep60000.vtu"
-
-    #vol_mesh.save(str(output_file))
-    qgrid.save(str(output_file))
     
     print ('Finished calculating post metrics and save them to the files.')
 

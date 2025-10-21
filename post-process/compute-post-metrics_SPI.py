@@ -67,6 +67,19 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 
+# -------------------------------- Shared-memory Utilities ---------------------------------------------
+
+def create_shared_array(size, dtype = np.float64):
+    """Create a ctypes-backed shared array filled with zeros."""
+    ctype_array = np.ctypeslib.as_ctypes( np.zeros(size, dtype=dtype) )
+    return sharedctypes.Array(ctype_array._type_, ctype_array,  lock=False)
+
+def view_shared_array(shared_obj):
+    """Get a NumPy view (no copy) onto a shared ctypes array created by create_shared_array."""
+    return np.ctypeslib.as_array(shared_obj)
+
+
+
 # ---------------------------------------- Mesh Utilities -----------------------------------------------------
 
 def assemble_wall_mesh(mesh_file):
@@ -84,14 +97,14 @@ def assemble_wall_mesh(mesh_file):
         wall_cells  = np.array(h5['Mesh/Wall/topology'])     # connectivity of wall points (n_cells, 3) -> triangles
         wall_pids   = np.array(h5['Mesh/Wall/pointIds'])     # mapping to volume point IDs (n_points,)
         
-    # Create VTK connectivity --> requires a size prefix per cell (here '3' for triangles)
+    # Create connectivity array compatible with VTK --> requires a size prefix per cell (here '3' for triangles)
     n_cells        = wall_cells.shape[0]
-    node_per_cell  = 3  # the surface cells are triangles with size of 3 (3 nodes per elem)
+    node_per_cell  = 3      # the surface cells are triangles with size of 3 (3 nodes per elem)
     cell_size      = np.full((n_cells, 1), node_per_cell, dtype=np.int64) # array of size (n_cells, 1) filled with 3 
-    vtk_cells      = np.hstack([cell_size, wall_cells]).ravel() # horrizontal stacking of arrays / ravel: flattens the array into a 1d array
+    cells_vtk      = np.hstack([cell_size, wall_cells]).ravel() # horrizontal stacking of arrays / ravel: flattens the array into a 1d array
         
     # Build surface and attach point ID
-    surf = pv.PolyData(wall_coords, vtk_cells)
+    surf = pv.PolyData(wall_coords, cells_vtk)
     surf.point_data['vtkOriginalPtIds'] = wall_pids
 
     return surf
@@ -134,18 +147,6 @@ def generate_windows(n_snapshots, window_size, window_overlap_frac):
 
 
 
-# -------------------------------- Shared-memory Utilities ---------------------------------------------
-
-def create_shared_array(size, dtype = np.float64):
-    """Create a ctypes-backed shared array filled with zeros."""
-    ctype_array = np.ctypeslib.as_ctypes( np.zeros(size, dtype=dtype) )
-    return sharedctypes.Array(ctype_array._type_, ctype_array,  lock=False)
-
-def view_shared_array(shared_obj):
-    """Get a NumPy view (no copy) onto a shared ctypes array created by create_shared_array."""
-    return np.ctypeslib.as_array(shared_obj)
-
-
 # --------------------------------- Parallel File Reader -----------------------------------------------
 
 
@@ -169,9 +170,9 @@ def read_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype):
             pressure_wall = pressure[wall_pids].flatten() # shape: (n_points,)
             
             # For each wall point j, set shared_pressure[j, t_index] = p_wall[j]
-            for j in range(pressure_wall.shape[0]):
-                shared_pressure[j][t_index] = pressure_wall[j]
-
+            #for j in range(pressure_wall.shape[0]):
+            #    shared_pressure[j][t_index] = pressure_wall[j]
+        shared_pressure[:, t_index] = pressure_wall 
 
 # ---------------------------------------- Compute SPI -----------------------------------------------------
 
