@@ -174,6 +174,8 @@ def read_h5_files_parallel(n_process, snapshot_h5_files, velocity_ctype):
 
 
 # --------------------------------- Output Utilities -----------------------------------------------
+
+
 def create_h5_output(vol_mesh, topology, n_points: int, n_snapshots: int, output_h5_path: Path):
     
     f = h5py.File(output_h5_path, "w")
@@ -188,23 +190,108 @@ def create_h5_output(vol_mesh, topology, n_points: int, n_snapshots: int, output
    
 
     # Time values placeholder; we’ll fill it later
-    #f.create_dataset("Time/values", shape=(n_snapshots,), dtype="f8")
+    f.create_dataset("Time/values", shape=(n_snapshots,), dtype="f8")
 
     # Data (point-centered): shape (n_points, n_snapshots)
-    f.create_group("Data")
+    dataset = f.create_dataset(
+            "Data/Q",
+            shape=(n_points, n_snapshots),
+            dtype="f4",
+            chunks=(n_points,1),
+            compression="gzip",shuffle=True)
 
-    #dataset = f.create_dataset("Data/", shape=(n_points, n_snapshots), dtype="f4", chunks=(n_points,1), compression="gzip",shuffle=True)
+    return f, dataset
 
-    return f
 
+
+
+def write_xdmf_for_h5(h5_path: Path,
+                     xdmf_path: Path,
+                     series_name: str = "TimeSeries",
+                     attr_name: str = "QCriterion",
+                     topo_type: str = "Tetrahedron"
+                     ):
+    """
+    Emit an XDMF v3 file that:
+      - defines a base 'mesh' Grid reading /Mesh/topology and /Mesh/coordinates from the same HDF5
+      - creates a Temporal collection where each step slices /Data/Q with a HyperSlab
+        Layout assumed: /Data/Q has shape (Npoints, Nt)  [column = one time slice]
+        For step t, HyperSlab selects start=(0, t), stride=(1,1), count=(Npoints,1)
+      - Time values are read from /Time/values if present; otherwise use integer t.
+    """
+    h5_path   = Path(h5_path)
+    xdmf_path = Path(xdmf_path)
+    h5_name   = h5_path.name
+
+    with h5py.File(h5_path, "r") as f:
+        coords = np.asarray(f["Mesh/coordinates"])
+        topo   = np.asarray(f["Mesh/topology"])
+        npoints = int(coords.shape[0])
+        ncells  = int(topo.shape[0])
+        nverts  = int(topo.shape[1])
+
+        Q = f["Data/Q"]
+        if Q.ndim != 2:
+            raise RuntimeError("Expected /Data/Q to be 2D (Npoints, Nt).")
+        
+        npoints_q, nt = int(Q.shape[0]), int(Q.shape[1])
+        
+        if npoints_q != npoints:
+            raise RuntimeError(f"/Data/Q first dim ({npoints_q}) should be equal to Mesh/coordinates length ({npoints}).")
+
+        # Time values (optional)
+        if "Time" in f and "values" in f["Time"]:
+            time_vals = np.asarray(f["Time/values"]).astype(float).tolist()
+            if len(time_vals) != nt:
+                # fallback to indices if mismatch
+                time_vals = [float(t) for t in range(nt)]
+        else:
+            time_vals = [float(t) for t in range(nt)]
+
+    header = f'''<?xml version="1.0"?>
+<!DOCTYPE Xdmf SYSTEM "Xdmf.dtd" []>
+<Xdmf Version="3.0" xmlns:xi="http://www.w3.org/2001/XInclude">
+  <Domain>
+    <Grid Name="{series_name}" GridType="Collection" CollectionType="Temporal">
+      <Grid Name="mesh" GridType="Uniform">
+        <Topology NumberOfElements="{ncells}" TopologyType="{topo_type}" NodesPerElement="{nverts}">
+          <DataItem Dimensions="{ncells} {nverts}" NumberType="Int" Format="HDF">{h5_name}:/Mesh/topology</DataItem>
+        </Topology>
+        <Geometry GeometryType="XYZ">
+          <DataItem Dimensions="{npoints} 3" Format="HDF">{h5_name}:/Mesh/coordinates</DataItem>
+        </Geometry>
+      </Grid>
+'''
+    grids = []
+    for t in range(nt):
+        tval = time_vals[t]
+        # HyperSlab parameters for selecting column t from (Npoints, Nt):
+        # start=(0,t), stride=(1,1), count=(Npoints,1)
+        grids.append(f'''      <Grid Name="T{t:06d}">
+        <xi:include xpointer="xpointer(//Grid[@Name=&quot;{series_name}&quot;]/Grid[1]/*[self::Topology or self::Geometry])" />
+        <Time Value="{tval:.15g}" />
+        <Attribute Name="{attr_name}" AttributeType="Scalar" Center="Node">
+          <DataItem ItemType="HyperSlab" Dimensions="{npoints} 1" Type="HyperSlab">
+            <DataItem Dimensions="3 2" NumberType="Int"> 0 {t}  1 1  {npoints} 1 </DataItem>
+            <DataItem Format="HDF" NumberType="Float" Precision="4" Dimensions="{npoints} {nt}">{h5_name}:/Data/Q</DataItem>
+          </DataItem>
+        </Attribute>
+      </Grid>
+''')
+    footer = '''    </Grid>
+  </Domain>
+</Xdmf>
+'''
+    xdmf_text = header + "".join(grids) + footer
+    xdmf_path.write_text(xdmf_text)
 
 
 
 # -------------------------------- Compute Qcriterion -----------------------------------------------------
 
-
+"""
 def compute_Qcriterion_parallel(vol_mesh, snapshot_h5_files, output_folder, n_process):
-    """Computes Q-criterion for the given points (pids) and writes back into shared array."""
+    #Computes Q-criterion for the given points (pids) and writes back into shared array.
     
     n_points = vol_mesh.n_points
     n_snapshots = len(snapshot_h5_files)
@@ -251,7 +338,7 @@ def compute_Qcriterion_parallel(vol_mesh, snapshot_h5_files, output_folder, n_pr
         # cleanup
         del qgrid_full, minimal
         gc.collect()
-
+"""
 
 
 
@@ -310,8 +397,7 @@ def hemodynamics(vol_mesh: pv.UnstructuredGrid,
     output_xdmf_path = output_folder / f"{case_name}_Qcriterion.xdmf"
 
     # --- NEW: create Q-only HDF5 ---
-    h5f = create_h5_output(vol_mesh, mesh_topology, n_points, n_snapshots, output_h5_path)
-    group_data = h5f["Data"]
+    h5f, q_dataset = create_h5_output(vol_mesh, mesh_topology, n_points, n_snapshots, output_h5_path)
 
     # collect physical times (or fallback)
     time_values = np.zeros((n_snapshots,), dtype=np.float64)
@@ -332,27 +418,21 @@ def hemodynamics(vol_mesh: pv.UnstructuredGrid,
         # Create a dataset per timestep under /Data/<ts> with shape (Npoints, 1)
         ts, time_val = extract_timestep_from_h5(snapshot_h5_files[t_index])
 
-        q_dataset = group_data.create_dataset(
-            str(ts),
-            shape=(n_points, 1),
-            dtype="f4",
-            chunks=(n_points, 1),
-            compression="gzip",
-            shuffle=True)
-        q_dataset[:, 0] = q_array.astype(np.float32, copy=False)
-
-
-        #time_values[t_index] = time_val
+        q_dataset[:, t_index] = q_array.astype(np.float32, copy=False)
+        time_values[t_index] = time_val
 
         del qgrid_full
         gc.collect()
 
     # close H5
-    #h5f["Time/values"][:] = time_values
+    h5f["Time/values"][:] = time_values
     h5f.close()
 
-
     #compute_Qcriterion_parallel(vol_mesh, snapshot_h5_files, output_folder, n_process)
+    # Write XDMF index for ParaView (reuses the mesh from the same H5; one attribute per timestep)
+    write_xdmf_for_h5(output_h5_path, output_xdmf_path, series_name="TimeSeries", attr_name="QCriterion")
+
+    
 
     print ('Finished calculating post metrics and save them to the files.')
 
