@@ -1,13 +1,13 @@
 # -----------------------------------------------------------------------------------------------------------------------
 # compute-post-metrics_Qcriterion.py 
-# To calculate Qcriterion from Oasis/BSLSolver CFD outputs.
+# To calculate Qcriterion in parallel from Oasis/BSLSolver CFD outputs.
 #
 # __author__: Rojin Anbarafshan <rojin.anbar@gmail.com>
 # __date__:   2025-10
 #
 # PURPOSE:
 #   - This script is part of the BSL post-processing pipeline.
-#   - It computes Qcriterion at each volumetric point and saves the resultant array 'Qcriterion' on the mesh to a VTU file.
+#   - It computes Qcriterion at each timestep and saves the array 'Qcriterion' with the mesh to an HDF5 file.
 #
 # REQUIREMENTS:
 #   - h5py
@@ -54,19 +54,20 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 # -------------------------------- Shared-memory Utilities ---------------------------------------------
-
+###############################################################################################
 def create_shared_array(size, dtype = np.float64):
     """Create a ctypes-backed shared array filled with zeros."""
     ctype_array = np.ctypeslib.as_ctypes( np.zeros(size, dtype=dtype) )
     return sharedctypes.Array(ctype_array._type_, ctype_array,  lock=False)
 
+###############################################################################################
 def np_shared_array(shared_obj):
     """Get a NumPy view (no copy) onto a shared ctypes array created by create_shared_array."""
     return np.ctypeslib.as_array(shared_obj)
 
 
-# ---------------------------------------- Mesh Utilities -----------------------------------------------------
-
+# ---------------------------------------- I/O Utilities -----------------------------------------------------
+###############################################################################################
 def assemble_volume_mesh(mesh_file):
     """
     Create a PyVista UnstructuredGrid from the volumetric mesh stored in a BSLSolver-style HDF5.
@@ -82,6 +83,7 @@ def assemble_volume_mesh(mesh_file):
 
         
     # Create connectivity array compatible with VTK --> requires a size prefix per cell (here '4' for tetrahedrons)
+    # VTK cell array layout = [nverts, v0, v1, v2, v3, nverts, ...]
     n_cells        = cells.shape[0]
     node_per_cell  = 4  # the volumetric cells are tets with size of 4 (4 nodes per elem)
     cell_types     = np.full(n_cells, pv.CellType.TETRA, dtype=np.uint8)
@@ -92,11 +94,9 @@ def assemble_volume_mesh(mesh_file):
     # Build grid and attach points
     vol_mesh = pv.UnstructuredGrid(cells_vtk, cell_types, coords)
 
-    return vol_mesh, coords, cells
+    return vol_mesh, cells
 
-
-# ---------------------------------------- Helper Utilities -----------------------------------------------------
-
+###############################################################################################
 def extract_timestep_from_h5(h5_filename):
         """
         Extract (integer_timestep, physical_time) from filename pattern '*t=<float>_ts=<int>_up.h5'.
@@ -112,72 +112,18 @@ def extract_timestep_from_h5(h5_filename):
 
         return (tstep, time)
 
-
-# --------------------------------- Parallel File Reader -----------------------------------------------
-
-#### ADD THE SOLUTION TYPE TO READ AS INPUT ARGUMENT
-def read_velocity_from_h5_files(file_ids, h5_files, velocity_ctype):
-    """
-    Reads a *chunk* of time-snapshot HDF5 files, extracts CFD solution, and writes into the shared array.
-
-    Arguments:
-      file_ids : list of snapshot indices to read
-      h5_files : list of Path objects to HDF5 snapshots
-      velocity_ctype  : shared ctypes array [n_points, 3, n_times]
-    """
-    
-    # Create a shared (across processes) array of velocity time-series
-    velocity = np_shared_array(velocity_ctype) # (n_points, 3, n_snapshots)
-    
-    
-    for t_index in file_ids:
-        with h5py.File(h5_files[t_index], 'r') as h5:
-            U = np.asarray(h5['Solution']['u']) # shape: (n_points, 3, n_times)
-            
-            # For each wall point j, set shared_pressure[j, t_index] = p_wall[j]
-            #for j in range(pressure_wall.shape[0]):
-            #    solution_shared[j][:][t_index] = velocity[j,:]
-            velocity[:,:,t_index] = U
-
-
-    return velocity
-
-
-def read_h5_files_parallel(n_process, snapshot_h5_files, velocity_ctype):
-
-    n_snapshots = len(snapshot_h5_files)
-
-    # divide all snapshot files into groups and spread across processes
-    time_indices    = list(range(n_snapshots))
-    time_chunk_size = max(n_snapshots // n_process, 1)
-    time_groups     = [time_indices[i : i + time_chunk_size] for i in range(0, n_snapshots, time_chunk_size)]
-    
-    processes_list=[]
-    for idx, group in enumerate(time_groups):
-        proc = mp.Process(
-                target = read_velocity_from_h5_files,
-                name = f"Reader{idx}",
-                args=(group, snapshot_h5_files, velocity_ctype))
-        
-        processes_list.append(proc)
-        proc.start()
-
-    # Start all readers
-    #for proc in processes_list: proc.start()
-
-    # Wait for all readers to finish
-    for proc in processes_list: proc.join()
-
-    # Free up memory
-    gc.collect()
-
-
-
-# --------------------------------- Output Utilities -----------------------------------------------
-
-
+###############################################################################################
 def create_h5_output(vol_mesh, topology, n_points: int, n_snapshots: int, output_h5_path: Path):
-    
+    """
+    Creates one HDF5 file with the mesh (constant) and pre-allocate Time and Q arrays.
+
+    Groups & datasets:
+      /Mesh/coordinates : (n_points,3)            # coordinates of mesh
+      /Mesh/topology    : (n_cells,4)             # connectivity of mesh
+      /Time/values      : (n_snapshots,)          # physical time per frame
+      /Data/Q           : (n_points,n_snapshots)  # Q at points; column t is frame t
+    """
+
     f = h5py.File(output_h5_path, "w")
 
     # Ensure Mesh group exists, then write exact arrays with proper shapes
@@ -189,34 +135,27 @@ def create_h5_output(vol_mesh, topology, n_points: int, n_snapshots: int, output
     group_mesh.create_dataset("topology", data=topo, dtype="i4", compression="gzip",shuffle=True) # (n_points, 3)
    
 
-    # Time values placeholder; we’ll fill it later
+    # Initialize time values placeholder -> to be filled later
     f.create_dataset("Time/values", shape=(n_snapshots,), dtype="f8")
 
-    # Data (point-centered): shape (n_points, n_snapshots)
-    dataset = f.create_dataset(
+    # Initialize Q placeholder -> to be filled later -> shape (n_points, n_snapshots)
+    q_dataset = f.create_dataset(
             "Data/Q",
             shape=(n_points, n_snapshots),
             dtype="f4",
             chunks=(n_points,1),
             compression="gzip",shuffle=True)
 
-    return f, dataset
+    return f
 
 
-
-
-def write_xdmf_for_h5(h5_path: Path,
-                     xdmf_path: Path,
-                     series_name: str = "TimeSeries",
-                     attr_name: str = "QCriterion",
-                     topo_type: str = "Tetrahedron"
-                     ):
+###############################################################################################
+def write_xdmf_for_h5(h5_path: Path, xdmf_path: Path, series_name: str = "TimeSeries", attr_name: str = "QCriterion", topo_type: str = "Tetrahedron"):
     """
-    Emit an XDMF v3 file that:
-      - defines a base 'mesh' Grid reading /Mesh/topology and /Mesh/coordinates from the same HDF5
-      - creates a Temporal collection where each step slices /Data/Q with a HyperSlab
-        Layout assumed: /Data/Q has shape (Npoints, Nt)  [column = one time slice]
-        For step t, HyperSlab selects start=(0, t), stride=(1,1), count=(Npoints,1)
+    Generate an XDMF v3 file:
+      - defines a base 'mesh' Grid reading /Mesh/topology and /Mesh/coordinates from the same HDF5.
+      - creates a Temporal collection where each step slices /Data/Q with a HyperSlab Layout assumed: /Data/Q has shape (Npoints, Nt)  [column = one time slice]
+      - For step t, HyperSlab selects start=(0, t), stride=(1,1), count=(Npoints,1)
       - Time values are read from /Time/values if present; otherwise use integer t.
     """
     h5_path   = Path(h5_path)
@@ -289,61 +228,46 @@ def write_xdmf_for_h5(h5_path: Path,
 
 # -------------------------------- Compute Qcriterion -----------------------------------------------------
 
-"""
-def compute_Qcriterion_parallel(vol_mesh, snapshot_h5_files, output_folder, n_process):
-    #Computes Q-criterion for the given points (pids) and writes back into shared array.
+###############################################################################################
+def compute_Qcriterion_from_h5_files_parallel(file_ids, h5_files, vol_mesh, q_ctype):
+    """
+    Computes Q for a subset of timesteps from HDF5 files and write results into a shared matrix.
+    For each assigned t_index it reads '/Solution/u' from h5 file, compute Q-criterion, and write it into column t_index of the shared Q matrix.
+
+    Arguments:
+      file_ids : list[int] of snapshot indices assigned to this worker to read
+      h5_files : list[Path] of path to snapshot h5 files
+      vol_mesh : pv.UnstructuredGrid
+      q_ctype  : shared ctype array to store Q-criterion
+    """
     
-    n_points = vol_mesh.n_points
-    n_snapshots = len(snapshot_h5_files)
+    # Create a shared (across processes) array of Q-criterion time-series
+    q_array = np_shared_array(q_ctype) # (n_points, n_snapshots)
+    
+    print (f'Computing Qcriterion for time indices {file_ids}')
+    for t_index in file_ids:
 
-    # 2) Create shared arrays
-    # Array to hold velocity fiels (n_points, n_times)
-    velocity_ctype = create_shared_array([n_points, 3, n_snapshots])
+        ts, t_val = extract_timestep_from_h5(h5_files[t_index])
+        
+        #if ts % 100 == 0:
+        #  print (f'Computing Qcriterion for timestep {ts}')
 
-    read_h5_files_parallel(n_process, snapshot_h5_files, velocity_ctype)
+        with h5py.File(h5_files[t_index], 'r') as h5:
+            U = np.asarray(h5['Solution']['u']) # shape: (n_points, 3, n_times)
+            
+            vol_mesh.point_data.clear()
+            vol_mesh.point_data["Velocity"] = U
+            vol_mesh.set_active_vectors("Velocity")
 
-    velocity = np_shared_array(velocity_ctype)  # (n_points, 3, n_snapshots)
+            q_grid = vol_mesh.compute_derivative(qcriterion=True, progress_bar=False)
 
-    # reuse geometry arrays to avoid copying VTK objects between processes
-    base_cells  = vol_mesh.cells.copy()
-    base_types  = vol_mesh.celltypes.copy()
-    base_points = vol_mesh.points.copy()
-
-
-    for t_index in range(n_snapshots):
-        if t_index%10 == 0:
-            print (f'Computing Q-criterion for frame {t_index} ...')
-
-        # Build a fresh grid per frame
-        U = velocity[:, :, t_index]
-
-        vol_mesh.point_data.clear()
-        vol_mesh.point_data["Velocity"] = U
-        vol_mesh.set_active_vectors("Velocity")
-
-        qgrid_full = vol_mesh.compute_derivative(qcriterion=True, progress_bar=False)
-        q_array = np.asarray(qgrid_full.point_data["qcriterion"])
-
-        # minimal grid with ONLY Q
-        minimal = pv.UnstructuredGrid(base_cells, base_types, base_points)
-        minimal.point_data.clear()
-        minimal.point_data["QCriterion"] = q_array
-
-        # use timestep from filename for naming
-        ts = extract_timestep_from_h5(snapshot_h5_files[t_index])
-        output_file = Path(output_folder) / f"Q_{ts:06d}.vtu"
-        minimal.save(str(output_file))
-
-
-        # cleanup
-        del qgrid_full, minimal
-        gc.collect()
-"""
+            # Store Q for this frame into the shared (Npoints,Nt) matrix (column-major per time)
+            q_array[:,t_index] = np.asarray(q_grid.point_data["qcriterion"], dtype=np.float32)
 
 
 
 # ---------------------------------------- Compute Hemodynamics Metrics -------------------------------------
-
+###############################################################################################
 def hemodynamics(vol_mesh: pv.UnstructuredGrid,
                  mesh_topology: np.array,
                  input_folder: Path,
@@ -352,7 +276,7 @@ def hemodynamics(vol_mesh: pv.UnstructuredGrid,
                  n_process: int,
                  ):
     """
-    Main driver: Reads time-series pressures, computes post-metrics, and writes them to files.
+    Main driver: Reads time-series CFD results, computes post-metrics, and writes them to files.
 
     Args:
       vol_mesh       : PyVista UnstructuredGrid for the volumetric mesh
@@ -362,85 +286,88 @@ def hemodynamics(vol_mesh: pv.UnstructuredGrid,
       n_process      : number of processes for parallel file reading
     """
 
-
+    # 1) Initialize:
     
-    # Mesh point IDs and sizes
-    n_points  = len(vol_mesh.points)
-
-    # 1) Gather files
-    # Find & sort snapshot files by timestep 
+    # Gather files: Find & sort snapshot files by timestep 
     snapshot_h5_files = sorted(Path(input_folder).glob('*_curcyc_*up.h5'), key = extract_timestep_from_h5)
-    n_snapshots = len(snapshot_h5_files)
+    
+    n_snapshots = len(snapshot_h5_files) # number of time frames stored 
+    n_points  = len(vol_mesh.points)     # number of nodes in the mesh
  
-
     if n_snapshots==0:
         print('No files found in {}!'.format(input_folder))
         sys.exit()
-    
-    
-    # 3) Reading snapshots (parallel)
-    print (f'Reading in parallel {n_snapshots} velocity files into 1 array of shape [{n_points}, 3, {n_snapshots}] ... \n')
-    
-    # parallel read of velocity
-    velocity_ctype = create_shared_array([n_points, 3, n_snapshots])
-    read_h5_files_parallel(n_process, snapshot_h5_files, velocity_ctype)
-    velocity = np_shared_array(velocity_ctype)  # (n_points, 3, Nt)
 
-
-    # 4) Compute Qcriterion (serial)
-    print ('Now computing Qcriterion:')
-
-    output_folder = Path(output_folder)
-    output_folder.mkdir(parents=True, exist_ok=True)
-
-    output_h5_path   = output_folder / f"{case_name}_Qcriterion.h5"      # Q-only
-    output_xdmf_path = output_folder / f"{case_name}_Qcriterion.xdmf"
-
-    # --- NEW: create Q-only HDF5 ---
-    h5f, q_dataset = create_h5_output(vol_mesh, mesh_topology, n_points, n_snapshots, output_h5_path)
 
     # collect physical times (or fallback)
     time_values = np.zeros((n_snapshots,), dtype=np.float64)
+    for t_index, p in enumerate(snapshot_h5_files):
+      _, t_val = extract_timestep_from_h5(p)
+      time_values[t_index] = t_val
+    
 
+    
+    # 2) Compute Qcriterion (parallel):
+    print (f'Computing Qcriterion in parallel for {n_snapshots} snapshots ... \n')
+    
+    # Create a shared (across processes) array of Q-criterion time-series
+    q_ctype = create_shared_array([n_points, n_snapshots]) # (n_points, n_snapshots)
 
-    for t_index in range(n_snapshots):
+    # Split all snapshot files (timesteps) into groups and spread across processes (one group per process)
+    time_indices    = list(range(n_snapshots))
+    time_chunk_size = max(n_snapshots // n_process, 1)
+    time_groups     = [time_indices[i : i + time_chunk_size] for i in range(0, n_snapshots, time_chunk_size)]
+    
+    processes_list=[]
+    for idx, group in enumerate(time_groups):
+        proc = mp.Process(
+                target = compute_Qcriterion_from_h5_files_parallel,
+                name = f"Qcriterion{idx}",
+                args=(group, snapshot_h5_files, vol_mesh, q_ctype))
         
-        print(f'Computing Qcriterion for frame {t_index} ...')
+        processes_list.append(proc)
+        proc.start()
 
-        U = velocity[:, :, t_index]
-        vol_mesh.point_data.clear()
-        vol_mesh.point_data["Velocity"] = U
-        vol_mesh.set_active_vectors("Velocity")
 
-        qgrid_full = vol_mesh.compute_derivative(qcriterion=True, progress_bar=False)
-        q_array = np.asarray(qgrid_full.point_data["qcriterion"], dtype=np.float32)
+    # Start all readers
+    #for proc in processes_list: proc.start()
 
-        # Create a dataset per timestep under /Data/<ts> with shape (Npoints, 1)
-        ts, time_val = extract_timestep_from_h5(snapshot_h5_files[t_index])
+    # Wait for all readers to finish
+    for proc in processes_list: proc.join()
 
-        q_dataset[:, t_index] = q_array.astype(np.float32, copy=False)
-        time_values[t_index] = time_val
+    # Free up memory
+    gc.collect()
 
-        del qgrid_full
-        gc.collect()
 
-    # close H5
-    h5f["Time/values"][:] = time_values
-    h5f.close()
+    # 3) Save the output:
+    output_folder = Path(output_folder)
+    output_folder.mkdir(parents=True, exist_ok=True)
 
-    #compute_Qcriterion_parallel(vol_mesh, snapshot_h5_files, output_folder, n_process)
+    output_h5_path   = output_folder / f"{case_name}_Qcriterion.h5"   
+    output_xdmf_path = output_folder / f"{case_name}_Qcriterion.xdmf"
+
+    # Create output HDF5 file
+    h5_dataset = create_h5_output(vol_mesh, mesh_topology, n_points, n_snapshots, output_h5_path)
+
+
+    # Write to H5 file
+    print(f'Writing Q-criterion to HDF5 output file into an array of shape [{n_points}, {n_snapshots}] ... \n')
+    q_array = np_shared_array(q_ctype)
+    h5_dataset["Data/Q"][:] = q_array.astype(np.float64, copy=False)
+    h5_dataset["Time/values"][:] = time_values
+    h5_dataset.close()
+
     # Write XDMF index for ParaView (reuses the mesh from the same H5; one attribute per timestep)
     write_xdmf_for_h5(output_h5_path, output_xdmf_path, series_name="TimeSeries", attr_name="QCriterion")
 
     
-
-    print ('Finished calculating post metrics and save them to the files.')
+    print ('Finished calculating the post metrics and saving to the files.')
 
 
 
 
 # ---------------------------------------- Run the script -----------------------------------------------------
-
+###############################################################################################
 def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input_folder",  required=True,       help="Results folder with CFD .h5 files")
@@ -451,7 +378,7 @@ def parse_args():
 
     return ap.parse_args()
 
-
+###############################################################################################
 def main():
     args          = parse_args()
     input_folder  = Path(args.input_folder)
@@ -463,7 +390,7 @@ def main():
 
     mesh_file = list(Path(mesh_folder).glob('*.h5'))[0]
     #print(f"Loading mesh: {mesh_file}")
-    vol_mesh, mesh_coords, mesh_topology = assemble_volume_mesh(mesh_file)
+    vol_mesh, mesh_topology = assemble_volume_mesh(mesh_file)
 
     print(f"[info] Mesh file:    {mesh_file}")
     print(f"[info] Reading from: {input_folder}")
