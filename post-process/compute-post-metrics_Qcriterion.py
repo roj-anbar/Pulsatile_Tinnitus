@@ -55,7 +55,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # -------------------------------- Shared-memory Utilities ---------------------------------------------
 ###############################################################################################
-def create_shared_array(size, dtype = np.float64):
+def create_shared_array(size, dtype = np.float32):
     """Create a ctypes-backed shared array filled with zeros."""
     ctype_array = np.ctypeslib.as_ctypes( np.zeros(size, dtype=dtype) )
     return sharedctypes.Array(ctype_array._type_, ctype_array,  lock=False)
@@ -244,13 +244,9 @@ def compute_Qcriterion_from_h5_files_parallel(file_ids, h5_files, vol_mesh, q_ct
     # Create a shared (across processes) array of Q-criterion time-series
     q_array = np_shared_array(q_ctype) # (n_points, n_snapshots)
     
-    print (f'Computing Qcriterion for time indices {file_ids}')
     for t_index in file_ids:
 
         ts, t_val = extract_timestep_from_h5(h5_files[t_index])
-        
-        #if ts % 100 == 0:
-        #  print (f'Computing Qcriterion for timestep {ts}')
 
         with h5py.File(h5_files[t_index], 'r') as h5:
             U = np.asarray(h5['Solution']['u']) # shape: (n_points, 3, n_times)
@@ -263,8 +259,7 @@ def compute_Qcriterion_from_h5_files_parallel(file_ids, h5_files, vol_mesh, q_ct
 
             # Store Q for this frame into the shared (Npoints,Nt) matrix (column-major per time)
             q_array[:,t_index] = np.asarray(q_grid.point_data["qcriterion"], dtype=np.float32)
-
-
+            
 
 # ---------------------------------------- Compute Hemodynamics Metrics -------------------------------------
 ###############################################################################################
@@ -348,16 +343,17 @@ def hemodynamics(vol_mesh: pv.UnstructuredGrid,
 
     # Create output HDF5 file
     h5_dataset = create_h5_output(vol_mesh, mesh_topology, n_points, n_snapshots, output_h5_path)
-
+    #q_dataset  = h5_dataset["Data/Q"]
 
     # Write to H5 file
-    print(f'Writing Q-criterion to HDF5 output file into an array of shape [{n_points}, {n_snapshots}] ... \n')
+    print(f'\nWriting Q-criterion to HDF5 output file into an array of shape [{n_points}, {n_snapshots}] ... \n')
     q_array = np_shared_array(q_ctype)
     h5_dataset["Data/Q"][:] = q_array.astype(np.float64, copy=False)
     h5_dataset["Time/values"][:] = time_values
     h5_dataset.close()
 
     # Write XDMF index for ParaView (reuses the mesh from the same H5; one attribute per timestep)
+    print('Writing XDMF file ... \n')
     write_xdmf_for_h5(output_h5_path, output_xdmf_path, series_name="TimeSeries", attr_name="QCriterion")
 
     

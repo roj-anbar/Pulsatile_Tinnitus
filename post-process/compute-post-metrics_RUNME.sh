@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --partition=debug
+#SBATCH --partition=compute
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=192
-#SBATCH --time=00:59:59
+#SBATCH --time=20:59:59
 #SBATCH --job-name PT_SPI
 #SBATCH --output=PT_SPI_%j.txt
 
@@ -40,21 +40,21 @@ export PYVISTA_USE_PANEL=true
 
 # ------------------------------ Run Scripts ---------------------------------------------
 
-python "$SCRIPT" \
-    --input_folder  "$INPUT" \
-    --mesh_folder   "$MESH" \
-    --case_name     "$CASE" \
-    --output_folder "$OUTPUT" \
-    --n_process     "${SLURM_TASKS_PER_NODE}" \
-    --window_size   4000 \
-    --window_overlap 0.75
+#python "$SCRIPT" \
+#    --input_folder  "$INPUT" \
+#    --mesh_folder   "$MESH" \
+#    --case_name     "$CASE" \
+#    --output_folder "$OUTPUT" \
+#    --n_process     "${SLURM_TASKS_PER_NODE}" \
+#    --window_size   4000 \
+#    --window_overlap 0.75
 
 
 python compute-post-metrics_Qcriterion.py \
-    --input_folder  "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq307" \
+    --input_folder  "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq2" \
     --mesh_folder   "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
     --case_name     "PTSeg028_base_0p64" \
-    --output_folder "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Qcriterion/cy6_Q=2t_test/" \
+    --output_folder "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Qcriterion/cy6_saveFreq2/" \
     --n_process     192
 
 wait
