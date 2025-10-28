@@ -3,7 +3,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=192
 #SBATCH --time=20:59:59
-#SBATCH --job-name PT_SPI
+#SBATCH --job-name PT_Qcriterion
 #SBATCH --output=PT_SPI_%j.txt
 
 
@@ -51,10 +51,10 @@ export PYVISTA_USE_PANEL=true
 
 
 python compute-post-metrics_Qcriterion.py \
-    --input_folder  "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq2" \
+    --input_folder  "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
     --mesh_folder   "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
     --case_name     "PTSeg028_base_0p64" \
-    --output_folder "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Qcriterion/cy6_saveFreq2/" \
+    --output_folder "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Qcriterion/cy6_saveFreq1/" \
     --n_process     192
 
 wait
