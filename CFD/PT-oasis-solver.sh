@@ -45,7 +45,7 @@ NP="${SLURM_NTASKS:-1}"
 #this is where the naming.py script is run
 # all it does is creates a naming structure that will be standard and used throughout, including in the post-processing
 # then we just set a variable to use as a shorter of the casename
-casename_full="PTSeg028_base_0p64_ts10000"
+casename_full="${casename}_ts${timesteps_per_cycle}_cy${cycles}_saveFreq${save_frequency}" #"PTSeg028_base_0p64_ts10000"
 
 results_folder="./results/$casename_full"
 
@@ -68,7 +68,7 @@ log_file="./logs/${casename_full}_${SLURM_JOB_ID}"
 BIND_OPTS="--bind /scratch:/scratch --bind $SLURM_SUBMIT_DIR:$SLURM_SUBMIT_DIR --pwd $SLURM_SUBMIT_DIR"
 
 # Setup cache directory
-PATH_JIT_CACHE="/scratch/$scinet_user/PT/PT_Ramp/unsteady/.cache"
+PATH_JIT_CACHE="/scratch/$scinet_user/PT/PT_Ramp/.cache"
 mkdir -p "$PATH_JIT_CACHE"
 
 # This is the location of the BSLSolver in your directory
