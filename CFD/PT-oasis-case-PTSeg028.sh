@@ -17,6 +17,10 @@
 #   - Run this script from terminal by:
 #     <./PT-oasis-case-casename.sh>
 #
+# NOTE:
+#   - This script should be ran from the PT case directory containing the mesh data (under /data folder).
+#   - "PT-oasis-solver.sh" and "PT-oasis-problem.py" should be copied as well to the same directory.
+#
 # Adapted from solver-v2.sh written by 2022 Anna Haley (ahaley@mie.utoronto.ca) and solver.sh written by 2018 Mehdi Najafi (mnuoft@gmail.com). 
 # Copyright (C) 2025 University of Toronto, Biomedical Simulation Lab.
 #-----------------------------------------------------------------------------------------------------------------------

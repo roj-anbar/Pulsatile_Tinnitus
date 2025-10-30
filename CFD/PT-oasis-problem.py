@@ -782,7 +782,7 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
         # Calculate CFL
         max_u = max(u_[0].vector().get_local().max(), u_[1].vector().get_local().max())
         CFL = NS_parameters['dt']*max_u/mesh.hmin()
-        print ('cycle:', current_cycle, 'tstep', tstep , ' timesteps', timesteps)
+        print ('For cycle:', current_cycle, 'tstep', tstep , ' current time (ms)', current_time)
         print (f"worst CFL number is: {CFL:.4f}") 
 
 
