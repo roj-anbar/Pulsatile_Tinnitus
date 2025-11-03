@@ -150,7 +150,7 @@ def generate_windows(n_snapshots, window_size, window_overlap_frac):
 # --------------------------------- Parallel File Reader -----------------------------------------------
 
 
-def read_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype):
+def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype):
     """
     Reads a *chunk* of time-snapshot HDF5 files, extracts wall pressures, and writes into the shared array.
 
