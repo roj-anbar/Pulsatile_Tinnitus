@@ -15,7 +15,7 @@ BASE_DIR=$SCRATCH/PT/PT_Ramp/PT_cases/$CASE
 MESH="$BASE_DIR/data"
 INPUT="$BASE_DIR/results/${CASE}_ts12000_cy6_saveFreq6"
 OUTPUT="$BASE_DIR/post-process/SPI_pressure/cy6_ts12000_saveFreq6"
-SCRIPT="$SLURM_SUBMIT_DIR/compute-post-metrics_SPI.py"  # ensure to submit from script dir
+SCRIPT="$SLURM_SUBMIT_DIR/compute_SPI.py"  # ensure to submit from script dir
 
 
 # --------------------------------- Load Modules ----------------------------------------
@@ -45,12 +45,12 @@ python "$SCRIPT" \
     --mesh_folder   "$MESH" \
     --case_name     "$CASE" \
     --output_folder "$OUTPUT" \
-    --n_process     "${SLURM_TASKS_PER_NODE}"
+    --n_process     "${SLURM_TASKS_PER_NODE}" \
     --window_size   4000 \
     --window_overlap 0.75
 
 
-#python compute-post-metrics_Qcriterion.py \
+#python compute_Qcriterion.py \
 #    --input_folder  "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg106_base_0p64/results/PTSeg106_base_0p64_ts10000_cy6_saveFreq5" \
 #    --mesh_folder   "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg106_base_0p64/data" \
 #    --case_name     "PTSeg106_base_0p64" \

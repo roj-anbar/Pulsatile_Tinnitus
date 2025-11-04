@@ -3,8 +3,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=192
 #SBATCH --time=00:59:59
-#SBATCH --job-name PT_Qcriterion
-#SBATCH --output=PT_Qcriterion_%j.txt
+#SBATCH --job-name PT_Spectrogram
+#SBATCH --output=PT_Spectrogram_%j.txt
 
 
 set -euo pipefail
@@ -15,7 +15,8 @@ BASE_DIR=$SCRATCH/PT/PT_Ramp/PT_cases/$CASE
 MESH="$BASE_DIR/data"
 INPUT="$BASE_DIR/results/${CASE}_ts10000_cy6_saveFreq5"
 OUTPUT="$BASE_DIR/post-process/Qcriterion/cy6_saveFreq5"
-SCRIPT="$SLURM_SUBMIT_DIR/compute_Qcriterion.py"  # ensure to submit from script dir
+
+SCRIPT="$SLURM_SUBMIT_DIR/compute_Spectrograms.py"  # ensure to submit from script dir
 
 
 # --------------------------------- Load Modules ----------------------------------------
@@ -40,19 +41,32 @@ export PYVISTA_USE_PANEL=true
 
 # ------------------------------ Run Scripts ---------------------------------------------
 
-python "$SCRIPT" \
-    --input_folder  "$INPUT" \
-    --mesh_folder   "$MESH" \
-    --case_name     "$CASE" \
-    --output_folder "$OUTPUT" \
-    --n_process     "${SLURM_TASKS_PER_NODE}"
+#python "$SCRIPT" \
+#    --input_folder     "$INPUT" \
+#    --mesh_folder      "$MESH" \
+#    --output_folder    "$OUTPUT" \
+#    --case_name        "$CASE" \
+#    --n_process        "${SLURM_TASKS_PER_NODE}" \
+#    --period           0.915 \
+#    --num_cycles       6 \
+#    --spec_quantity    "pressure" \
+#    --ROI_center_pid   4000 \
+#    --ROI_radius       2
 
 
-#python compute_Qcriterion.py \
-#    --input_folder  "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg106_base_0p64/results/PTSeg106_base_0p64_ts10000_cy6_saveFreq5" \
-#    --mesh_folder   "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg106_base_0p64/data" \
-#    --case_name     "PTSeg106_base_0p64" \
-#    --output_folder "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg106_base_0p64/post-process/Qcriterion/cy6_saveFreq5/" \
-#    --n_process     192
+#pid: 47859 
+
+python compute_Spectrogram.py \
+    --input_folder     "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
+    --mesh_folder      "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
+    --case_name        "PTSeg028_base_0p64" \
+    --output_folder    "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Spectrorgam_wall_pressure/cy6_saveFreq1_window4000/" \
+    --n_process        192 \
+    --period           0.915 \
+    --num_cycles       6 \
+    --spec_quantity    "pressure" \
+    --window_size      200 \
+    --ROI_center_pid   21950 \
+    --ROI_radius       0 
 
 wait
