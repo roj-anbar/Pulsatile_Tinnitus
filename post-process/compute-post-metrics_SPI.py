@@ -161,12 +161,15 @@ def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_press
       shared_pressure_ctype  : shared ctypes array; viewed as press_[n_points, n_times]
     """
     
+    # Multiply all pressures by density (since oasis return p/rho)
+    density = 1050 #[kg/m3]
+
     # Create a shared (across processes) array of wall-pressure time-series
     shared_pressure = view_shared_array(shared_pressure_ctype)
     
     for t_index in file_ids:
         with h5py.File(h5_files[t_index], 'r') as h5:
-            pressure = np.array(h5['Solution']['p'])
+            pressure = np.array(h5['Solution']['p']) * density
             pressure_wall = pressure[wall_pids].flatten() # shape: (n_points,)
             
             # For each wall point j, set shared_pressure[j, t_index] = p_wall[j]
@@ -228,7 +231,7 @@ def compute_SPI(pids, shared_pressure_ctype, shared_SPI_ctype,
 
 # ---------------------------------------- Compute Hemodynamics Metrics -------------------------------------
 
-def hemodynamics(surf: pv.PolyData,
+def hemodynamics(wall_mesh: pv.PolyData,
                  input_folder: Path,
                  output_folder: Path,
                  case_name: str,
@@ -243,7 +246,7 @@ def hemodynamics(surf: pv.PolyData,
     Main driver: Reads time-series pressures, computes windowed SPI, and writes it to a VTP file.
 
     Args:
-      surf           : PyVista PolyData for the wall surface
+      wall_mesh      : PyVista PolyData for the wall surface
       input_folder   : folder containing '*_curcyc_*up.h5' snapshots
       output_folder  : output folder for VTP
       case_name      : prefix for output filename
@@ -264,8 +267,8 @@ def hemodynamics(surf: pv.PolyData,
         sys.exit()
     
     # Wall point IDs and sizes
-    wall_pids = surf.point_data['vtkOriginalPtIds']
-    n_points  = len(surf.points)
+    wall_pids = wall_mesh.point_data['vtkOriginalPtIds']
+    n_points  = len(wall_mesh.points)
 
 
     # 2) Create shared arrays
@@ -284,7 +287,7 @@ def hemodynamics(surf: pv.PolyData,
     
     processes_list=[]
     for idx, group in enumerate(time_groups):
-        proc = mp.Process(target = read_h5_files, name=f"Reader{idx}", args=(group, wall_pids, snapshot_h5_files, shared_pressure_ctype))
+        proc = mp.Process(target = read_wall_pressure_from_h5_files, name=f"Reader{idx}", args=(group, wall_pids, snapshot_h5_files, shared_pressure_ctype))
         processes_list.append(proc)
 
     # Start all readers
@@ -345,13 +348,13 @@ def hemodynamics(surf: pv.PolyData,
         # Free up memory
         gc.collect()
         
-        # 6) Attach SPI to surface and save VTP
+        # 5) Attach SPI to wall surface and save VTP
         SPI = view_shared_array(shared_SPI_ctype)
-        surf.point_data['SPI_p'] = SPI
+        wall_mesh.point_data['SPI_p'] = SPI
 
         output_file = Path(output_folder) / f"{case_name}_SPIp_win{window_idx:03d}.vtp"
 
-        surf.save(str(output_file))
+        wall_mesh.save(str(output_file))
     
     print (f'Finished writing windowed SPI files to {output_folder}.')
 
@@ -387,12 +390,12 @@ def main():
 
     mesh_file = list(Path(mesh_folder).glob('*.h5'))[0]
     print(f"Loading mesh: {mesh_file}")
-    surf = assemble_wall_mesh(mesh_file)
+    wall_mesh = assemble_wall_mesh(mesh_file)
 
     print(f"Processing on {args.n_process} processes…")
 
     #print ('Performing hemodynamics computation on %d core%s.'%(ncore,'s' if ncore>1 else '') )
-    hemodynamics(surf, input_folder, output_folder, case_name = args.case_name,
+    hemodynamics(wall_mesh, input_folder, output_folder, case_name = args.case_name,
                  n_process = args.n_process, period_seconds = args.period, freq_cut = args.freq_cut,
                  window_size = args.window_size, window_overlap_frac = args.window_overlap, with_mean = args.with_mean)
 
