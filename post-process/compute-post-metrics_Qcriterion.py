@@ -249,7 +249,7 @@ def compute_Qcriterion_from_h5_files_parallel(file_ids, h5_files, vol_mesh, q_ct
         ts, t_val = extract_timestep_from_h5(h5_files[t_index])
 
         with h5py.File(h5_files[t_index], 'r') as h5:
-            U = np.asarray(h5['Solution']['u']) # shape: (n_points, 3, n_times)
+            U = np.asarray(h5['Solution']['u']) # shape: (n_points, 3)
             
             vol_mesh.point_data.clear()
             vol_mesh.point_data["Velocity"] = U
