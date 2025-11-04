@@ -54,19 +54,20 @@ export PYVISTA_USE_PANEL=true
 #    --ROI_radius       2
 
 
-#pid: 47859 
+#pid (wall): 47859, 21950
+#pid (volume): 157426
 
 python compute_Spectrogram.py \
     --input_folder     "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
     --mesh_folder      "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
     --case_name        "PTSeg028_base_0p64" \
-    --output_folder    "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Spectrorgam_wall_pressure/cy6_saveFreq1_window4000/" \
+    --output_folder    "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Spectrorgam_wall_pressure/cy6_saveFreq1/" \
     --n_process        192 \
     --period           0.915 \
     --num_cycles       6 \
     --spec_quantity    "pressure" \
     --window_size      200 \
-    --ROI_center_pid   21950 \
-    --ROI_radius       0 
+    --ROI_center       46.2749 -20.3932 10.7888 \
+    --ROI_radius       4 
 
 wait

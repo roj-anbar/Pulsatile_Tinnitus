@@ -185,18 +185,19 @@ def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_press
 
 # ---------------------------------------- Compute Spectrograms -----------------------------------------------------
 
-def assemble_wall_pressure_for_ROI(wall_mesh, shared_pressure_ctype, ROI_center_pid, ROI_radius):
+def assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_ctype, ROI_center, ROI_radius):
     if ROI_radius == 0:
-        ROI_pids = np.atleast_1d(ROI_center_pid).astype(np.intp)
+        ROI_pids = np.atleast_1d(ROI_center).astype(np.intp)
         #print(f"ROI_pid = {ROI_pids}")
 
     else:
         # Create the spherical ROI (using pyvista)
-        ROI_center = vol_mesh.points[ROI_center_pid] # return coordinates of the desired center
+        #ROI_center = vol_mesh.points[ROI_center_pid] # return coordinates of the desired center
+        ROI_center = np.asarray(ROI_center, dtype=float) 
         ROI_sphere = pv.Sphere(radius = ROI_radius, center = ROI_center) # creates a 2d sphere around desired point (units of the radius same as units of the mesh)
         
         # Save the sphere to a .vtp file (for visualization in paraview later)
-        #ROI_sphere.save(f'{spec_data_out_folder}/ROI_sphere_ID={ROI_center_pid}_r={ROI_radius}.vtp') 
+        ROI_sphere.save(f'{output_folder}/ROI_sphere_pid{ROI_center}_r{ROI_radius}.vtp') 
 
         # Selects mesh points inside the surface, with a certain tolerance (using pyvista)
         ROI_mesh = wall_mesh.select_enclosed_points(ROI_sphere, tolerance=0.01)
@@ -211,7 +212,9 @@ def assemble_wall_pressure_for_ROI(wall_mesh, shared_pressure_ctype, ROI_center_
         if ROI_pids.size == 0:
             raise ValueError(
                 "No wall points found in ROI. Try increasing --ROI_radius (check mesh units: mm vs m) "
-                "or choose a different --ROI_center_pid. ")
+                "or choose a different --ROI_center. ")
+        else:
+            print(f"Found {ROI_pids.size} wall points in the ROI")
 
     wall_pressure = view_shared_array(shared_pressure_ctype) # (n_points, n_times)
     wall_pressure_ROI = wall_pressure[ROI_pids,:]
@@ -294,7 +297,7 @@ def average_spectrogram(data, sampling_rate, n_fft=None, hop_length=None, win_le
             S_avg += S_point 
     
         # This is a difference between using signal.stft and signal.spectrogram.
-        S_avg = np.log(S_avg / data.shape[0])
+        S_avg = np.log(S_avg / data.shape[0] + 1e-30) # add a small value to avoid log(0)
 
     if pad_mode in ['cycle', 'even', 'odd']:
         bins = bins - bins[0]
@@ -303,14 +306,12 @@ def average_spectrogram(data, sampling_rate, n_fft=None, hop_length=None, win_le
 
 
 
-
-
-def compute_spectrogram_wall_pressure(wall_mesh, shared_pressure_ctype, period_seconds, num_cycles,
-                                     window_size, ROI_center_pid, ROI_radius, spec_quantity = 'pressure'):
+def compute_spectrogram_wall_pressure(output_folder, wall_mesh, shared_pressure_ctype, period_seconds, num_cycles,
+                                     window_size, ROI_center, ROI_radius, spec_quantity = 'pressure'):
     
     if spec_quantity == 'pressure':
         # Assembles data for the ROI
-        wall_pressure_ROI = assemble_wall_pressure_for_ROI(wall_mesh, shared_pressure_ctype, ROI_center_pid, ROI_radius)
+        wall_pressure_ROI = assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_ctype, ROI_center, ROI_radius)
         
 
         n_samples = wall_pressure_ROI.shape[1] # number of snapshots
@@ -351,7 +352,48 @@ def compute_spectrogram_wall_pressure(wall_mesh, shared_pressure_ctype, period_s
 
     return spec_data
 
-    
+
+def plot_spectrogram(output_folder, case_name, spec_data, plot_title):
+
+    spec_output_file = Path(output_folder) / f"{plot_title}.npz"
+    np.savez(spec_output_file, spec_data)
+
+
+    # Extract relevant data for plotting
+    bins = spec_data['bins']
+    freqs = spec_data['freqs']
+    spec_signal = spec_data['S']
+
+    # Clamp values below -20dB
+    spec_signal[spec_signal < -20] = -20 
+
+    # Setting plot properties
+    size = 10
+    plt.rc('font', size=size) #controls default text size
+    plt.rc('axes', titlesize=12) #fontsize of the title
+    plt.rc('axes', labelsize=size) #fontsize of the x and y labels
+    plt.rc('xtick', labelsize=size) #fontsize of the x tick labels
+    plt.rc('ytick', labelsize=size) #fontsize of the y tick labels
+    plt.rc('legend', fontsize=size) #fontsize of the legend
+
+
+    fig, ax = plt.subplots(1,1, figsize=(8,6))
+    spectrogram = ax.pcolormesh(bins, freqs, spec_signal, shading='gouraud')
+    #spectrogram.set_clim([-20, 0])
+    ax.set_xlabel('Time (s)', labelpad=-5)
+    ax.set_ylabel('Freq (Hz)', labelpad=-10)
+    #ax.set_xticks([0, 0.9])
+    #ax.set_xticklabels(['0.0', '0.9'])
+    #ax.set_yticks([0, 600, 800])
+    #ax.set_yticklabels(['0', '600', '800'])
+    ax.set_ylim([0, 2000])
+
+    ax.set_title(plot_title)
+    plt.tight_layout()
+    plt.colorbar(spectrogram, ax=ax) # Adding the colorbar
+    plt.savefig(Path(output_folder) / f"{plot_title}.png")#, transparent=True)
+
+
 
 
 # ---------------------------------------- Compute Hemodynamics Metrics -------------------------------------
@@ -365,7 +407,7 @@ def hemodynamics(wall_mesh: pv.PolyData,
                  num_cycles: int,
                  spec_quantity: str,
                  window_size: int,
-                 ROI_center_pid: int,
+                 ROI_center: list[float],
                  ROI_radius: int,
                  ):
     """
@@ -400,7 +442,7 @@ def hemodynamics(wall_mesh: pv.PolyData,
 
 
     # 3) Parallel reading
-    print ('Reading in parallel', n_snapshots, 'files into 1 array of shape', [n_points, n_snapshots],' ...')
+    print (f"Reading in parallel {n_snapshots} files into 1 array of shape [{n_points}, {n_snapshots}] ... \n")
 
     # divide all snapshot files into groups and spread across processes
     time_indices    = list(range(n_snapshots))
@@ -429,61 +471,16 @@ def hemodynamics(wall_mesh: pv.PolyData,
     print ('Now computing spectrograms ...')
 
   
-    spec_data = compute_spectrogram_wall_pressure(
+    spec_data = compute_spectrogram_wall_pressure(output_folder,
                 wall_mesh, shared_pressure_ctype, period_seconds, num_cycles,
-                window_size, ROI_center_pid, ROI_radius, spec_quantity)
+                window_size, ROI_center, ROI_radius, spec_quantity)
 
-    # 5) Save spectrograms
-
-    # To store outputs
-    #spec_data_out_folder = Path(output_folder) #eg. spec_data
-    #spec_img_out_folder  = Path(sys.argv[4]) #eg spec_imgs
-
+    # 5) Save spectrogram
     # Creates the output filename (npz format: numpy zipped file)
-    spec_output_file = Path(output_folder) / f"{case_name}_specP_center{ROI_center_pid}_r{ROI_radius}_win{window_size}.npz" #eg. specs/PTSeg028_low_pressure_ID=9301_r=0.1.npz
-    
-    #spec_output_img  = Path(output_folder) / f"{case_name}_specP_center{point_ID}_r{radius}_win{window_size}.png"
-    np.savez(spec_output_file, spec_data)
-
-
-    ### ----------------- PLOTTING ------------------ ###
-    # 6) Plotting spectrograms
-    # Extract relevant data for plotting
-    bins = spec_data['bins']
-    freqs = spec_data['freqs']
-    spec_signal = spec_data['S']
-
-    # Clamp values below -20dB
-    spec_signal[spec_signal < -20] = -20 
-
-    # Setting plot properties
-    size = 10
-    plt.rc('font', size=size) #controls default text size
-    plt.rc('axes', titlesize=12) #fontsize of the title
-    plt.rc('axes', labelsize=size) #fontsize of the x and y labels
-    plt.rc('xtick', labelsize=size) #fontsize of the x tick labels
-    plt.rc('ytick', labelsize=size) #fontsize of the y tick labels
-    plt.rc('legend', fontsize=size) #fontsize of the legend
-
-
-    fig, ax = plt.subplots(1,1, figsize=(8,6))
-    spectrogram = ax.pcolormesh(bins, freqs, spec_signal, shading='gouraud')
-    #spectrogram.set_clim([-20, 0])
-    ax.set_xlabel('Time (s)', labelpad=-5)
-    ax.set_ylabel('Freq (Hz)', labelpad=-10)
-    #ax.set_xticks([0, 0.9])
-    #ax.set_xticklabels(['0.0', '0.9'])
-    #ax.set_yticks([0, 600, 800])
-    #ax.set_yticklabels(['0', '600', '800'])
-    ax.set_ylim([0, 2000])
-
-
-    title = f'{case_name}_specP_window{window_size}_pid={ROI_center_pid}_r{ROI_radius}' 
-
-    ax.set_title(title)
-    plt.tight_layout()
-    plt.colorbar(spectrogram, ax=ax) # Adding the colorbar
-    plt.savefig(Path(output_folder) / f"{title}.png")#, transparent=True)
+    cx, cy, cz = map(float, ROI_center)
+    center_tag = f"{cx:.2f}{cy:.2f}{cz:.2f}"
+    spec_title = f'{case_name}_specP_window{window_size}_center{center_tag}_r{ROI_radius}' 
+    plot_spectrogram(output_folder, case_name, spec_data, spec_title)
 
     
     print (f'Finished saving spetrograms.')
@@ -503,7 +500,7 @@ def parse_args():
     ap.add_argument("--num_cycles",     type=int,            help="Number of cycles")
     ap.add_argument("--spec_quantity",  type=str, choices=["pressure","velocity"], required=True, help="Quantity used for spectrogram generation (choose between <pressure>/<velocity>)")
     ap.add_argument("--window_size",    type=int,            help="Size of FFT window (number of snapshots for each window)")
-    ap.add_argument("--ROI_center_pid", type=int,   required=True,       help="Point ID for the center of ROI to compute spectrogram")
+    ap.add_argument("--ROI_center",     nargs=3, type=float, metavar=("X","Y","Z"), required=True, help="XYZ coordinates for ROI center to compute spectrogram (mesh units)")
     ap.add_argument("--ROI_radius",     type=float, required=True,       help="Radius of ROI to compute spectrogram in mesh units (mm in most cases)")
     ap.add_argument("--n_process",      type=int,            help="Number of parallel processes", default=max(1, mp.cpu_count() - 1))
 
@@ -524,7 +521,7 @@ def main():
     # Assemble mesh
     mesh_file = list(Path(mesh_folder).glob('*.h5'))[0]
     wall_mesh = assemble_wall_mesh(mesh_file)
-    vol_mesh  = assemble_volume_mesh(mesh_file)
+    #vol_mesh  = assemble_volume_mesh(mesh_file)
 
 
     print(f"[info] Mesh file:    {mesh_file}")
@@ -535,7 +532,7 @@ def main():
     print (f"Performing hemodynamics computation on {args.n_process} cores..." )
     hemodynamics(wall_mesh, input_folder, output_folder, case_name = args.case_name, n_process = args.n_process,
                 period_seconds= args.period, num_cycles= args.num_cycles, spec_quantity= args.spec_quantity,
-                window_size= args.window_size, ROI_center_pid = args.ROI_center_pid, ROI_radius = args.ROI_radius)
+                window_size= args.window_size, ROI_center = args.ROI_center, ROI_radius = args.ROI_radius)
 
 
 
