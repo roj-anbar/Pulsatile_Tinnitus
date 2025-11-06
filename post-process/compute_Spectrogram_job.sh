@@ -10,11 +10,11 @@
 set -euo pipefail
 
 # ---------------------------------- Define Paths ---------------------------------------
-CASE=PTSeg106_base_0p64
+CASE=PTSeg028_base_0p64
 BASE_DIR=$SCRATCH/PT/PT_Ramp/PT_cases/$CASE
 MESH="$BASE_DIR/data"
-INPUT="$BASE_DIR/results/${CASE}_ts10000_cy6_saveFreq5"
-OUTPUT="$BASE_DIR/post-process/Qcriterion/cy6_saveFreq5"
+INPUT="$BASE_DIR/results/${CASE}_ts10000_cy6_saveFreq1"
+OUTPUT="$BASE_DIR/post-process/Spectrogram/cy6_saveFreq1"
 
 SCRIPT="$SLURM_SUBMIT_DIR/compute_Spectrograms.py"  # ensure to submit from script dir
 
@@ -54,20 +54,21 @@ export PYVISTA_USE_PANEL=true
 #    --ROI_radius       2
 
 
-#pid (wall): 47859, 21950
-#pid (volume): 157426
+# (46.2749 -20.3932 10.7888)
+#id=39: (33.6404, -9.21902, -3.76951)
+
 
 python compute_Spectrogram.py \
     --input_folder     "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
     --mesh_folder      "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
     --case_name        "PTSeg028_base_0p64" \
-    --output_folder    "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Spectrorgam_wall_pressure/cy6_saveFreq1/" \
+    --output_folder    "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Spectrorgam_wall_pressure/cy6_saveFreq1" \
     --n_process        192 \
     --period           0.915 \
     --num_cycles       6 \
     --spec_quantity    "pressure" \
-    --window_size      200 \
-    --ROI_center       46.2749 -20.3932 10.7888 \
-    --ROI_radius       4 
+    --ROI_center       33.6404 -9.21902 -3.76951 \
+    --ROI_radius       3 \
+    --window_length   1000 \
 
 wait
