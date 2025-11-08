@@ -1,47 +1,71 @@
 # -----------------------------------------------------------------------------------------------------------------------
-# compute-post-metrics_Spectrograms.py 
-# To compute the spectrograms of pressure or velocity on vessel wall from Oasis/BSLSolver CFD outputs.
+# compute_Spectrograms.py 
+# To compute the average power spectrogram in dB scale of pressure or velocity from Oasis/BSLSolver CFD outputs.
 #
 # __author__: Rojin Anbarafshan <rojin.anbar@gmail.com>
 # __date__:   2025-10
 #
 # PURPOSE:
 #   - This script is part of the BSL post-processing pipeline.
-#   - It computes 
+#   - Reads CFD HDF5 snapshots for all timesteps, extracts the quantity of interest (wall pressure/velocity) time-series,
+#     computes ROI-averaged spectrograms, and saves both .npz data and .png images.
 #
 # REQUIREMENTS:
-#   - h5py
-#   - pyvista
-#   - On Trillium: virtual environment called pyvista36
+#   - h5py, pyvista, vtk, numpy, scipy, matplotlib
+#   - On Trillium: virtual environment called "pyvista36"
 #
 # EXECUTION:
-#   - Run using "compute-post-metrics_RUNME.sh" bash script.
+#   - Run using "compute_Spectrograms_job.sh" bash script.
 #   - Run directly on a login/debug node as below:
 #       > module load StdEnv/2023 gcc/12.3 python/3.12.4
 #       > source $HOME/virtual_envs/pyvista36/bin/activate
 #       > module load  vtk/9.3.0
-#       > python compute-post-metrics_Spectrograms.py <path_to_CFD_results_folder> <path_to_case_mesh_data> <case_name> <path_to_output_folder> <period> <ncores> <f_cutoff> <flag_mean>
-#     
+#       > python compute_Spectrograms.py INPUTS (see below)
+#               --input_folder      <path_to_CFD_results_folder> \
+#               --mesh_folder       <path_to_case_mesh_data>     \
+#               --output_folder     <path_to_output_folder>      \
+#               --case_name         PTSeg028_base_0p64           \
+#               --n_process         <ncores>                     \
+#               --period_seconds    0.915                        \
+#               --timesteps_per_cyc 10000                        \
+#               --spec_quantity     "pressure"                   \
+#               --ROI_center        12.3 4.5 6.7                 \
+#               --ROI_radius        2                            \
+#               --window_length     512                          \
+#               --clamp_threshold_dB -60
 #
 # INPUTS:
-#   - input_folder      Path to results directory with HDF5 snapshots
-#   - mesh_folder       Path to the case mesh data files (with Mesh/Wall/{coordinates,topology,pointIds})
-#   - case_name         Case name (used only in output filename)
-#   - output_folder     Output directory for the VTP result
+#   - input_folder        Path to results directory with HDF5 snapshots
+#   - mesh_folder         Path to the case mesh data files (with Mesh/Wall/{coordinates,topology,pointIds})
+#   - case_name           Case name (used only in output filename)
+#   - output_folder       Path to output directory to save results (will create subfolders files/, imgs/, ROIs/)
+#   --period_seconds      Flow period [s] (if omitted, try to parse from filenames with '_Per<ms>')
+#   --timesteps_per_cyc   Timesteps per cycle (if omitted, try to parse from filenames with '_ts<int>')
+#   --density             Blood density [kg/m3] (default = 1050 kg/m3)
+#   --spec_quantity       Quantity to compute spectrogram from: 'pressure' or 'velocity'
+#   --window_length       STFT window length (samples, i.e., snapshots)
+#   --n_fft               STFT FFT length (bins)
+#   --hop_length          STFT hop length (samples)
+#   --window              STFT window type
+#   --pad_mode            Edge padding ('cycle','constant','odd','even','none')
+#   --detrend             STFT detrend ('linear','constant', or False)
+#   --ROI_center          X Y Z center of spherical ROI (mesh units). If ROI_radius==0, this is a **point ID**.
+#   --ROI_radius          Sphere radius (mesh units). If 0, treat ROI_center as the **point ID** to sample.
+#   --clamp_threshold_dB  Floor for dB image (e.g., -60)
 #   - n_process         Number of worker processes (default: #logical CPUs)
-#   - flag_pressure_velocity
-#
 #
 # OUTPUTS:
 #   - output_folder/<case>_p_<f-cut>Hz.vtp  PolyData with 'SPI_p' point-data
-#   1) Processed spectrograms saved as .npz
-#         2) Spectrogram images saved as .png
-
+#   1) Processed spectrograms saved as .npz (output_folder/files)
+#   2) Spectrogram images saved as .png     (output_folder/imgs)
+#   3) ROI surface file saved as .vtp       (output_folder/ROIs)
+#
 # NOTES:
-#   - Time step dt is inferred from: dt = period / (N-1) (one period covered by N files).
+#   - Sampling rate inferred as: fs = timesteps_per_cyc / period_seconds [Hz].
+#   - Filename helpers expect snapshots containing '_curcyc_' and optionally '_ts<int>' and '_Per<ms>'.
+#   - Pressure in Oasis is p/rho; multiply by density (default 1050 kg/m^3) to get Pa if desired.
 #
-#
-# Adapted from hemodynamic_indices_pressure.py originally written by Anna Haley (2024). 
+# Adapted from BSL-tools repo (Dan Macdonald 2022) and make_wall_pressure_specs.py (Anna Haley 2024). 
 # Copyright (C) 2025 University of Toronto, Biomedical Simulation Lab.
 # -----------------------------------------------------------------------------------------------------------------------
 
@@ -80,12 +104,39 @@ def view_shared_array(shared_obj):
 
 # ---------------------------------------- Helper Utilities -----------------------------------------------------
 
-def extract_timestep_from_h5(h5_file):
+def extract_timestep_from_h5_filename(h5_file):
         """
-        Extract integer timestep from filename pattern '*_ts=<int>_...'.
+        Extract integer timestep values from filename pattern '*_ts=<int>_...'.
         Used to sort snapshot files chronologically.
         """
-        return int(h5_file.stem.split('_ts=')[1].split('_')[0])
+        stem = h5_file.stem
+
+        if "_ts=" in stem:
+            return int(stem.split("_ts=")[1].split("_")[0])
+        else:
+            raise ValueError(f"Filename '{h5_file}' does not contain expected '_ts=' pattern.")
+
+def extract_time_params_from_h5_filename(h5_file):
+        """
+        Extract timesteps_per_cyc and period_seconds values from filename pattern 'Per<float>_*_ts<int>_...'.
+        """
+        stem = h5_file.stem
+
+        # Extract timestep per cycle
+        if "_ts" in stem:
+            timestep_per_cyc = int(stem.split("_ts")[1].split("_")[0])
+        else:
+            raise ValueError(f"Filename '{h5_file}' does not contain expected '_ts' pattern.")
+
+        # Extract period if not provided
+        if "_Per" in stem:
+            period_ms = int(stem.split("_Per")[1].split("_")[0]) #period in milliseconds
+            period_seconds = period_ms/1000 #[s]
+        else:
+            raise ValueError(f"Filename '{h5_file}' does not contain expected '_Per' pattern.")
+
+
+        return timestep_per_cyc, period_seconds
 
 def shift_bit_length(x):
     """ Round up to nearest power of 2.
@@ -94,6 +145,9 @@ def shift_bit_length(x):
     find-the-smallest-power-of-2-greater-than-n-in-python  
     """
     return 1<<(x-1).bit_length()
+
+
+
 
 # ---------------------------------------- Mesh Utilities -----------------------------------------------------
 
@@ -185,13 +239,27 @@ def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_press
 
 # ---------------------------------------- Compute Spectrograms -----------------------------------------------------
 
+    """
+    Select wall points inside a spherical ROI and return the wall-pressure time series for those points.
+    - If PyVista's surface inclusion returns no points, fall back to distance-based selection.
+    - If still empty, raise a clear error with guidance.
+    """
+    # If ROI_radius == 0: interpret ROI_center as a single POINT ID (not coordinates)
+
+
 def assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_ctype, ROI_center, ROI_radius):
+    """
+    Select wall points inside a spherical ROI and return the wall-pressure time series for those points.
+    """
+
+    # Case 1: Obtain spectrograms at a single point
     if ROI_radius == 0:
         #ROI_pids = np.atleast_1d(ROI_center).astype(np.intp)
         ROI_pids = np.asarray(ROI_center, dtype=float) 
 
+    # Case 2: Obtain spectrograms in a spherical ROI
     else:
-        # Create the spherical ROI (using pyvista)
+        # Create spherical ROI (using pyvista)
         #ROI_center = vol_mesh.points[ROI_center_pid] # return coordinates of the desired center
         ROI_center = np.asarray(ROI_center, dtype=float) 
         ROI_sphere = pv.Sphere(radius = ROI_radius, center = ROI_center) # creates a 2d sphere around desired point (units of the radius same as units of the mesh)
@@ -202,20 +270,20 @@ def assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_cty
         # Selects mesh points inside the surface, with a certain tolerance (using pyvista)
         ROI_mesh = wall_mesh.select_enclosed_points(ROI_sphere, tolerance=0.01)
         
-        # Get indices of the points on the ROI
-        sel = ROI_mesh.point_data['SelectedPoints'].astype(bool)
-        ROI_pids = np.where(sel)[0]
+        # Get indices of the points that falls in the ROI
+        points_in_ROI = ROI_mesh.point_data['SelectedPoints'].astype(bool)
+        ROI_pids = np.where(points_in_ROI)[0]
         #ROI_pids = np.where(wall_mesh.point_arrays[ROI_mesh])
         #ROI_pids = ROI_mesh.point_data['vtkOriginalPtIds']
     
         # --- Sanity check: ensure ROI is not empty ---
         if ROI_pids.size == 0:
-            raise ValueError(
-                "No wall points found in ROI. Try increasing --ROI_radius (check mesh units: mm vs m) "
-                "or choose a different --ROI_center. ")
+            raise ValueError("No wall points found in ROI. Try increasing --ROI_radius (check mesh units: mm vs m) "
+                            "or choose a different --ROI_center. ")
         else:
-            print(f"Found {ROI_pids.size} wall points in the ROI")
+            print(f"Found {ROI_pids.size} wall points in the ROI...")
 
+    # Assemble wall pressure for ROI points
     wall_pressure = view_shared_array(shared_pressure_ctype) # (n_points, n_times)
     wall_pressure_ROI = wall_pressure[ROI_pids,:]
 
@@ -223,23 +291,45 @@ def assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_cty
 
 
 
-def average_spectrogram(data, sampling_rate, n_fft=None, hop_length=None, window_length=None, 
-                        window='hann', pad_mode='cycle', detrend='linear', print_progress=False):
-    """ Compute the average spectrogram of a dataset.
+def average_spectrogram(data,
+                        sampling_rate: float,
+                        n_fft: int | None = None,
+                        hop_length: int | None = None,
+                        window_length: int | None = None,
+                        window_type: str = 'hann',
+                        pad_mode: str | None = 'cycle',
+                        detrend: str | bool = 'linear',
+                        print_progress: bool = False):
+
+    """
+    Compute the power spectrogram over multiple points and return the average value in dB scale.
+    All scipy.signal STFT parameters are set to defaults if they are None.
+    See here for scipy.signal.stft documentation:  https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.stft.html 
+   
     
-    Args: 
-        data (array): N * ts array.
-        For other args, see librosa.stft docs.
+    Arguments: 
+        data: Timeseries data for all ROI points -> shape (n_points, n_snapshots)
+        sampling_rate: Number of samples per second [Hz]
+        n_fft:
+        hop_length:
+        window_length: 
+        window_type : Window type for stft
+        pad_mode : Optional padding strategy to reduce edge artifacts {'cycle','constant','odd','even',None}
+        detrend : {'linear','constant', False}
     
     Returns:
         array: Average spectrogram of data.
-
+        S_db : Average power spectrogram in dB -> shape (n_freqs, n_frames)
+        bins : Time vector in seconds -> shape (n_frames,)
+        freqs: Frequency vector in [Hz] -> shape (n_freqs,)
+        
     """
 
+
+    n_frames = data.shape[1]
+
     # Define defaults
-    n_samples = data.shape[1]
-    
-    if n_fft is None: n_fft = shift_bit_length(int(n_samples / 10))
+    if n_fft is None: n_fft = shift_bit_length(int(n_frames / 10))
     if hop_length is None: hop_length = int(n_fft / 4)
     if window_length is None: window_length = n_fft
 
@@ -262,13 +352,11 @@ def average_spectrogram(data, sampling_rate, n_fft=None, hop_length=None, window
         boundary = pad_mode
     
     else:
-        print('Problem with pad_mode')
+        print('Warning: Problem with pad_mode!')
 
-
-    # See here for scipy.signal.stft documentation:  https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.stft.html 
     stft_params = {
         'fs' : sampling_rate,
-        'window' : window,
+        'window' : window_type,
         'nperseg' : window_length,
         'noverlap' : window_length - hop_length,   # number of overlapping samples
         'nfft' : n_fft,
@@ -279,7 +367,8 @@ def average_spectrogram(data, sampling_rate, n_fft=None, hop_length=None, window
         'axis' : -1,
         }
 
-    # All the below S arrays have shape (n_freq, n_windows)
+
+    # All the below S arrays have shape (n_freq, n_frames)
     freqs, bins, Z0 = stft(x=data[0], **stft_params) #data[0] will be the first row
 
     S_sum = np.zeros_like(Z0, dtype=np.float64)
@@ -306,47 +395,60 @@ def average_spectrogram(data, sampling_rate, n_fft=None, hop_length=None, window
     if pad_mode in ['cycle', 'even', 'odd']:
         bins = bins - bins[0]
 
-    return S_avg_dB, bins, freqs
+
+    # Remove last frame to keep edges clean    
+    S_avg_dB = S_avg_dB[:,:-1]
+    bins = bins[:-1]
+
+    # Store all values in spec_data
+    spec_data = {
+        'S_avg_dB': S_avg_dB,
+        'bins': bins,
+        'freqs': freqs,
+        'sampling_rate': sampling_rate,
+        'n_fft': n_fft,
+        'window_length': window_length,
+        'hop_length': hop_length,
+    }
+    return spec_data
 
 
 
-def compute_spectrogram_wall_pressure(output_folder, wall_mesh, shared_pressure_ctype, period_seconds, num_cycles,
-                                     window_length, ROI_center, ROI_radius, spec_quantity = 'pressure'):
+def compute_spectrogram_wall_pressure(output_folder,
+                                      wall_mesh,
+                                      shared_pressure_ctype,
+                                      period_seconds,
+                                      timesteps_per_cyc,
+                                      spec_quantity,
+                                      ROI_center,
+                                      ROI_radius,
+                                      window_length,
+                                      n_fft=None,
+                                      hop_length=None,
+                                      window_type='hann',
+                                      pad_mode='cycle',
+                                      detrend='linear',
+                                      clamp_threshold_dB=None):
+
+    """
+    Assemble ROI time series and compute an average spectrogram (in dB) with configurable STFT parameters.
+    """
     
     if spec_quantity == 'pressure':
         # Assembles data for the ROI
         wall_pressure_ROI = assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_ctype, ROI_center, ROI_radius)
-        print(f"Shape of wall_pressure_ROI is {wall_pressure_ROI.shape}")
+        print(f"[info] wall_pressure_ROI shape: {wall_pressure_ROI.shape}")
 
-        n_samples = wall_pressure_ROI.shape[1] # number of snapshots
-        sampling_rate = n_samples/(num_cycles*period_seconds)
+        n_snapshots = wall_pressure_ROI.shape[1] # total number of snapshots
+        sampling_rate = timesteps_per_cyc/period_seconds # [Hz]
 
-        if window_length is None: window_length = shift_bit_length(int(n_samples / 10))
-        n_fft = window_length
-        hop_length = int(n_fft / 4)
+        # If window_length is not defined, divide the signal by 10 by default 
+        if window_length is None: window_length = shift_bit_length(int(n_snapshots / 10))
+        #n_fft = window_length
+        #hop_length = int(n_fft / 10)
         
-
-
-        S_avg_dB, bins, freqs = average_spectrogram(
-                        data=wall_pressure_ROI,
-                        sampling_rate=sampling_rate,
-                        n_fft=n_fft,
-                        hop_length=hop_length,
-                        window_length=window_length,
-                        window='hann',
-                        pad_mode='cycle',
-                        detrend='linear')
-
-        # Remove last frame
-        S_avg_dB = S_avg_dB[:,:-1]
-        bins = bins[:-1]
-
-        spec_data = {}
-        spec_data['S'] = S_avg_dB
-        spec_data['bins'] = bins
-        spec_data['freqs'] = freqs
-        spec_data['sampling_rate'] = sampling_rate
-        spec_data['n_fft'] = n_fft
+        # Compute average spectrogram
+        spec_data = average_spectrogram(data=wall_pressure_ROI, sampling_rate=sampling_rate, window_length=window_length)
 
         #wall_mesh.spectrogram_data['p'] = spec_data
         
@@ -358,7 +460,10 @@ def compute_spectrogram_wall_pressure(output_folder, wall_mesh, shared_pressure_
     return spec_data
 
 
-def plot_spectrogram(output_folder, case_name, spec_data, plot_title):
+def plot_spectrogram(output_folder, case_name, spec_data, plot_title, clamp_threshold_dB):
+    """
+    Save spectrogram data (.npz) and a PNG image.
+    """
 
     spec_output_npz = Path(output_folder) / f"files/{plot_title}.npz"
     np.savez(spec_output_npz, spec_data)
@@ -367,36 +472,40 @@ def plot_spectrogram(output_folder, case_name, spec_data, plot_title):
     # Extract relevant data for plotting
     bins = spec_data['bins']
     freqs = spec_data['freqs']
-    spec_signal = spec_data['S']
+    spec_signal = spec_data['S_avg_dB']
 
-    # Clamp values below -20dB
-    spec_signal[spec_signal < -50] = -50
+    # Clamp values below a certain dB threshold
+    spec_signal[spec_signal < clamp_threshold_dB] = clamp_threshold_dB
 
     # Setting plot properties
-    size = 10
-    plt.rc('font', size=size) #controls default text size
-    plt.rc('axes', titlesize=12) #fontsize of the title
-    plt.rc('axes', labelsize=size) #fontsize of the x and y labels
-    plt.rc('xtick', labelsize=size) #fontsize of the x tick labels
-    plt.rc('ytick', labelsize=size) #fontsize of the y tick labels
-    plt.rc('legend', fontsize=size) #fontsize of the legend
+    font_size = 12
+    plt.rc('axes', titlesize=14)         # fontsize of the title
+    plt.rc('font', size=font_size)       # controls default text size
+    plt.rc('axes', labelsize=14)  # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=font_size) # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=font_size) # fontsize of the y tick labels
+    plt.rc('legend', fontsize=font_size) # fontsize of the legend
 
 
-    fig, ax = plt.subplots(1,1, figsize=(8,6))
+    fig, ax = plt.subplots(1,1, figsize=(10,8))
     spectrogram = ax.pcolormesh(bins, freqs, spec_signal, shading='gouraud')
-    #spectrogram.set_clim([-20, 0])
-    ax.set_xlabel('Time (s)', labelpad=-5)
-    ax.set_ylabel('Freq (Hz)', labelpad=-10)
+    
+    # Set axis
+    ax.set_title(plot_title)
+    ax.set_xlabel('Time (s)', labelpad=0)
+    ax.set_ylabel('Freq (Hz)', labelpad=0)
+    ax.set_ylim([0, 1500])
     #ax.set_xticks([0, 0.9])
     #ax.set_xticklabels(['0.0', '0.9'])
     #ax.set_yticks([0, 600, 800])
     #ax.set_yticklabels(['0', '600', '800'])
-    ax.set_ylim([0, 1500])
+    #spectrogram.set_clim([-20, 0])
 
-    ax.set_title(plot_title)
+    
     plt.tight_layout()
     plt.colorbar(spectrogram, ax=ax) # Adding the colorbar
     plt.savefig(Path(output_folder) / f"imgs/{plot_title}.png")#, transparent=True)
+    plt.close(fig)
 
 
 
@@ -408,13 +517,21 @@ def hemodynamics(wall_mesh: pv.PolyData,
                  output_folder: Path,
                  case_name: str,
                  n_process: int,
+                 density: float,
                  period_seconds: float,
-                 num_cycles: int,
+                 timesteps_per_cyc: int,
                  spec_quantity: str,
-                 window_length: int,
                  ROI_center: list[float],
                  ROI_radius: int,
+                 clamp_threshold_dB: float,
+                 window_length: int,
+                 n_fft: int,
+                 hop_length: int,
+                 window_type: str,
+                 pad_mode: str,
+                 detrend: str,
                  ):
+
     """
     Main driver: Reads time-series pressures, computes windowed SPI, and writes it to a VTP file.
 
@@ -428,12 +545,18 @@ def hemodynamics(wall_mesh: pv.PolyData,
 
     # 1) Gather files
     # Find & sort snapshot files by timestep 
-    snapshot_h5_files = sorted(Path(input_folder).glob('*_curcyc_*up.h5'), key = extract_timestep_from_h5)
+    snapshot_h5_files = sorted(Path(input_folder).glob('*_curcyc_*up.h5'), key = extract_timestep_from_h5_filename)
     n_snapshots = len(snapshot_h5_files)
 
     if n_snapshots==0:
         print('No files found in {}!'.format(input_folder))
         sys.exit()
+
+    
+    # Obtain simulation temporal parameters from filename (if not given as input argument)
+    if timesteps_per_cyc is None or period_seconds is None:
+        timesteps_per_cyc, period_seconds = extract_time_params_from_h5_filename(snapshot_h5_files[0])
+
     
     # Wall point IDs and sizes
     wall_pids = wall_mesh.point_data['vtkOriginalPtIds']
@@ -443,7 +566,6 @@ def hemodynamics(wall_mesh: pv.PolyData,
     # 2) Create shared arrays
     # Array to hold pressures (n_points, n_times)
     shared_pressure_ctype = create_shared_array([n_points, n_snapshots])
-
 
 
     # 3) Parallel reading
@@ -456,7 +578,7 @@ def hemodynamics(wall_mesh: pv.PolyData,
     
     processes_list=[]
     for idx, group in enumerate(time_groups):
-        proc = mp.Process(target = read_wall_pressure_from_h5_files, name=f"Reader{idx}", args=(group, wall_pids, snapshot_h5_files, shared_pressure_ctype))
+        proc = mp.Process(target = read_wall_pressure_from_h5_files, name=f"Reader{idx}", args=(group, wall_pids, snapshot_h5_files, shared_pressure_ctype, density))
         processes_list.append(proc)
 
     # Start all readers
@@ -475,17 +597,30 @@ def hemodynamics(wall_mesh: pv.PolyData,
     # 4) Computing spectrogram 
     print (f"Now computing {spec_quantity} spectrograms for window length {window_length}...")
 
-  
-    spec_data = compute_spectrogram_wall_pressure(output_folder,
-                wall_mesh, shared_pressure_ctype, period_seconds, num_cycles,
-                window_length, ROI_center, ROI_radius, spec_quantity)
+    spec_data = compute_spectrogram_wall_pressure(
+        output_folder=output_folder,
+        wall_mesh=wall_mesh,
+        shared_pressure_ctype=shared_pressure_ctype,
+        period_seconds=period_seconds,
+        timesteps_per_cyc=timesteps_per_cyc,
+        spec_quantity=spec_quantity,
+        ROI_center=ROI_center,
+        ROI_radius=ROI_radius,
+        clamp_threshold_dB=clamp_threshold_dB,
+        window_length=window_length,
+        n_fft=n_fft,
+        hop_length=hop_length,
+        window_type=window_type,
+        pad_mode=pad_mode,
+        detrend=detrend,
+    )
 
     # 5) Save spectrogram
     # Creates the output filename (npz format: numpy zipped file)
     cx, cy, cz = map(float, ROI_center)
     center_tag = f"cx{cx:.2f}cy{cy:.2f}cz{cz:.2f}"
     spec_title = f'{case_name}_specP_window{window_length}_{center_tag}_r{ROI_radius}' 
-    plot_spectrogram(output_folder, case_name, spec_data, spec_title)
+    plot_spectrogram(output_folder, case_name, spec_data, spec_title, clamp_threshold_dB)
 
     
     print (f'Finished saving spetrograms.')
@@ -501,15 +636,30 @@ def parse_args():
     ap.add_argument("--mesh_folder",    required=True,       help="Case mesh folder containing HDF5 mesh file")
     ap.add_argument("--output_folder",  required=True,       help="Output directory for SPI VTP file")
     ap.add_argument("--case_name",      required=True,       help="Case name")
-    ap.add_argument("--period",         type=float,          help="Period in seconds (default: 0.915)", default=0.915)
-    ap.add_argument("--num_cycles",     type=int,            help="Number of cycles")
-    ap.add_argument("--spec_quantity",  type=str, choices=["pressure","velocity"], required=True, help="Quantity used for spectrogram generation (choose between <pressure>/<velocity>)")
-    ap.add_argument("--window_length",    type=int,            help="Size of FFT window (number of snapshots for each window)")
-    ap.add_argument("--ROI_center",     nargs=3, type=float, metavar=("X","Y","Z"), required=True, help="XYZ coordinates for ROI center to compute spectrogram (mesh units)")
-    ap.add_argument("--ROI_radius",     type=float, required=True,       help="Radius of ROI to compute spectrogram in mesh units (mm in most cases)")
     ap.add_argument("--n_process",      type=int,            help="Number of parallel processes", default=max(1, mp.cpu_count() - 1))
 
+    ap.add_argument("--density",           type=float,  default=1050,   help="Blood density [kg/m3] (default: 1050)")
+    ap.add_argument("--period_seconds",    type=float,  default=0.915,  help="Period in seconds (default: 0.915)")
+    ap.add_argument("--timesteps_per_cyc", type=int,                    help="Number of timesteps per cycle")
+    ap.add_argument("--spec_quantity",     type=str,    required=True, choices=["pressure","velocity"], help="Quantity used for spectrogram")
+    
+    # ROI parameters and visualization
+    ap.add_argument("--ROI_center",     nargs=3, type=float, metavar=("X","Y","Z"), required=True, help="XYZ coordinates for ROI center to compute spectrogram (mesh units)")
+    ap.add_argument("--ROI_radius",     type=float, required=True,       help="Radius of ROI to compute spectrogram in mesh units (mm in most cases)")
+    ap.add_argument("--clamp_threshold_dB", type=float, default=-60.0, help="Minimum dB floor for visualization")
+    
+    # Short-time Fourier Transform control (all optional)
+    ap.add_argument("--window_length",  type=int, default=None,    help="Length of FFT window in samples (number of snapshots for each window)")
+    ap.add_argument("--n_fft",          type=int, default=None,    help="FFT length (bins)")
+    ap.add_argument("--hop_length",     type=int, default=None,    help="Hop length between consequent in samples (default: window_length/4)")
+    ap.add_argument("--window_type",    type=str, default="hann",  choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT")
+    ap.add_argument("--pad_mode",       type=str, default="cycle", choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts")
+    ap.add_argument("--detrend",        default="linear",          help="Detrend option for STFT: 'linear', 'constant', or False")
+
+
+    
     return ap.parse_args()
+
 
 
 def main():
@@ -522,10 +672,9 @@ def main():
     if not Path(output_folder).exists():
         Path(output_folder).mkdir(parents=True, exist_ok=True)
 
-    Path(output_folder/"files").mkdir(parents=True, exist_ok=True)
-    Path(output_folder/"imgs").mkdir(parents=True, exist_ok=True)
-    Path(output_folder/"ROIs").mkdir(parents=True, exist_ok=True)
-
+    (output_folder/"files").mkdir(parents=True, exist_ok=True)
+    (output_folder/"imgs").mkdir(parents=True, exist_ok=True)
+    (output_folder/"ROIs").mkdir(parents=True, exist_ok=True)
 
     # Assemble mesh
     mesh_file = list(Path(mesh_folder).glob('*.h5'))[0]
@@ -537,11 +686,28 @@ def main():
     print(f"[info] Reading from: {input_folder}")
     print(f"[info] Writing to:   {output_folder} \n")
 
-
     print (f"Performing post-processing computation on {args.n_process} cores..." )
-    hemodynamics(wall_mesh, input_folder, output_folder, case_name = args.case_name, n_process = args.n_process,
-                period_seconds= args.period, num_cycles= args.num_cycles, spec_quantity= args.spec_quantity,
-                window_length= args.window_length, ROI_center = args.ROI_center, ROI_radius = args.ROI_radius)
+
+    # Run post-processing    
+    hemodynamics(
+        wall_mesh = wall_mesh,
+        input_folder = input_folder,
+        output_folder = output_folder,
+        case_name = args.case_name,
+        n_process = args.n_process,
+        density = args.density,
+        period_seconds = args.period_seconds,
+        timesteps_per_cyc = args.timesteps_per_cyc,
+        spec_quantity = args.spec_quantity,
+        ROI_center = args.ROI_center,
+        ROI_radius = args.ROI_radius,
+        clamp_threshold_dB = args.clamp_threshold_dB,
+        window_length = args.window_length,
+        n_fft = args.n_fft,
+        hop_length = args.hop_length,
+        window_type = args.window_type,
+        pad_mode = args.pad_mode,
+        detrend = args.detrend)
 
 
 

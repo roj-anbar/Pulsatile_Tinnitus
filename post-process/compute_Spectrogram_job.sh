@@ -59,16 +59,16 @@ export PYVISTA_USE_PANEL=true
 
 
 python compute_Spectrogram.py \
-    --input_folder     "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
-    --mesh_folder      "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
-    --case_name        "PTSeg028_base_0p64" \
-    --output_folder    "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Spectrorgam_wall_pressure/cy6_saveFreq1" \
-    --n_process        192 \
-    --period           0.915 \
-    --num_cycles       6 \
-    --spec_quantity    "pressure" \
-    --ROI_center       33.6404 -9.21902 -3.76951 \
-    --ROI_radius       3 \
-    --window_length   1000 \
+    --input_folder      "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
+    --mesh_folder       "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
+    --case_name         "PTSeg028_base_0p64" \
+    --output_folder     "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Spectrorgam_wall_pressure/cy6_saveFreq1" \
+    --n_process         192 \
+    --period_seconds    0.915 \
+    --timesteps_per_cyc 10000 \
+    --spec_quantity     "pressure" \
+    --ROI_center        33.6404 -9.21902 -3.76951 \
+    --ROI_radius        3 \
+    --window_length     5000 \
 
 wait
