@@ -69,6 +69,7 @@ python compute_Spectrogram.py \
     --spec_quantity     "pressure" \
     --ROI_center        33.6404 -9.21902 -3.76951 \
     --ROI_radius        3 \
-    --window_length     5000 \
+    --window_length     4000 \
+    --overlap_fraction  0.8
 
 wait

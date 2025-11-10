@@ -45,7 +45,7 @@
 #   --spec_quantity       Quantity to compute spectrogram from: 'pressure' or 'velocity'
 #   --window_length       STFT window length (samples, i.e., snapshots)
 #   --n_fft               STFT FFT length (bins)
-#   --hop_length          STFT hop length (samples)
+#   --overlap_frac        STFT noverlap = overlap_frac * window_length --> Overlap fraction between consequent windows (0-1)
 #   --window              STFT window type
 #   --pad_mode            Edge padding ('cycle','constant','odd','even','none')
 #   --detrend             STFT detrend ('linear','constant', or False)
@@ -247,7 +247,7 @@ def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_press
     # If ROI_radius == 0: interpret ROI_center as a single POINT ID (not coordinates)
 
 
-def assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_ctype, ROI_center, ROI_radius):
+def assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_ctype, ROI_center, ROI_radius, save_ROI_flag=False):
     """
     Select wall points inside a spherical ROI and return the wall-pressure time series for those points.
     """
@@ -265,7 +265,8 @@ def assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_cty
         ROI_sphere = pv.Sphere(radius = ROI_radius, center = ROI_center) # creates a 2d sphere around desired point (units of the radius same as units of the mesh)
         
         # Save the sphere to a .vtp file (for visualization in paraview later)
-        #ROI_sphere.save(f'{output_folder}/ROIs/ROI_sphere_center{ROI_center}_r{ROI_radius}.vtp') 
+        if save_ROI_flag:
+            ROI_sphere.save(f'{output_folder}/ROIs/ROI_sphere_center{ROI_center}_r{ROI_radius}.vtp') 
 
         # Selects mesh points inside the surface, with a certain tolerance (using pyvista)
         ROI_mesh = wall_mesh.select_enclosed_points(ROI_sphere, tolerance=0.01)
@@ -293,10 +294,10 @@ def assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_cty
 
 def average_spectrogram(data,
                         sampling_rate: float,
-                        n_fft: int | None = None,
-                        hop_length: int | None = None,
-                        window_length: int | None = None,
                         window_type: str = 'hann',
+                        window_length: int | None = None,
+                        overlap_frac: float = 0.75,
+                        n_fft: int | None = None,
                         pad_mode: str | None = 'cycle',
                         detrend: str | bool = 'linear',
                         print_progress: bool = False):
@@ -310,10 +311,10 @@ def average_spectrogram(data,
     Arguments: 
         data: Timeseries data for all ROI points -> shape (n_points, n_snapshots)
         sampling_rate: Number of samples per second [Hz]
-        n_fft:
-        hop_length:
-        window_length: 
         window_type : Window type for stft
+        window_length (nperseg): Number of time samples in each window 
+        overlap_frca: Fraction (0-1) of overlap between segments (default = 0.75)
+        n_fft: Number of FFT bins in each segment (>= window_length) -> if a zero padded FFT is desired, if None, is equal to window_length (nperseg) 
         pad_mode : Optional padding strategy to reduce edge artifacts {'cycle','constant','odd','even',None}
         detrend : {'linear','constant', False}
     
@@ -329,10 +330,9 @@ def average_spectrogram(data,
     n_frames = data.shape[1]
 
     # Define defaults
-    if n_fft is None: n_fft = shift_bit_length(int(n_frames / 10))
-    if hop_length is None: hop_length = int(n_fft / 4)
-    if window_length is None: window_length = n_fft
-
+    if window_length is None: window_length = shift_bit_length(int(n_frames / 10))
+    if n_fft is None: n_fft = window_length
+    if overlap_frac is None: overlap_frac = 0.75
 
     if pad_mode == 'cycle':
         pad_size = window_length // 2
@@ -358,7 +358,7 @@ def average_spectrogram(data,
         'fs' : sampling_rate,
         'window' : window_type,
         'nperseg' : window_length,
-        'noverlap' : window_length - hop_length,   # number of overlapping samples
+        'noverlap' : int(overlap_frac * window_length),   # number of overlapping samples
         'nfft' : n_fft,
         'detrend' : detrend,
         'return_onesided' : True,
@@ -400,17 +400,24 @@ def average_spectrogram(data,
     S_avg_dB = S_avg_dB[:,:-1]
     bins = bins[:-1]
 
-    # Store all values in spec_data
-    spec_data = {
+    # Store all values in spectrogram_data
+    spectrogram_data = {
         'S_avg_dB': S_avg_dB,
         'bins': bins,
         'freqs': freqs,
         'sampling_rate': sampling_rate,
         'n_fft': n_fft,
         'window_length': window_length,
-        'hop_length': hop_length,
+        'overlap_frac': overlap_frac,
     }
-    return spec_data
+
+    print(f"\n[info] STFT parameters: \n \
+            sampling_rate (Hz)      = {sampling_rate:.4g} \n \
+            window_length (samples) = {window_length} \n \
+            n_fft         (samples) = {n_fft} \n \
+            overlap_fraction        = {overlap_frac} \n")
+
+    return spectrogram_data
 
 
 
@@ -422,9 +429,10 @@ def compute_spectrogram_wall_pressure(output_folder,
                                       spec_quantity,
                                       ROI_center,
                                       ROI_radius,
+                                      save_ROI_flag,
                                       window_length,
                                       n_fft=None,
-                                      hop_length=None,
+                                      overlap_frac=None,
                                       window_type='hann',
                                       pad_mode='cycle',
                                       detrend='linear',
@@ -436,8 +444,8 @@ def compute_spectrogram_wall_pressure(output_folder,
     
     if spec_quantity == 'pressure':
         # Assembles data for the ROI
-        wall_pressure_ROI = assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_ctype, ROI_center, ROI_radius)
-        print(f"[info] wall_pressure_ROI shape: {wall_pressure_ROI.shape}")
+        wall_pressure_ROI = assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_ctype, ROI_center, ROI_radius, save_ROI_flag)
+        #print(f"Wall_pressure_ROI shape: {wall_pressure_ROI.shape}")
 
         n_snapshots = wall_pressure_ROI.shape[1] # total number of snapshots
         sampling_rate = timesteps_per_cyc/period_seconds # [Hz]
@@ -445,55 +453,65 @@ def compute_spectrogram_wall_pressure(output_folder,
         # If window_length is not defined, divide the signal by 10 by default 
         if window_length is None: window_length = shift_bit_length(int(n_snapshots / 10))
         #n_fft = window_length
-        #hop_length = int(n_fft / 10)
+        #hop_length = int(n_fft / 4)
+        #overlap_frac = 0.75
         
         # Compute average spectrogram
-        spec_data = average_spectrogram(data=wall_pressure_ROI, sampling_rate=sampling_rate, window_length=window_length)
+        spectrogram_data = average_spectrogram(
+                        data=wall_pressure_ROI,
+                        sampling_rate = sampling_rate,
+                        n_fft = n_fft,
+                        overlap_frac = overlap_frac,
+                        window_length = window_length,
+                        window_type = window_type,
+                        pad_mode = pad_mode,
+                        detrend = detrend)
 
-        #wall_mesh.spectrogram_data['p'] = spec_data
+
+        #wall_mesh.spectrogram_data['p'] = spectrogram_data
         
 
     elif spec_quantity == 'velocity':
         # the variable is 'u' but bsl tools calculate the norm of it -> 'umag'
         print("Spectrogram calculation for velocity is not implemented yet!")
 
-    return spec_data
+    return spectrogram_data
 
 
-def plot_spectrogram(output_folder, case_name, spec_data, plot_title, clamp_threshold_dB):
+def plot_spectrogram(output_folder, case_name, spectrogram_data, plot_title, clamp_threshold_dB):
     """
     Save spectrogram data (.npz) and a PNG image.
     """
 
     spec_output_npz = Path(output_folder) / f"files/{plot_title}.npz"
-    np.savez(spec_output_npz, spec_data)
+    np.savez(spec_output_npz, spectrogram_data)
 
 
     # Extract relevant data for plotting
-    bins = spec_data['bins']
-    freqs = spec_data['freqs']
-    spec_signal = spec_data['S_avg_dB']
+    bins = spectrogram_data['bins']
+    freqs = spectrogram_data['freqs']
+    spectrogram_signal = spectrogram_data['S_avg_dB']
 
     # Clamp values below a certain dB threshold
-    spec_signal[spec_signal < clamp_threshold_dB] = clamp_threshold_dB
+    spectrogram_signal[spectrogram_signal < clamp_threshold_dB] = clamp_threshold_dB
 
     # Setting plot properties
     font_size = 12
-    plt.rc('axes', titlesize=14)         # fontsize of the title
+    plt.rc('axes', titlesize=16)         # fontsize of the title
     plt.rc('font', size=font_size)       # controls default text size
-    plt.rc('axes', labelsize=14)  # fontsize of the x and y labels
     plt.rc('xtick', labelsize=font_size) # fontsize of the x tick labels
     plt.rc('ytick', labelsize=font_size) # fontsize of the y tick labels
-    plt.rc('legend', fontsize=font_size) # fontsize of the legend
+    plt.rc('legend', fontsize=font_size)             # fontsize of the legend
+    plt.rc('axes', labelsize=16, fontweight='bold')  # fontsize of the x and y labels
 
 
-    fig, ax = plt.subplots(1,1, figsize=(10,8))
-    spectrogram = ax.pcolormesh(bins, freqs, spec_signal, shading='gouraud')
+    fig, ax = plt.subplots(1,1, figsize=(12,8))
+    spectrogram = ax.pcolormesh(bins, freqs, spectrogram_signal, shading='gouraud')
     
     # Set axis
-    ax.set_title(plot_title)
-    ax.set_xlabel('Time (s)', labelpad=0)
-    ax.set_ylabel('Freq (Hz)', labelpad=0)
+    ax.set_title(plot_title, fontweight='bold')
+    ax.set_xlabel('Time (s)', labelpad=0, fontweight='bold')
+    ax.set_ylabel('Frequency (Hz)', labelpad=0, fontweight='bold')
     ax.set_ylim([0, 1500])
     #ax.set_xticks([0, 0.9])
     #ax.set_xticklabels(['0.0', '0.9'])
@@ -503,7 +521,8 @@ def plot_spectrogram(output_folder, case_name, spec_data, plot_title, clamp_thre
 
     
     plt.tight_layout()
-    plt.colorbar(spectrogram, ax=ax) # Adding the colorbar
+    cbar = plt.colorbar(spectrogram, ax=ax) # Adding the colorbar
+    cbar.set_label('Power (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
     plt.savefig(Path(output_folder) / f"imgs/{plot_title}.png")#, transparent=True)
     plt.close(fig)
 
@@ -523,10 +542,11 @@ def hemodynamics(wall_mesh: pv.PolyData,
                  spec_quantity: str,
                  ROI_center: list[float],
                  ROI_radius: int,
+                 save_ROI_flag: bool,
                  clamp_threshold_dB: float,
                  window_length: int,
                  n_fft: int,
-                 hop_length: int,
+                 overlap_frac: float,
                  window_type: str,
                  pad_mode: str,
                  detrend: str,
@@ -597,30 +617,31 @@ def hemodynamics(wall_mesh: pv.PolyData,
     # 4) Computing spectrogram 
     print (f"Now computing {spec_quantity} spectrograms for window length {window_length}...")
 
-    spec_data = compute_spectrogram_wall_pressure(
-        output_folder=output_folder,
-        wall_mesh=wall_mesh,
-        shared_pressure_ctype=shared_pressure_ctype,
-        period_seconds=period_seconds,
-        timesteps_per_cyc=timesteps_per_cyc,
-        spec_quantity=spec_quantity,
-        ROI_center=ROI_center,
-        ROI_radius=ROI_radius,
-        clamp_threshold_dB=clamp_threshold_dB,
-        window_length=window_length,
-        n_fft=n_fft,
-        hop_length=hop_length,
-        window_type=window_type,
-        pad_mode=pad_mode,
-        detrend=detrend,
+    spectrogram_data = compute_spectrogram_wall_pressure(
+        output_folder = output_folder,
+        wall_mesh = wall_mesh,
+        shared_pressure_ctype = shared_pressure_ctype,
+        period_seconds = period_seconds,
+        timesteps_per_cyc = timesteps_per_cyc,
+        spec_quantity = spec_quantity,
+        ROI_center = ROI_center,
+        ROI_radius = ROI_radius,
+        save_ROI_flag = save_ROI_flag,
+        clamp_threshold_dB = clamp_threshold_dB,
+        window_length = window_length,
+        n_fft = n_fft,
+        overlap_frac = overlap_frac,
+        window_type = window_type,
+        pad_mode = pad_mode,
+        detrend = detrend,
     )
 
     # 5) Save spectrogram
     # Creates the output filename (npz format: numpy zipped file)
     cx, cy, cz = map(float, ROI_center)
     center_tag = f"cx{cx:.2f}cy{cy:.2f}cz{cz:.2f}"
-    spec_title = f'{case_name}_specP_window{window_length}_{center_tag}_r{ROI_radius}' 
-    plot_spectrogram(output_folder, case_name, spec_data, spec_title, clamp_threshold_dB)
+    spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac*100}%_{center_tag}_r{ROI_radius}' 
+    plot_spectrogram(output_folder, case_name, spectrogram_data, spectrogram_title, clamp_threshold_dB)
 
     
     print (f'Finished saving spetrograms.')
@@ -641,20 +662,21 @@ def parse_args():
     ap.add_argument("--density",           type=float,  default=1050,   help="Blood density [kg/m3] (default: 1050)")
     ap.add_argument("--period_seconds",    type=float,  default=0.915,  help="Period in seconds (default: 0.915)")
     ap.add_argument("--timesteps_per_cyc", type=int,                    help="Number of timesteps per cycle")
-    ap.add_argument("--spec_quantity",     type=str,    required=True, choices=["pressure","velocity"], help="Quantity used for spectrogram")
+    ap.add_argument("--spec_quantity",     type=str,    required=True,  choices=["pressure","velocity"], help="Quantity used for spectrogram")
     
     # ROI parameters and visualization
-    ap.add_argument("--ROI_center",     nargs=3, type=float, metavar=("X","Y","Z"), required=True, help="XYZ coordinates for ROI center to compute spectrogram (mesh units)")
-    ap.add_argument("--ROI_radius",     type=float, required=True,       help="Radius of ROI to compute spectrogram in mesh units (mm in most cases)")
+    ap.add_argument("--ROI_center",nargs=3, type=float, metavar=("X","Y","Z"), required=True, help="XYZ coordinates for ROI center to compute spectrogram (mesh units)")
+    ap.add_argument("--ROI_radius",         type=float, required=True,       help="Radius of ROI to compute spectrogram in mesh units (mm in most cases)")
+    ap.add_argument("--save_ROI_flag",      type=bool,  default=False, help="Flag to save ROI.vtp surface file or not")
     ap.add_argument("--clamp_threshold_dB", type=float, default=-60.0, help="Minimum dB floor for visualization")
     
     # Short-time Fourier Transform control (all optional)
-    ap.add_argument("--window_length",  type=int, default=None,    help="Length of FFT window in samples (number of snapshots for each window)")
-    ap.add_argument("--n_fft",          type=int, default=None,    help="FFT length (bins)")
-    ap.add_argument("--hop_length",     type=int, default=None,    help="Hop length between consequent in samples (default: window_length/4)")
-    ap.add_argument("--window_type",    type=str, default="hann",  choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT")
-    ap.add_argument("--pad_mode",       type=str, default="cycle", choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts")
-    ap.add_argument("--detrend",        default="linear",          help="Detrend option for STFT: 'linear', 'constant', or False")
+    ap.add_argument("--window_length",    type=int,   default=None,     help="Length of FFT window in samples (number of snapshots for each window)")
+    ap.add_argument("--n_fft",            type=int,   default=None,     help="FFT length (bins)")
+    ap.add_argument("--overlap_fraction", type=float, default=0.75,     help="Overlap fraction between consequent windows [0,1] (default: 0.75)")
+    ap.add_argument("--window_type",      type=str,   default="hann",   choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT")
+    ap.add_argument("--pad_mode",         type=str,   default="cycle",  choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts")
+    ap.add_argument("--detrend",          type=str,   default="linear", help="Detrend option for STFT: 'linear', 'constant', or False")
 
 
     
@@ -701,10 +723,11 @@ def main():
         spec_quantity = args.spec_quantity,
         ROI_center = args.ROI_center,
         ROI_radius = args.ROI_radius,
+        save_ROI_flag = args.save_ROI_flag,
         clamp_threshold_dB = args.clamp_threshold_dB,
         window_length = args.window_length,
         n_fft = args.n_fft,
-        hop_length = args.hop_length,
+        overlap_frac = args.overlap_fraction,
         window_type = args.window_type,
         pad_mode = args.pad_mode,
         detrend = args.detrend)
