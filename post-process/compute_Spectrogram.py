@@ -59,7 +59,6 @@
 #   - n_process         Number of worker processes (default: #logical CPUs)
 #
 # OUTPUTS:
-#   - output_folder/<case>_p_<f-cut>Hz.vtp  PolyData with 'SPI_p' point-data
 #   1) Processed spectrograms saved as .npz (output_folder/files)
 #   2) Spectrogram images saved as .png     (output_folder/imgs)
 #   3) ROI surface file saved as .vtp       (output_folder/ROIs)
@@ -153,19 +152,37 @@ def shift_bit_length(x):
 def read_ROI_points_from_csv(csv_path: str) -> np.ndarray:
     """
     Read a CSV of ROI points with columns:
-    Normals:0, Normals:1, Normals:2, Points:0, Points:1, Points:2
-    Returns an array of shape (n_points, 3) with XYZ coordinates.
+    Points:0, Points:1, Points:2
+    FrenetNormal:0, FrenetNormal:1, FrenetNormal:2
+    Uses header names to locate columns.
+    Returns
+    coords  : (n_points, 3) array of XYZ coordinates
+    normals : (n_points, 3) array of normals
     """
-    data = np.genfromtxt(csv_path, delimiter=',', names=True)
 
-    # Adjust these names if your headers differ
-    x = data['Points:0']
-    y = data['Points:1']
-    z = data['Points:2']
+    data = np.genfromtxt(csv_path, delimiter=",", names=True)
 
-    ROI_centers = np.vstack([x, y, z]).T  # shape (n_points, 3)
-    print(ROI_centers)
-    return ROI_centers
+    # Field names from the header (quotes in CSV are handled by genfromtxt)
+    column_names = data.dtype.names
+
+    # Helper to get a column by name and stack into (n_points, 3)
+    def stack_columns(col_name):
+        # Create Points1, Points2, Points3
+        cols = [f"{col_name}{i}" for i in range(3)]
+        for c in cols:
+            if c not in column_names:
+                raise KeyError(f"Expected column '{c}' not found in CSV header.")
+        return np.vstack([data[c] for c in cols]).T
+
+    #normals = stack_columns("FrenetNormal:")
+    #coords  = stack_columns("Points")
+    x = data['Points0']
+    y = data['Points1']
+    z = data['Points2']
+
+    coords = np.vstack([x,y,z]).T
+
+    return coords
 
 
 # ---------------------------------------- Mesh Utilities -----------------------------------------------------
@@ -258,7 +275,7 @@ def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_press
 
 # ---------------------------------------- Compute Spectrograms -----------------------------------------------------
 
-def assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_ctype, ROI_center_coords, ROI_radius, save_ROI_flag=False):
+def assemble_wall_pressure_for_ROI(output_folder_ROIs, wall_mesh, shared_pressure_ctype, ROI_tag, ROI_center_coords, ROI_radius, save_ROI_flag=False):
     """
     Select wall points inside a ROI with defined shape and return the wall-pressure time series for those points.
     """
@@ -279,7 +296,7 @@ def assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_cty
         
         # Save the sphere to a .vtp file (for visualization in paraview later)
         if save_ROI_flag:
-            ROI_sphere.save(f'{output_folder}/ROIs/ROI_sphere_center{ROI_center_coords}_r{ROI_radius}.vtp') 
+            ROI_sphere.save(f'{output_folder_ROIs}/{ROI_tag}_cx{ROI_center_coords}_r{ROI_radius}.vtp') 
 
         # Selects mesh points inside the surface, with a certain tolerance (using pyvista)
         ROI_mesh = wall_mesh.select_enclosed_points(ROI_sphere, tolerance=0.01)
@@ -295,7 +312,7 @@ def assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_cty
             raise ValueError("No wall points found in ROI. Try increasing --ROI_radius (check mesh units: mm vs m) "
                             "or choose a different --ROI_center_coords. ")
         else:
-            print(f"Found {ROI_pids.size} wall points in the ROI...")
+            print(f"Found {ROI_pids.size} wall points in {ROI_tag}...")
 
     # Assemble wall pressure for ROI points
     wall_pressure = view_shared_array(shared_pressure_ctype) # (n_points, n_times)
@@ -403,7 +420,7 @@ def average_spectrogram(data,
         S_ref = np.mean(S_avg_power)
         S_avg_dB = 10.0 * np.log10(S_avg_power / S_ref)
 
-    print(f"Shape of S_avg_dB is {S_avg_dB.shape}")
+    #print(f"Shape of S_avg_dB is {S_avg_dB.shape}")
 
     if pad_mode in ['cycle', 'even', 'odd']:
         bins = bins - bins[0]
@@ -424,17 +441,13 @@ def average_spectrogram(data,
         'overlap_frac': overlap_frac,
     }
 
-    print(f"\n[info] STFT parameters: \n \
-        sampling_rate (Hz)      = {sampling_rate:.4g} \n \
-        window_length (samples) = {window_length} \n \
-        n_fft         (samples) = {n_fft} \n \
-        overlap_fraction        = {overlap_frac} \n")
-
     return spectrogram_data
 
 
 
-def compute_spectrogram_wall_pressure(output_folder,
+def compute_spectrogram_wall_pressure(output_folder_files,
+                                      output_folder_imgs,
+                                      output_folder_ROIs,
                                       wall_mesh,
                                       shared_pressure_ctype,
                                       period_seconds,
@@ -458,7 +471,7 @@ def compute_spectrogram_wall_pressure(output_folder,
     
     if spec_quantity == 'pressure':
         # Assembles data for the ROI
-        wall_pressure_ROI = assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_ctype, ROI_center, ROI_radius, save_ROI_flag)
+        wall_pressure_ROI = assemble_wall_pressure_for_ROI(output_folder_ROIs, wall_mesh, shared_pressure_ctype, ROI_tag, ROI_center_coords, ROI_radius, save_ROI_flag)
         #print(f"Wall_pressure_ROI shape: {wall_pressure_ROI.shape}")
 
         n_snapshots = wall_pressure_ROI.shape[1] # total number of snapshots
@@ -492,12 +505,12 @@ def compute_spectrogram_wall_pressure(output_folder,
     return spectrogram_data
 
 
-def plot_spectrogram(output_folder, case_name, spectrogram_data, plot_title, clamp_threshold_dB):
+def plot_spectrogram(output_folder_files, output_folder_imgs, case_name, spectrogram_data, plot_title, clamp_threshold_dB):
     """
     Save spectrogram data (.npz) and a PNG image.
     """
 
-    spec_output_npz = Path(output_folder) / f"files/{plot_title}.npz"
+    spec_output_npz = Path(output_folder_files) / f"{plot_title}.npz"
     np.savez(spec_output_npz, spectrogram_data)
 
 
@@ -538,7 +551,7 @@ def plot_spectrogram(output_folder, case_name, spectrogram_data, plot_title, cla
 
     
     plt.tight_layout()
-    plt.savefig(Path(output_folder) / f"imgs/{plot_title}.png")#, transparent=True)
+    plt.savefig(Path(output_folder_imgs) / f"{plot_title}.png")#, transparent=True)
     plt.close(fig)
 
 
@@ -548,7 +561,9 @@ def plot_spectrogram(output_folder, case_name, spectrogram_data, plot_title, cla
 
 def hemodynamics(wall_mesh: pv.PolyData,
                  input_folder: Path,
-                 output_folder: Path,
+                 output_folder_files: Path,
+                 output_folder_imgs: Path,
+                 output_folder_ROIs: Path,
                  case_name: str,
                  n_process: int,
                  density: float,
@@ -605,7 +620,7 @@ def hemodynamics(wall_mesh: pv.PolyData,
 
 
     # 3) Parallel reading
-    print (f"Reading in parallel {n_snapshots} CFD solution files into 1 array of shape [{n_points}, {n_snapshots}] ... \n")
+    print (f"Reading in parallel {n_snapshots} HDF5 files into 1 array of shape [{n_points}, {n_snapshots}] ... \n")
 
     # divide all snapshot files into groups and spread across processes
     time_indices    = list(range(n_snapshots))
@@ -630,7 +645,10 @@ def hemodynamics(wall_mesh: pv.PolyData,
 
 
     # 4) Computing spectrogram 
-    print (f"Now computing {spec_quantity} spectrograms for window length {window_length}...")
+    print (f"Now computing {spec_quantity} spectrograms with STFT parameters: \n \
+        window_length (samples) = {window_length} \n \
+        n_fft         (samples) = {n_fft} \n \
+        overlap_fraction        = {overlap_frac} \n")
 
     # Case 1: Coords mode
     # Single ROI center coordinates provided
@@ -638,7 +656,9 @@ def hemodynamics(wall_mesh: pv.PolyData,
         ROI_center_coords = np.array(ROI_center_coords, dtype=float)
 
         spectrogram_data = compute_spectrogram_wall_pressure(
-            output_folder = output_folder,
+            output_folder_files = output_folder_files,
+            output_folder_imgs = output_folder_imgs,
+            output_folder_ROIs = output_folder_ROIs,
             wall_mesh = wall_mesh,
             shared_pressure_ctype = shared_pressure_ctype,
             period_seconds = period_seconds,
@@ -656,17 +676,29 @@ def hemodynamics(wall_mesh: pv.PolyData,
             pad_mode = pad_mode,
             detrend = detrend)
 
+        # 5) Save spectrogram
+        # Creates the output filename (npz format: numpy zipped file)
+        cx, cy, cz = map(float, ROI_center_coords)
+        center_tag = f"cx{cx:.2f}cy{cy:.2f}cz{cz:.2f}"
+        spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f)}_{center_tag}_r{ROI_radius}' 
+        
+        plot_spectrogram(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_title, clamp_threshold_dB)
+
+
     # Case 2: CSV mode
     # Coordinates of multiple points given in a CSV file
     if ROI_center_csv is not None:
-        ROI_centers = read_ROI_points_from_csv(ROI_csv)
-        print(f"Loaded {ROI_centers.shape[0]} ROI points from {ROI_csv} ...")
+        ROI_centers = read_ROI_points_from_csv(ROI_center_csv)
+        print(f"Loaded {ROI_centers.shape[0]} ROI points from {ROI_center_csv}.")
 
         # Loop over all center points
-        for i, center in enumerate(ROI_centers):
-            ROI_tag = f"pt{i:03d}"
+        for i, center in enumerate(ROI_centers[20:30]):
+            ROI_tag = f"ROI{i:03d}"
+            
             spectrogram_data = compute_spectrogram_wall_pressure(
-                output_folder = output_folder,
+                output_folder_files = output_folder_files,
+                output_folder_imgs = output_folder_imgs,
+                output_folder_ROIs = output_folder_ROIs,
                 wall_mesh = wall_mesh,
                 shared_pressure_ctype = shared_pressure_ctype,
                 period_seconds = period_seconds,
@@ -682,15 +714,15 @@ def hemodynamics(wall_mesh: pv.PolyData,
                 overlap_frac = overlap_frac,
                 window_type = window_type,
                 pad_mode = pad_mode,
-                detrend = detrend,
-    )
+                detrend = detrend)
 
-    # 5) Save spectrogram
-    # Creates the output filename (npz format: numpy zipped file)
-    cx, cy, cz = map(float, ROI_center)
-    center_tag = f"cx{cx:.2f}cy{cy:.2f}cz{cz:.2f}"
-    spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{int(overlap_frac*100)}%_{center_tag}_r{ROI_radius}' 
-    plot_spectrogram(output_folder, case_name, spectrogram_data, spectrogram_title, clamp_threshold_dB)
+            # 5) Save spectrogram
+            # Creates the output filename (npz format: numpy zipped file)
+            cx, cy, cz = map(float, center)
+            center_tag = f"cx{cx:.2f}cy{cy:.2f}cz{cz:.2f}"
+            spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_{ROI_tag}_{center_tag}_r{ROI_radius}' 
+            
+            plot_spectrogram(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_title, clamp_threshold_dB)
 
     
     print (f'Finished saving spetrograms.')
@@ -748,9 +780,13 @@ def main():
     if not Path(output_folder).exists():
         Path(output_folder).mkdir(parents=True, exist_ok=True)
 
-    (output_folder/"files").mkdir(parents=True, exist_ok=True)
-    (output_folder/"imgs").mkdir(parents=True, exist_ok=True)
-    (output_folder/"ROIs").mkdir(parents=True, exist_ok=True)
+    output_folder_files = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}/files")
+    output_folder_imgs = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}/imgs")
+    output_folder_ROIs = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}/ROIs")
+    
+    output_folder_files.mkdir(parents=True, exist_ok=True)
+    output_folder_imgs.mkdir(parents=True, exist_ok=True)
+    output_folder_ROIs.mkdir(parents=True, exist_ok=True)
 
     # Assemble mesh
     mesh_file = list(Path(mesh_folder).glob('*.h5'))[0]
@@ -762,13 +798,15 @@ def main():
     print(f"[info] Reading from: {input_folder}")
     print(f"[info] Writing to:   {output_folder} \n")
 
-    print (f"Performing post-processing computation on {args.n_process} cores..." )
+    print (f"Performing post-processing computation on {args.n_process} cores ..." )
 
     # Run post-processing    
     hemodynamics(
         wall_mesh = wall_mesh,
         input_folder = input_folder,
-        output_folder = output_folder,
+        output_folder_files = output_folder_files,
+        output_folder_imgs = output_folder_imgs,
+        output_folder_ROIs = output_folder_ROIs,
         case_name = args.case_name,
         n_process = args.n_process,
         density = args.density,

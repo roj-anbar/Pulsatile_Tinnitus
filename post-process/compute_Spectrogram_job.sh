@@ -56,7 +56,7 @@ export PYVISTA_USE_PANEL=true
 
 # (46.2749 -20.3932 10.7888)
 #id=39: (33.6404, -9.21902, -3.76951)
-
+#--ROI_center_coords 33.6404 -9.21902 -3.76951 \
 
 python compute_Spectrogram.py \
     --input_folder      "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
@@ -67,10 +67,10 @@ python compute_Spectrogram.py \
     --period_seconds    0.915 \
     --timesteps_per_cyc 10000 \
     --spec_quantity     "pressure" \
-    #--ROI_center_coords 33.6404 -9.21902 -3.76951 \
     --ROI_center_csv    "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data/PTSeg028_base_0p64_centerline_points_clipped.csv" \
-    --ROI_radius        3 \
-    --window_length     4000 \
-    --overlap_fraction  0.9
+    --ROI_radius        4 \
+    --save_ROI_flag     True \
+    --window_length     5000 \
+    --overlap_fraction  0.7
 
 wait
