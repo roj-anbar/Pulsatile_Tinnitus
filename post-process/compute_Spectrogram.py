@@ -29,9 +29,11 @@
 #               --period_seconds    0.915                        \
 #               --timesteps_per_cyc 10000                        \
 #               --spec_quantity     "pressure"                   \
-#               --ROI_center        12.3 4.5 6.7                 \
+#               --ROI_center_coords        12.3 4.5 6.7          \
 #               --ROI_radius        2                            \
-#               --window_length     512                          \
+#               --save_ROI_flag     True                         \
+#               --window_length     1000                         \
+#               --overlap_fraction  0.8                          \
 #               --clamp_threshold_dB -60
 #
 # INPUTS:
@@ -49,8 +51,10 @@
 #   --window              STFT window type
 #   --pad_mode            Edge padding ('cycle','constant','odd','even','none')
 #   --detrend             STFT detrend ('linear','constant', or False)
-#   --ROI_center          X Y Z center of spherical ROI (mesh units). If ROI_radius==0, this is a **point ID**.
+#   --ROI_center_coords   X Y Z center of spherical ROI (mesh units). If ROI_radius==0, this is a **point ID**.
+#   --ROI_center_csv      Path to CSV file containing the coordinates of multiple points for ROI center.
 #   --ROI_radius          Sphere radius (mesh units). If 0, treat ROI_center as the **point ID** to sample.
+#   --save_ROI_flag       Boolean flag to save the ROI.vtp surface file or not.
 #   --clamp_threshold_dB  Floor for dB image (e.g., -60)
 #   - n_process         Number of worker processes (default: #logical CPUs)
 #
@@ -65,7 +69,7 @@
 #   - Filename helpers expect snapshots containing '_curcyc_' and optionally '_ts<int>' and '_Per<ms>'.
 #   - Pressure in Oasis is p/rho; multiply by density (default 1050 kg/m^3) to get Pa if desired.
 #
-# Adapted from BSL-tools repo (Dan Macdonald 2022) and make_wall_pressure_specs.py (Anna Haley 2024). 
+# Adapted from BSL-tools repository (Dan Macdonald 2022) and make_wall_pressure_specs.py (Anna Haley 2024). 
 # Copyright (C) 2025 University of Toronto, Biomedical Simulation Lab.
 # -----------------------------------------------------------------------------------------------------------------------
 
@@ -146,7 +150,22 @@ def shift_bit_length(x):
     """
     return 1<<(x-1).bit_length()
 
+def read_ROI_points_from_csv(csv_path: str) -> np.ndarray:
+    """
+    Read a CSV of ROI points with columns:
+    Normals:0, Normals:1, Normals:2, Points:0, Points:1, Points:2
+    Returns an array of shape (n_points, 3) with XYZ coordinates.
+    """
+    data = np.genfromtxt(csv_path, delimiter=',', names=True)
 
+    # Adjust these names if your headers differ
+    x = data['Points:0']
+    y = data['Points:1']
+    z = data['Points:2']
+
+    ROI_centers = np.vstack([x, y, z]).T  # shape (n_points, 3)
+    print(ROI_centers)
+    return ROI_centers
 
 
 # ---------------------------------------- Mesh Utilities -----------------------------------------------------
@@ -206,7 +225,7 @@ def assemble_volume_mesh(mesh_file):
 
     return vol_mesh, cells
 
-# --------------------------------- Parallel Mesh Reader -----------------------------------------------
+# --------------------------------- Parallel File Reader -----------------------------------------------
 
 
 def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype, density=1050):
@@ -239,34 +258,28 @@ def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_press
 
 # ---------------------------------------- Compute Spectrograms -----------------------------------------------------
 
+def assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_ctype, ROI_center_coords, ROI_radius, save_ROI_flag=False):
     """
-    Select wall points inside a spherical ROI and return the wall-pressure time series for those points.
-    - If PyVista's surface inclusion returns no points, fall back to distance-based selection.
-    - If still empty, raise a clear error with guidance.
+    Select wall points inside a ROI with defined shape and return the wall-pressure time series for those points.
     """
+
     # If ROI_radius == 0: interpret ROI_center as a single POINT ID (not coordinates)
-
-
-def assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_ctype, ROI_center, ROI_radius, save_ROI_flag=False):
-    """
-    Select wall points inside a spherical ROI and return the wall-pressure time series for those points.
-    """
 
     # Case 1: Obtain spectrograms at a single point
     if ROI_radius == 0:
         #ROI_pids = np.atleast_1d(ROI_center).astype(np.intp)
-        ROI_pids = np.asarray(ROI_center, dtype=float) 
+        ROI_pids = np.asarray(ROI_center_coords, dtype=float) 
 
     # Case 2: Obtain spectrograms in a spherical ROI
     else:
         # Create spherical ROI (using pyvista)
         #ROI_center = vol_mesh.points[ROI_center_pid] # return coordinates of the desired center
-        ROI_center = np.asarray(ROI_center, dtype=float) 
-        ROI_sphere = pv.Sphere(radius = ROI_radius, center = ROI_center) # creates a 2d sphere around desired point (units of the radius same as units of the mesh)
+        ROI_center_coords = np.asarray(ROI_center_coords, dtype=float) 
+        ROI_sphere = pv.Sphere(radius = ROI_radius, center = ROI_center_coords) # creates a 2d sphere around desired point (units of the radius same as units of the mesh)
         
         # Save the sphere to a .vtp file (for visualization in paraview later)
         if save_ROI_flag:
-            ROI_sphere.save(f'{output_folder}/ROIs/ROI_sphere_center{ROI_center}_r{ROI_radius}.vtp') 
+            ROI_sphere.save(f'{output_folder}/ROIs/ROI_sphere_center{ROI_center_coords}_r{ROI_radius}.vtp') 
 
         # Selects mesh points inside the surface, with a certain tolerance (using pyvista)
         ROI_mesh = wall_mesh.select_enclosed_points(ROI_sphere, tolerance=0.01)
@@ -280,7 +293,7 @@ def assemble_wall_pressure_for_ROI(output_folder, wall_mesh, shared_pressure_cty
         # --- Sanity check: ensure ROI is not empty ---
         if ROI_pids.size == 0:
             raise ValueError("No wall points found in ROI. Try increasing --ROI_radius (check mesh units: mm vs m) "
-                            "or choose a different --ROI_center. ")
+                            "or choose a different --ROI_center_coords. ")
         else:
             print(f"Found {ROI_pids.size} wall points in the ROI...")
 
@@ -412,10 +425,10 @@ def average_spectrogram(data,
     }
 
     print(f"\n[info] STFT parameters: \n \
-            sampling_rate (Hz)      = {sampling_rate:.4g} \n \
-            window_length (samples) = {window_length} \n \
-            n_fft         (samples) = {n_fft} \n \
-            overlap_fraction        = {overlap_frac} \n")
+        sampling_rate (Hz)      = {sampling_rate:.4g} \n \
+        window_length (samples) = {window_length} \n \
+        n_fft         (samples) = {n_fft} \n \
+        overlap_fraction        = {overlap_frac} \n")
 
     return spectrogram_data
 
@@ -427,8 +440,9 @@ def compute_spectrogram_wall_pressure(output_folder,
                                       period_seconds,
                                       timesteps_per_cyc,
                                       spec_quantity,
-                                      ROI_center,
+                                      ROI_center_coords,
                                       ROI_radius,
+                                      ROI_tag,
                                       save_ROI_flag,
                                       window_length,
                                       n_fft=None,
@@ -497,22 +511,25 @@ def plot_spectrogram(output_folder, case_name, spectrogram_data, plot_title, cla
 
     # Setting plot properties
     font_size = 12
-    plt.rc('axes', titlesize=16)         # fontsize of the title
+    plt.rc('axes', titlesize=18)         # fontsize of the title
     plt.rc('font', size=font_size)       # controls default text size
     plt.rc('xtick', labelsize=font_size) # fontsize of the x tick labels
     plt.rc('ytick', labelsize=font_size) # fontsize of the y tick labels
-    plt.rc('legend', fontsize=font_size)             # fontsize of the legend
-    plt.rc('axes', labelsize=16, fontweight='bold')  # fontsize of the x and y labels
+    plt.rc('legend', fontsize=font_size) # fontsize of the legend
+    plt.rc('axes', labelsize=16)         # fontsize of the x and y labels
 
 
     fig, ax = plt.subplots(1,1, figsize=(12,8))
-    spectrogram = ax.pcolormesh(bins, freqs, spectrogram_signal, shading='gouraud')
+    spectrogram = ax.pcolormesh(bins, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
     
     # Set axis
     ax.set_title(plot_title, fontweight='bold')
-    ax.set_xlabel('Time (s)', labelpad=0, fontweight='bold')
-    ax.set_ylabel('Frequency (Hz)', labelpad=0, fontweight='bold')
+    ax.set_xlabel('Time (s)', fontweight='bold', labelpad=0)
+    ax.set_ylabel('Frequency (Hz)', fontweight='bold', labelpad=0)
+    ax.set_xlim([1, 5])
     ax.set_ylim([0, 1500])
+    cbar = plt.colorbar(spectrogram, ax=ax) # Adding the colorbar
+    cbar.set_label('Power (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
     #ax.set_xticks([0, 0.9])
     #ax.set_xticklabels(['0.0', '0.9'])
     #ax.set_yticks([0, 600, 800])
@@ -521,8 +538,6 @@ def plot_spectrogram(output_folder, case_name, spectrogram_data, plot_title, cla
 
     
     plt.tight_layout()
-    cbar = plt.colorbar(spectrogram, ax=ax) # Adding the colorbar
-    cbar.set_label('Power (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
     plt.savefig(Path(output_folder) / f"imgs/{plot_title}.png")#, transparent=True)
     plt.close(fig)
 
@@ -540,7 +555,8 @@ def hemodynamics(wall_mesh: pv.PolyData,
                  period_seconds: float,
                  timesteps_per_cyc: int,
                  spec_quantity: str,
-                 ROI_center: list[float],
+                 ROI_center_coords: list[float],
+                 ROI_center_csv: str,
                  ROI_radius: int,
                  save_ROI_flag: bool,
                  clamp_threshold_dB: float,
@@ -589,7 +605,7 @@ def hemodynamics(wall_mesh: pv.PolyData,
 
 
     # 3) Parallel reading
-    print (f"Reading in parallel {n_snapshots} files into 1 array of shape [{n_points}, {n_snapshots}] ... \n")
+    print (f"Reading in parallel {n_snapshots} CFD solution files into 1 array of shape [{n_points}, {n_snapshots}] ... \n")
 
     # divide all snapshot files into groups and spread across processes
     time_indices    = list(range(n_snapshots))
@@ -613,34 +629,67 @@ def hemodynamics(wall_mesh: pv.PolyData,
     gc.collect()
 
 
-
     # 4) Computing spectrogram 
     print (f"Now computing {spec_quantity} spectrograms for window length {window_length}...")
 
-    spectrogram_data = compute_spectrogram_wall_pressure(
-        output_folder = output_folder,
-        wall_mesh = wall_mesh,
-        shared_pressure_ctype = shared_pressure_ctype,
-        period_seconds = period_seconds,
-        timesteps_per_cyc = timesteps_per_cyc,
-        spec_quantity = spec_quantity,
-        ROI_center = ROI_center,
-        ROI_radius = ROI_radius,
-        save_ROI_flag = save_ROI_flag,
-        clamp_threshold_dB = clamp_threshold_dB,
-        window_length = window_length,
-        n_fft = n_fft,
-        overlap_frac = overlap_frac,
-        window_type = window_type,
-        pad_mode = pad_mode,
-        detrend = detrend,
+    # Case 1: Coords mode
+    # Single ROI center coordinates provided
+    if ROI_center_coords is not None:
+        ROI_center_coords = np.array(ROI_center_coords, dtype=float)
+
+        spectrogram_data = compute_spectrogram_wall_pressure(
+            output_folder = output_folder,
+            wall_mesh = wall_mesh,
+            shared_pressure_ctype = shared_pressure_ctype,
+            period_seconds = period_seconds,
+            timesteps_per_cyc = timesteps_per_cyc,
+            spec_quantity = spec_quantity,
+            ROI_center_coords = ROI_center_coords,
+            ROI_radius = ROI_radius,
+            ROI_tag = "single",
+            save_ROI_flag = save_ROI_flag,
+            clamp_threshold_dB = clamp_threshold_dB,
+            window_length = window_length,
+            n_fft = n_fft,
+            overlap_frac = overlap_frac,
+            window_type = window_type,
+            pad_mode = pad_mode,
+            detrend = detrend)
+
+    # Case 2: CSV mode
+    # Coordinates of multiple points given in a CSV file
+    if ROI_center_csv is not None:
+        ROI_centers = read_ROI_points_from_csv(ROI_csv)
+        print(f"Loaded {ROI_centers.shape[0]} ROI points from {ROI_csv} ...")
+
+        # Loop over all center points
+        for i, center in enumerate(ROI_centers):
+            ROI_tag = f"pt{i:03d}"
+            spectrogram_data = compute_spectrogram_wall_pressure(
+                output_folder = output_folder,
+                wall_mesh = wall_mesh,
+                shared_pressure_ctype = shared_pressure_ctype,
+                period_seconds = period_seconds,
+                timesteps_per_cyc = timesteps_per_cyc,
+                spec_quantity = spec_quantity,
+                ROI_center_coords = center,
+                ROI_radius = ROI_radius,
+                ROI_tag = ROI_tag,
+                save_ROI_flag = save_ROI_flag,
+                clamp_threshold_dB = clamp_threshold_dB,
+                window_length = window_length,
+                n_fft = n_fft,
+                overlap_frac = overlap_frac,
+                window_type = window_type,
+                pad_mode = pad_mode,
+                detrend = detrend,
     )
 
     # 5) Save spectrogram
     # Creates the output filename (npz format: numpy zipped file)
     cx, cy, cz = map(float, ROI_center)
     center_tag = f"cx{cx:.2f}cy{cy:.2f}cz{cz:.2f}"
-    spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac*100}%_{center_tag}_r{ROI_radius}' 
+    spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{int(overlap_frac*100)}%_{center_tag}_r{ROI_radius}' 
     plot_spectrogram(output_folder, case_name, spectrogram_data, spectrogram_title, clamp_threshold_dB)
 
     
@@ -664,12 +713,16 @@ def parse_args():
     ap.add_argument("--timesteps_per_cyc", type=int,                    help="Number of timesteps per cycle")
     ap.add_argument("--spec_quantity",     type=str,    required=True,  choices=["pressure","velocity"], help="Quantity used for spectrogram")
     
-    # ROI parameters and visualization
-    ap.add_argument("--ROI_center",nargs=3, type=float, metavar=("X","Y","Z"), required=True, help="XYZ coordinates for ROI center to compute spectrogram (mesh units)")
-    ap.add_argument("--ROI_radius",         type=float, required=True,       help="Radius of ROI to compute spectrogram in mesh units (mm in most cases)")
-    ap.add_argument("--save_ROI_flag",      type=bool,  default=False, help="Flag to save ROI.vtp surface file or not")
-    ap.add_argument("--clamp_threshold_dB", type=float, default=-60.0, help="Minimum dB floor for visualization")
-    
+
+    # ROI parameters: It allows for either a single center OR a CSV of center
+    ROI_group = ap.add_mutually_exclusive_group(required=True)
+    ROI_group.add_argument("--ROI_center_coords", nargs=3, type=float, metavar=("X", "Y", "Z"), help="XYZ coordinates for a single ROI center (mesh units)")
+    ROI_group.add_argument("--ROI_center_csv", type=str, help="CSV file with multiple ROI points; coords columns = Points:0/1/2")
+    #ap.add_argument("--ROI_center",nargs=3, type=float, metavar=("X","Y","Z"), required=True, help="XYZ coordinates for ROI center to compute spectrogram (mesh units)")
+    ap.add_argument("--ROI_type",       type=str, choices=["point","sphere","cylinder"], help="Type of ROI shape")
+    ap.add_argument("--ROI_radius",     type=float, required=True, help="Radius of ROI to compute spectrogram in mesh units (mm in most cases)")
+    ap.add_argument("--save_ROI_flag",  type=bool,  default=False, help="Flag to save ROI.vtp surface file or not")
+  
     # Short-time Fourier Transform control (all optional)
     ap.add_argument("--window_length",    type=int,   default=None,     help="Length of FFT window in samples (number of snapshots for each window)")
     ap.add_argument("--n_fft",            type=int,   default=None,     help="FFT length (bins)")
@@ -677,7 +730,8 @@ def parse_args():
     ap.add_argument("--window_type",      type=str,   default="hann",   choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT")
     ap.add_argument("--pad_mode",         type=str,   default="cycle",  choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts")
     ap.add_argument("--detrend",          type=str,   default="linear", help="Detrend option for STFT: 'linear', 'constant', or False")
-
+    ap.add_argument("--clamp_threshold_dB", type=float, default=-60.0, help="Minimum dB floor for visualization")
+    
 
     
     return ap.parse_args()
@@ -721,7 +775,8 @@ def main():
         period_seconds = args.period_seconds,
         timesteps_per_cyc = args.timesteps_per_cyc,
         spec_quantity = args.spec_quantity,
-        ROI_center = args.ROI_center,
+        ROI_center_coords = args.ROI_center_coords,
+        ROI_center_csv = args.ROI_center_csv,
         ROI_radius = args.ROI_radius,
         save_ROI_flag = args.save_ROI_flag,
         clamp_threshold_dB = args.clamp_threshold_dB,

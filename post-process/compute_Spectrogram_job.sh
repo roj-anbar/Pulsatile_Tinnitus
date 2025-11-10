@@ -67,9 +67,10 @@ python compute_Spectrogram.py \
     --period_seconds    0.915 \
     --timesteps_per_cyc 10000 \
     --spec_quantity     "pressure" \
-    --ROI_center        33.6404 -9.21902 -3.76951 \
+    #--ROI_center_coords 33.6404 -9.21902 -3.76951 \
+    --ROI_center_csv    "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data/PTSeg028_base_0p64_centerline_points_clipped.csv" \
     --ROI_radius        3 \
     --window_length     4000 \
-    --overlap_fraction  0.8
+    --overlap_fraction  0.9
 
 wait
