@@ -13,10 +13,10 @@ set -euo pipefail
 CASE=PTSeg028_base_0p64
 BASE_DIR=$SCRATCH/PT/PT_Ramp/PT_cases/$CASE
 MESH="$BASE_DIR/data"
-INPUT="$BASE_DIR/results/${CASE}_ts10000_cy6_saveFreq1"
-OUTPUT="$BASE_DIR/post-process/Spectrogram/cy6_saveFreq1"
+INPUT="$BASE_DIR/results/${CASE}_ts10000_cy6_Q=2t_saveFreq1"
+OUTPUT="$BASE_DIR/post-process/Spectrogram_wall_pressure/cy6"
 
-SCRIPT="$SLURM_SUBMIT_DIR/compute_Spectrograms.py"  # ensure to submit from script dir
+SCRIPT="$SLURM_SUBMIT_DIR/compute_Spectrogram.py"  # ensure to submit from script dir
 
 
 # --------------------------------- Load Modules ----------------------------------------
@@ -33,7 +33,6 @@ export MPLCONFIGDIR=$SCRATCH/.config/mpl
 export PYVISTA_USERDATA_PATH=$SCRATCH/.local/share/pyvista
 export XDG_RUNTIME_DIR=$SCRATCH/.local/temp
 export TEMPDIR=$SCRATCH/.local/temp
-#export TMPDIR=$SCRATCH/.local/temp
 export PYVISTA_OFF_SCREEN=true
 export PYVISTA_USE_PANEL=true
 #export OMP_NUM_THREADS=1
@@ -41,37 +40,41 @@ export PYVISTA_USE_PANEL=true
 
 # ------------------------------ Run Scripts ---------------------------------------------
 
-#python "$SCRIPT" \
-#    --input_folder     "$INPUT" \
-#    --mesh_folder      "$MESH" \
-#    --output_folder    "$OUTPUT" \
-#    --case_name        "$CASE" \
-#    --n_process        "${SLURM_TASKS_PER_NODE}" \
-#    --period           0.915 \
-#    --num_cycles       6 \
-#    --spec_quantity    "pressure" \
-#    --ROI_center_pid   4000 \
-#    --ROI_radius       2
 
+#    --timesteps_per_cyc 10000 \
 
-# (46.2749 -20.3932 10.7888)
-#id=39: (33.6404, -9.21902, -3.76951)
-#--ROI_center_coords 33.6404 -9.21902 -3.76951 \
-
-python compute_Spectrogram.py \
-    --input_folder      "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
-    --mesh_folder       "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
-    --case_name         "PTSeg028_base_0p64" \
-    --output_folder     "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Spectrorgam_wall_pressure/cy6_saveFreq1" \
-    --n_process         192 \
+python "$SCRIPT" \
+    --input_folder      "$INPUT" \
+    --mesh_folder       "$MESH" \
+    --output_folder     "$OUTPUT" \
+    --case_name         "$CASE" \
+    --n_process         "${SLURM_TASKS_PER_NODE}" \
     --period_seconds    0.915 \
-    --timesteps_per_cyc 10000 \
     --spec_quantity     "pressure" \
     --ROI_type          "cylinder" \
-    --ROI_center_csv    "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data/PTSeg028_base_0p64_centerline_points_clipped.csv" \
-    --ROI_radius        6 \
+    --ROI_center_csv    "$MESH/${CASE}_centerline_points.csv" \
+    --ROI_radius        8 \
+    --ROI_height        2 \
     --save_ROI_flag     True \
-    --window_length     4000 \
+    --window_length     5000 \
     --overlap_fraction  0.9
 
+
+#python compute_Spectrogram.py \
+#    --input_folder      "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
+#    --mesh_folder       "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
+#    --case_name         "PTSeg028_base_0p64" \
+#    --output_folder     "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Spectrogram_wall_pressure/cy6_saveFreq1" \
+#    --n_process         192 \
+#    --spec_quantity     "pressure" \
+#    --ROI_type          "sphere" \
+#    --ROI_center_csv    "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data/PTSeg028_base_0p64_centerline_points_clipped.csv" \
+#    --ROI_radius        8 \
+#    --save_ROI_flag     True \
+#    --window_length     5000 \
+#    --overlap_fraction  0.9
+
 wait
+
+
+# 

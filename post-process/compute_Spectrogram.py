@@ -20,21 +20,16 @@
 #       > module load StdEnv/2023 gcc/12.3 python/3.12.4
 #       > source $HOME/virtual_envs/pyvista36/bin/activate
 #       > module load  vtk/9.3.0
-#       > python compute_Spectrograms.py INPUTS (see below)
-#               --input_folder      <path_to_CFD_results_folder> \
-#               --mesh_folder       <path_to_case_mesh_data>     \
-#               --output_folder     <path_to_output_folder>      \
-#               --case_name         PTSeg028_base_0p64           \
-#               --n_process         <ncores>                     \
-#               --period_seconds    0.915                        \
-#               --timesteps_per_cyc 10000                        \
-#               --spec_quantity     "pressure"                   \
-#               --ROI_center_coord        12.3 4.5 6.7          \
-#               --ROI_radius        2                            \
-#               --save_ROI_flag     True                         \
-#               --window_length     1000                         \
-#               --overlap_fraction  0.8                          \
-#               --clamp_threshold_dB -60
+#
+# EXAMPLE CLI (with required arguments):
+#       > python compute_Spectrograms.py \
+#           --input_folder       <path_to_CFD_results_folder> \
+#           --mesh_folder        <path_to_case_mesh_data>     \
+#           --output_folder      <path_to_output_folder>      \
+#           --case_name          PTSeg028_base_0p64           \
+#           --ROI_center_csv     <path_to_ROI_CSV_file>       \
+#           --ROI_radius         4.0                          \
+#
 #
 # INPUTS:
 #   - input_folder        Path to results directory with HDF5 snapshots
@@ -45,16 +40,17 @@
 #   --timesteps_per_cyc   Timesteps per cycle (if omitted, try to parse from filenames with '_ts<int>')
 #   --density             Blood density [kg/m3] (default = 1050 kg/m3)
 #   --spec_quantity       Quantity to compute spectrogram from: 'pressure' or 'velocity'
+#   --ROI_type            (default = 'cylinder')
+#   --ROI_center_coord    X Y Z center of spherical ROI (mesh units).
+#   --ROI_center_csv      Path to CSV file containing the coordinates of multiple points for ROI center.
+#   --ROI_radius          Sphere radius (mesh units). If 0, treat ROI_center as the **point ID** to sample.
+#   --save_ROI_flag       Boolean flag to save the ROI.vtp surface file or not (default = False)
 #   --window_length       STFT window length (samples, i.e., snapshots)
 #   --n_fft               STFT FFT length (bins)
 #   --overlap_frac        STFT noverlap = overlap_frac * window_length --> Overlap fraction between consequent windows (0-1)
 #   --window              STFT window type
 #   --pad_mode            Edge padding ('cycle','constant','odd','even','none')
 #   --detrend             STFT detrend ('linear','constant', or False)
-#   --ROI_center_coord    X Y Z center of spherical ROI (mesh units). If ROI_radius==0, this is a **point ID**.
-#   --ROI_center_csv      Path to CSV file containing the coordinates of multiple points for ROI center.
-#   --ROI_radius          Sphere radius (mesh units). If 0, treat ROI_center as the **point ID** to sample.
-#   --save_ROI_flag       Boolean flag to save the ROI.vtp surface file or not.
 #   --clamp_threshold_dB  Floor for dB image (e.g., -60)
 #   - n_process         Number of worker processes (default: #logical CPUs)
 #
@@ -109,7 +105,7 @@ def view_shared_array(shared_obj):
 
 def extract_timestep_from_h5_filename(h5_file):
         """
-        Extract integer timestep values from filename pattern '*_ts=<int>_...'.
+        Extract integer timestep values of the current file from filename pattern '*_ts=<int>_...'.
         Used to sort snapshot files chronologically.
         """
         stem = h5_file.stem
@@ -119,28 +115,38 @@ def extract_timestep_from_h5_filename(h5_file):
         else:
             raise ValueError(f"Filename '{h5_file}' does not contain expected '_ts=' pattern.")
 
-def extract_time_params_from_h5_filename(h5_file):
+def extract_period_from_h5_filename(h5_file):
         """
-        Extract timesteps_per_cyc and period_seconds values from filename pattern 'Per<float>_*_ts<int>_...'.
+        Extract period_seconds values from filename pattern '_Per<float>'.
+        """
+        stem = h5_file.stem
+
+        # Extract period (ms) if not provided
+        if "_Per" in stem:
+            period_ms = int(stem.split("_Per")[1].split("_")[0]) #period in milliseconds
+            period_seconds = period_ms/1000 #[s]
+        else:
+            raise ValueError(f"Filename '{h5_file}' does not contain expected '_Per' pattern.\nDefine --period_seconds in the CLI.")
+
+
+        return period_seconds
+
+def extract_timesteps_per_cyc_from_h5_filename(h5_file):
+        """
+        Extract timesteps_per_cyc value from filename pattern '_ts<int>'.
         """
         stem = h5_file.stem
 
         # Extract timestep per cycle
         if "_ts" in stem:
-            timestep_per_cyc = int(stem.split("_ts")[1].split("_")[0])
+            timesteps_per_cyc = int(stem.split("_ts")[1].split("_")[0])
         else:
-            raise ValueError(f"Filename '{h5_file}' does not contain expected '_ts' pattern.")
+            raise ValueError(f"Filename '{h5_file}' does not contain expected '_ts' pattern.\nDefine --timestep_per_cyc in the CLI.")
 
-        # Extract period if not provided
-        if "_Per" in stem:
-            period_ms = int(stem.split("_Per")[1].split("_")[0]) #period in milliseconds
-            period_seconds = period_ms/1000 #[s]
-        else:
-            raise ValueError(f"Filename '{h5_file}' does not contain expected '_Per' pattern.")
+        return timesteps_per_cyc
 
 
-        return timestep_per_cyc, period_seconds
-
+# Used to determine STFT params if not given
 def shift_bit_length(x):
     """ Round up to nearest power of 2.
 
@@ -245,9 +251,9 @@ def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_press
       wall_pids  : wall point indices (to slice pressure field)
       h5_files : list of Path objects to HDF5 snapshots
       shared_pressure_ctype  : shared ctypes array; viewed as press_[n_points, n_times]
+
+    Note: Multiply all pressures by density (since oasis return p/rho)
     """
-    # Multiply all pressures by density (since oasis return p/rho)
-    #density = 1050 #[kg/m3]
 
     # Create a shared (across processes) array of wall-pressure time-series
     shared_pressure = view_shared_array(shared_pressure_ctype)
@@ -257,9 +263,6 @@ def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_press
             pressure = np.array(h5['Solution']['p']) * density
             pressure_wall = pressure[wall_pids].flatten() # shape: (n_points,)
             
-            # For each wall point j, set shared_pressure[j, t_index] = p_wall[j]
-            #for j in range(pressure_wall.shape[0]):
-            #    shared_pressure[j][t_index] = pressure_wall[j]
         shared_pressure[:, t_index] = pressure_wall 
 
 
@@ -267,7 +270,7 @@ def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_press
 # ---------------------------------------- Compute Spectrograms -----------------------------------------------------
 
 def assemble_wall_pressure_for_ROI(output_folder_ROIs, wall_mesh, shared_pressure_ctype,
-                                    ROI_type, ROI_tag, ROI_center_coord, ROI_center_normal, ROI_radius, save_ROI_flag=False):
+                                    ROI_type, ROI_tag, ROI_center_coord, ROI_center_normal, ROI_radius, ROI_height = 1, save_ROI_flag=False):
     """
     Select wall points inside a ROI with defined shape (ROI_type) and return the wall-pressure time series for those points.
     Note: Units of the radius should be the same as units of the mesh.
@@ -302,7 +305,7 @@ def assemble_wall_pressure_for_ROI(output_folder_ROIs, wall_mesh, shared_pressur
     elif ROI_type == 'cylinder':
 
         # Note: needed to add clean() to the surface to make it compatible with vtk 'select_enclosed_points'
-        ROI_cylinder = pv.Cylinder(center = ROI_center_coord, direction = ROI_center_normal, radius = ROI_radius, height = 1).clean()
+        ROI_cylinder = pv.Cylinder(center = ROI_center_coord, direction = ROI_center_normal, radius = ROI_radius, height = ROI_height).clean()
 
         # Selects mesh points inside the surface, with a certain tolerance (using pyvista)
         ROI_mesh = wall_mesh.select_enclosed_points(ROI_cylinder, tolerance=0.01)
@@ -311,9 +314,9 @@ def assemble_wall_pressure_for_ROI(output_folder_ROIs, wall_mesh, shared_pressur
         points_in_ROI = ROI_mesh.point_data['SelectedPoints'].astype(bool)
         ROI_pids = np.where(points_in_ROI)[0]
 
-        # Save the sphere to a .vtp file (for visualization in paraview later)
+        # Save the cylinder to a .vtp file (for visualization in paraview later)
         if save_ROI_flag:
-            ROI_cylinder.save(f'{output_folder_ROIs}/{ROI_tag}_{ROI_type}_c{ROI_center_coord}_r{ROI_radius}.vtp') 
+            ROI_cylinder.save(f'{output_folder_ROIs}/{ROI_tag}_{ROI_type}_c{ROI_center_coord}_r{ROI_radius}_h{ROI_height}.vtp') 
 
     # For any other types    
     else:
@@ -325,7 +328,7 @@ def assemble_wall_pressure_for_ROI(output_folder_ROIs, wall_mesh, shared_pressur
         raise ValueError("No wall points found in ROI. Try increasing --ROI_radius (check mesh units: mm vs m) "
                         "or choose a different --ROI_center_coord. ")
     else:
-        print(f"Found {ROI_pids.size} wall points in {ROI_tag}...")
+        print(f"Found {ROI_pids.size} wall points in {ROI_tag} ...")
 
     # Assemble wall pressure for ROI points
     wall_pressure = view_shared_array(shared_pressure_ctype) # (n_points, n_times)
@@ -470,6 +473,7 @@ def compute_spectrogram_wall_pressure(output_folder_files,
                                       ROI_center_coord,
                                       ROI_center_normal,
                                       ROI_radius,
+                                      ROI_height,
                                       ROI_tag,
                                       save_ROI_flag,
                                       window_length,
@@ -487,7 +491,7 @@ def compute_spectrogram_wall_pressure(output_folder_files,
     if spec_quantity == 'pressure':
         # Assembles data for the ROI
         wall_pressure_ROI = assemble_wall_pressure_for_ROI(output_folder_ROIs, wall_mesh, shared_pressure_ctype,
-                            ROI_type, ROI_tag, ROI_center_coord, ROI_center_normal, ROI_radius, save_ROI_flag)
+                            ROI_type, ROI_tag, ROI_center_coord, ROI_center_normal, ROI_radius, ROI_height, save_ROI_flag)
         #print(f"Wall_pressure_ROI shape: {wall_pressure_ROI.shape}")
 
         n_snapshots = wall_pressure_ROI.shape[1] # total number of snapshots
@@ -589,7 +593,8 @@ def hemodynamics(wall_mesh: pv.PolyData,
                  ROI_type: str,
                  ROI_center_coord: list[float],
                  ROI_center_csv: str,
-                 ROI_radius: int,
+                 ROI_radius: float,
+                 ROI_height: float,
                  save_ROI_flag: bool,
                  clamp_threshold_dB: float,
                  window_length: int,
@@ -622,9 +627,13 @@ def hemodynamics(wall_mesh: pv.PolyData,
 
     
     # Obtain simulation temporal parameters from filename (if not given as input argument)
-    if timesteps_per_cyc is None or period_seconds is None:
-        timesteps_per_cyc, period_seconds = extract_time_params_from_h5_filename(snapshot_h5_files[0])
+    if timesteps_per_cyc is None:
+        timesteps_per_cyc = extract_timesteps_per_cyc_from_h5_filename(snapshot_h5_files[0])
+        print (f"Found timesteps-per-cycle = {timesteps_per_cyc} from HDF5 file names. \n")
 
+    if period_seconds is None:
+        period_seconds = extract_period_from_h5_filename(snapshot_h5_files[0])
+        print (f"Found period (s) = {period_seconds} from HDF5 file names. \n")
     
     # Wall point IDs and sizes
     wall_pids = wall_mesh.point_data['vtkOriginalPtIds']
@@ -638,6 +647,7 @@ def hemodynamics(wall_mesh: pv.PolyData,
 
     # 3) Parallel reading
     print (f"Reading in parallel {n_snapshots} HDF5 files into 1 array of shape [{n_points}, {n_snapshots}] ... \n")
+    
 
     # divide all snapshot files into groups and spread across processes
     time_indices    = list(range(n_snapshots))
@@ -663,9 +673,9 @@ def hemodynamics(wall_mesh: pv.PolyData,
 
     # 4) Computing spectrogram 
     print (f"Now computing {spec_quantity} spectrograms for {ROI_type} ROIs with STFT parameters: \n \
-        window_length (samples) = {window_length} \n \
-        n_fft         (samples) = {n_fft} \n \
-        overlap_fraction        = {overlap_frac} \n")
+    window_length (samples) = {window_length} \n \
+    n_fft         (samples) = {n_fft} \n \
+    overlap_fraction        = {overlap_frac} \n")
 
     # Case 1: Coords mode
     # Single ROI center coordinates provided
@@ -685,6 +695,7 @@ def hemodynamics(wall_mesh: pv.PolyData,
             ROI_center_coord = ROI_center_coord,
             ROI_center_normal = None,
             ROI_radius = ROI_radius,
+            ROI_height = ROI_height,
             ROI_tag = "single",
             save_ROI_flag = save_ROI_flag,
             clamp_threshold_dB = clamp_threshold_dB,
@@ -699,7 +710,7 @@ def hemodynamics(wall_mesh: pv.PolyData,
         # Creates the output filename (npz format: numpy zipped file)
         cx, cy, cz = map(float, ROI_center_coord)
         center_tag = f"cx{cx:.2f}cy{cy:.2f}cz{cz:.2f}"
-        spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac)}_{center_tag}_r{ROI_radius}' 
+        spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac}_r{ROI_radius}_h{ROI_height}' 
         
         plot_spectrogram(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_title, clamp_threshold_dB)
 
@@ -708,10 +719,10 @@ def hemodynamics(wall_mesh: pv.PolyData,
     # Coordinates of multiple points given in a CSV file
     if ROI_center_csv is not None:
         ROI_centers, ROI_normals = read_ROI_points_from_csv(ROI_center_csv)
-        print(f"Loaded {ROI_centers.shape[0]} ROI points from {ROI_center_csv}.")
+        print(f"Loaded {ROI_centers.shape[0]} ROI points from {ROI_center_csv}: \n")
 
         # Loop over all center points (or with a stride set below)
-        for i in range(0, len(ROI_centers), 5):
+        for i in range(0, len(ROI_centers), 1):
             
             center = ROI_centers[i]
             normal = ROI_normals[i]
@@ -730,6 +741,7 @@ def hemodynamics(wall_mesh: pv.PolyData,
                 ROI_center_coord = center,
                 ROI_center_normal = normal,
                 ROI_radius = ROI_radius,
+                ROI_height = ROI_height,
                 ROI_tag = ROI_tag,
                 save_ROI_flag = save_ROI_flag,
                 clamp_threshold_dB = clamp_threshold_dB,
@@ -774,9 +786,9 @@ def parse_args():
     ROI_group = ap.add_mutually_exclusive_group(required=True)
     ROI_group.add_argument("--ROI_center_coord", nargs=3, type=float, metavar=("X", "Y", "Z"), help="XYZ coordinates for a single ROI center (mesh units)")
     ROI_group.add_argument("--ROI_center_csv", type=str, help="CSV file with multiple ROI points; coords columns = Points:0/1/2")
-    #ap.add_argument("--ROI_center",nargs=3, type=float, metavar=("X","Y","Z"), required=True, help="XYZ coordinates for ROI center to compute spectrogram (mesh units)")
-    ap.add_argument("--ROI_type",       type=str, choices=["point","sphere","cylinder"], help="Type of ROI shape")
-    ap.add_argument("--ROI_radius",     type=float, required=True, help="Radius of ROI to compute spectrogram in mesh units (mm in most cases)")
+    ap.add_argument("--ROI_type",       type=str,   default="cylinder", choices=["point","sphere","cylinder"], help="Type of ROI shape")
+    ap.add_argument("--ROI_radius",     type=float, required=True, help="Radius of ROI in mesh units (mm in most cases)")
+    ap.add_argument("--ROI_height",     type=float, default=1,     help="Height of cylindrical ROI in mesh units (mm in most cases)")
     ap.add_argument("--save_ROI_flag",  type=bool,  default=False, help="Flag to save ROI.vtp surface file or not")
   
     # Short-time Fourier Transform control (all optional)
@@ -840,6 +852,7 @@ def main():
         ROI_center_coord = args.ROI_center_coord,
         ROI_center_csv = args.ROI_center_csv,
         ROI_radius = args.ROI_radius,
+        ROI_height = args.ROI_height,
         save_ROI_flag = args.save_ROI_flag,
         clamp_threshold_dB = args.clamp_threshold_dB,
         window_length = args.window_length,
