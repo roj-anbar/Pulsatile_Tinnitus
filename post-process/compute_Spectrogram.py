@@ -539,6 +539,10 @@ def plot_spectrogram(output_folder_files, output_folder_imgs, case_name, spectro
     freqs = spectrogram_data['freqs']
     spectrogram_signal = spectrogram_data['S_avg_dB']
 
+    # JUST FOR PT_RAMP:
+    # Create bins to show Q_inlet (instead of time) --> specify based on the ramp slope
+    bins_Q = 2*bins # Q_in = 2*t
+
     # Clamp values below a certain dB threshold
     spectrogram_signal[spectrogram_signal < clamp_threshold_dB] = clamp_threshold_dB
 
@@ -553,11 +557,12 @@ def plot_spectrogram(output_folder_files, output_folder_imgs, case_name, spectro
 
 
     fig, ax = plt.subplots(1,1, figsize=(14,8))
-    spectrogram = ax.pcolormesh(bins, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
+    spectrogram = ax.pcolormesh(bins_Q, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
     
     # Set axis
     ax.set_title(plot_title)
-    ax.set_xlabel('Time (s)', fontweight='bold', labelpad=0)
+    #ax.set_xlabel('Time (s)', fontweight='bold', labelpad=0)
+    ax.set_xlabel('Q_inlet (ml/s)', fontweight='bold', labelpad=0)
     ax.set_ylabel('Frequency (Hz)', fontweight='bold', labelpad=0)
     ax.set_xlim([1, 5])
     ax.set_ylim([0, 1500])
