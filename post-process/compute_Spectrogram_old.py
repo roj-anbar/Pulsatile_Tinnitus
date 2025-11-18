@@ -88,10 +88,6 @@ import matplotlib.pyplot as plt
 warnings.filterwarnings("ignore", category=DeprecationWarning) 
 
 
-# ======================================================================================================
-# GENERAL UTILITIES
-# ======================================================================================================
-
 
 # -------------------------------- Shared-memory Utilities ---------------------------------------------
 
@@ -148,6 +144,42 @@ def extract_timesteps_per_cyc_from_h5_filename(h5_file):
             raise ValueError(f"Filename '{h5_file}' does not contain expected '_ts' pattern.\nDefine --timestep_per_cyc in the CLI.")
 
         return timesteps_per_cyc
+
+
+# Used to determine STFT params if not given
+def shift_bit_length(x):
+    """ Round up to nearest power of 2.
+
+    Notes: See https://stackoverflow.com/questions/14267555/  
+    find-the-smallest-power-of-2-greater-than-n-in-python  
+    """
+    return 1<<(x-1).bit_length()
+
+def read_ROI_points_from_csv(csv_path: str) -> np.ndarray:
+    """
+    Read a CSV of ROI points with columns:
+    - Points:0, Points:1, Points:2
+    - FrenetTangent:0, FrenetTangent:1, FrenetTangent:2
+    Uses header names to locate columns.
+    Returns
+    - coords  : (n_points, 3) array of XYZ coordinates
+    - normals : (n_points, 3) array of normals
+    """
+
+    data = np.genfromtxt(csv_path, delimiter=",", names=True)
+
+    # Field names from the header (quotes in CSV are handled by genfromtxt)
+    #column_names = data.dtype.names
+
+    # Change the header names for your dataset
+    x = data['Points0']; y = data['Points1']; z = data['Points2']
+    normx = data['FrenetTangent0']; normy = data['FrenetTangent1']; normz = data['FrenetTangent2']
+
+
+    coords = np.vstack([x,y,z]).T
+    normals = np.vstack([normx,normy,normz]).T
+
+    return coords, normals
 
 
 # ---------------------------------------- Mesh Utilities -----------------------------------------------------
@@ -207,128 +239,35 @@ def assemble_volume_mesh(mesh_file):
 
     return vol_mesh, cells
 
+# --------------------------------- Parallel File Reader -----------------------------------------------
 
 
-# ---------------------------------- Fourier Transfor Utilities -------------------------------------------
-# Used to determine STFT params if not given
-def shift_bit_length(x):
-    """ Round up to nearest power of 2.
-
-    Notes: See https://stackoverflow.com/questions/14267555/  
-    find-the-smallest-power-of-2-greater-than-n-in-python  
+def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype, density=1050):
     """
-    return 1<<(x-1).bit_length()
+    Reads a *chunk* of time-snapshot HDF5 files, extracts wall pressures, and writes into the shared array.
 
+    Arguments:
+      file_ids   : list of snapshot indices to read
+      wall_pids  : wall point indices (to slice pressure field)
+      h5_files : list of Path objects to HDF5 snapshots
+      shared_pressure_ctype  : shared ctypes array; viewed as press_[n_points, n_times]
 
-def short_time_fourier(data,
-                        sampling_rate: float,
-                        window_type: str = 'hann',
-                        window_length: int | None = None,
-                        overlap_frac: float = 0.75,
-                        n_fft: int | None = None,
-                        pad_mode: str | None = 'cycle',
-                        detrend: str | bool = 'linear'):
-
+    Note: Multiply all pressures by density (since oasis return p/rho)
     """
-    Compute the windowed FFT for a timeseries data.
-    All scipy.signal STFT parameters are set to defaults if they are None.
-    See here for scipy.signal.stft documentation:  https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.stft.html 
-   
+
+    # Create a shared (across processes) array of wall-pressure time-series
+    shared_pressure = view_shared_array(shared_pressure_ctype)
     
-    Arguments: 
-        data: Timeseries data for the point of interest -> shape (1, n_frames)
-        sampling_rate: Number of samples per second [Hz]
-        window_type : Window type for stft
-        window_length (nperseg): Number of time samples in each window 
-        overlap_frca: Fraction (0-1) of overlap between segments (default = 0.75)
-        n_fft: Number of FFT bins in each segment (>= window_length) -> if a zero padded FFT is desired, if None, is equal to window_length (nperseg) 
-        pad_mode : Optional padding strategy to reduce edge artifacts {'cycle','constant','odd','even',None}
-        detrend : {'linear','constant', False}
-    
-    Returns:
-        array: Average spectrogram of data.
-        S_db : Average power spectrogram in dB -> shape (n_freqs, n_frames)
-        bins : Time vector in seconds -> shape (n_frames,)
-        freqs: Frequency vector in [Hz] -> shape (n_freqs,)
-        
-    """
-
-
-    n_frames = data.shape[1]
-
-    # Define defaults
-    if window_length is None: window_length = shift_bit_length(int(n_frames / 10))
-    if n_fft is None: n_fft = window_length
-    if overlap_frac is None: overlap_frac = 0.75
-
-    if pad_mode == 'cycle':
-        pad_size = window_length // 2
-        front_pad = data[:,-pad_size:]
-        back_pad = data[:,:pad_size]
-        data = np.concatenate([front_pad, data, back_pad], axis=1)
-        boundary = None 
-
-    elif pad_mode == 'constant':
-        pad_size = window_length // 2
-        front_pad = np.zeros((data.shape[0], pad_size)) + data[:,0][:,None]
-        back_pad = np.zeros((data.shape[0], pad_size)) + data[:,-1][:,None]
-        data = np.concatenate([front_pad, data, back_pad], axis=1)
-        boundary = None 
-
-    elif pad_mode in ['odd', 'even', None]:
-        boundary = pad_mode
-    
-    else:
-        print('Warning: Problem with pad_mode!')
-
-    stft_params = {
-        'fs' : sampling_rate,
-        'window' : window_type,
-        'nperseg' : window_length,
-        'noverlap' : int(overlap_frac * window_length),   # number of overlapping samples
-        'nfft' : n_fft,
-        'detrend' : detrend,
-        'return_onesided' : True,
-        'boundary' : boundary,
-        'padded' : True,
-        'axis' : -1,
-        }
-
-
-    # All the below S arrays have shape (n_freq, n_frames)
-    freqs, bins, Z = stft(x=data, **stft_params) #data[0] will be the first row
-
-    return freqs, bins, Z
+    for t_index in file_ids:
+        with h5py.File(h5_files[t_index], 'r') as h5:
+            pressure = np.array(h5['Solution']['p']) * density
+            pressure_wall = pressure[wall_pids].flatten() # shape: (n_points,)
+            
+        shared_pressure[:, t_index] = pressure_wall 
 
 
 
-# ---------------------------------- ROI Utilities -------------------------------------------
-def read_ROI_points_from_csv(csv_path: str) -> np.ndarray:
-    """
-    Read a CSV of ROI points with columns:
-    - Points:0, Points:1, Points:2
-    - FrenetTangent:0, FrenetTangent:1, FrenetTangent:2
-    Uses header names to locate columns.
-    Returns
-    - coords  : (n_points, 3) array of XYZ coordinates
-    - normals : (n_points, 3) array of normals
-    """
-
-    data = np.genfromtxt(csv_path, delimiter=",", names=True)
-
-    # Field names from the header (quotes in CSV are handled by genfromtxt)
-    #column_names = data.dtype.names
-
-    # Change the header names for your dataset
-    x = data['Points0']; y = data['Points1']; z = data['Points2']
-    normx = data['FrenetTangent0']; normy = data['FrenetTangent1']; normz = data['FrenetTangent2']
-
-
-    coords = np.vstack([x,y,z]).T
-    normals = np.vstack([normx,normy,normz]).T
-
-    return coords, normals
-
+# ---------------------------------------- Compute Spectrograms -----------------------------------------------------
 
 def assemble_wall_pressure_for_ROI(output_folder_ROIs, wall_mesh, shared_pressure_ctype,
                                     ROI_type, ROI_tag, ROI_center_coord, ROI_center_normal, ROI_radius, ROI_height = 1, save_ROI_flag=False):
@@ -399,118 +338,7 @@ def assemble_wall_pressure_for_ROI(output_folder_ROIs, wall_mesh, shared_pressur
 
 
 
-# --------------------------------- Parallel File Reader -----------------------------------------------
-
-
-def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype, density=1050):
-    """
-    Reads a *chunk* of time-snapshot HDF5 files, extracts wall pressures, and writes into the shared array.
-
-    Arguments:
-      file_ids   : list of snapshot indices to read
-      wall_pids  : wall point indices (to slice pressure field)
-      h5_files : list of Path objects to HDF5 snapshots
-      shared_pressure_ctype  : shared ctypes array; viewed as press_[n_points, n_times]
-
-    Note: Multiply all pressures by density (since oasis return p/rho)
-    """
-
-    # Create a shared (across processes) array of wall-pressure time-series
-    shared_pressure = view_shared_array(shared_pressure_ctype)
-    
-    for t_index in file_ids:
-        with h5py.File(h5_files[t_index], 'r') as h5:
-            pressure = np.array(h5['Solution']['p']) * density
-            pressure_wall = pressure[wall_pids].flatten() # shape: (n_points,)
-            
-        shared_pressure[:, t_index] = pressure_wall 
-
-
-
-
-# ======================================================================================================
-# HEMODYNAMICS CALCULATIONS
-# ======================================================================================================
-
-
-# ---------------------------------------- Compute SPI -----------------------------------------------------
-
-def filter_SPI(signal, sampling_rate, window_length, overlap_frac, ind_freq_zero, ind_freq_below_cutoff, mean_tag):
-    """
-    Compute SPI for a single time series using frequency masks in W_low_cut.
-
-    Arguments:
-      signal                : 1D numpy array of length n_times (pressure vs time at a wall point)
-      ind_freq_zero         : index of where frequency is zero --> np.where(|f| == 0)
-      ind_freq_below_cutoff : index of where frequency is below cutoff freq --> np.where(|f| < f_cutoff)
-      mean_tag              : choose between "withmean" or "withoutmean" -> use raw signal; otherwise subtract mean
-
-    """
-
-    # Subtract mean unless instructed otherwise
-    if mean_tag == "withoutmean":
-        signal = signal - np.mean(signal)
-    
-    fft_signal = short_time_fourier(signal, sampling_rate, window_length, overlap_frac)
-
-    # Filter any amplitude corresponding to frequency equal to 0Hz
-    fft_signal_above_zero = fft_signal.copy()
-    fft_signal_above_zero[ind_freq_zero] = 0
-
-    # Filter any amplitude corresponding to frequency lower than cutoff frequecy (f_cutoff=25Hz)
-    fft_signal_below_cutoff = fft_signal.copy()
-    fft_signal_below_cutoff[ind_freq_below_cutoff] = 0
-
-    # Compute the absolute value (power)
-    Power_below_cutoff = np.sum ( np.power( np.absolute(fft_signal_below_cutoff),2))
-    Power_above_zero   = np.sum ( np.power( np.absolute(fft_signal_above_zero),2))
-    
-    if Power_above_zero < 1e-5:
-        return 0
-    
-    return Power_below_cutoff/Power_above_zero
-
-
-def compute_SPI(pids, shared_pressure_ctype, shared_SPI_ctype, sampling_rate, window_length, overlap_frac,
-                ind_freq_zero, ind_freq_below_cutoff, with_mean=False):
-    """Computes windowed SPI for the given points (pids) and writes back into shared SPI array."""
-    
-    pressure = view_shared_array(shared_pressure_ctype) # (n_points, n_frames)
-    SPI      = view_shared_array(shared_SPI_ctype)      # (n_points,)
-
-    for point in pids:
-        pressure_window = pressure[point, start_idx:end_idx]
-        SPI[point] = filter_SPI(pressure_window, ind_freq_zero, ind_freq_below_cutoff, "withmean" if with_mean else "withoutmean")
-
-
-
-def compute_SPI_wall_pressure(output_folder_files,
-                                      output_folder_imgs,
-                                      output_folder_ROIs,
-                                      wall_mesh,
-                                      shared_pressure_ctype,
-                                      period_seconds,
-                                      timesteps_per_cyc,
-                                      spec_quantity,
-                                      ROI_type,
-                                      ROI_center_coord,
-                                      ROI_center_normal,
-                                      ROI_radius,
-                                      ROI_height,
-                                      ROI_tag,
-                                      save_ROI_flag,
-                                      window_length,
-                                      n_fft=None,
-                                      overlap_frac=None,
-                                      window_type='hann',
-                                      pad_mode='cycle',
-                                      detrend='linear',
-
-
-# ---------------------------------------- Compute Spectrograms -----------------------------------------------------
-
-
-def average_spectrogram_in_ROI(data_ROI,
+def average_spectrogram(data,
                         sampling_rate: float,
                         window_type: str = 'hann',
                         window_length: int | None = None,
@@ -521,13 +349,73 @@ def average_spectrogram_in_ROI(data_ROI,
                         print_progress: bool = False):
 
     """
-    Compute the average spectrogram over multiple points and return the average value in dB scale.        
+    Compute the power spectrogram over multiple points and return the average value in dB scale.
+    All scipy.signal STFT parameters are set to defaults if they are None.
+    See here for scipy.signal.stft documentation:  https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.stft.html 
+   
+    
+    Arguments: 
+        data: Timeseries data for all ROI points -> shape (n_points, n_snapshots)
+        sampling_rate: Number of samples per second [Hz]
+        window_type : Window type for stft
+        window_length (nperseg): Number of time samples in each window 
+        overlap_frca: Fraction (0-1) of overlap between segments (default = 0.75)
+        n_fft: Number of FFT bins in each segment (>= window_length) -> if a zero padded FFT is desired, if None, is equal to window_length (nperseg) 
+        pad_mode : Optional padding strategy to reduce edge artifacts {'cycle','constant','odd','even',None}
+        detrend : {'linear','constant', False}
+    
+    Returns:
+        array: Average spectrogram of data.
+        S_db : Average power spectrogram in dB -> shape (n_freqs, n_frames)
+        bins : Time vector in seconds -> shape (n_frames,)
+        freqs: Frequency vector in [Hz] -> shape (n_freqs,)
+        
     """
 
-    # Note: All the below S arrays have shape (n_freq, n_frames)
+
+    n_frames = data.shape[1]
+
+    # Define defaults
+    if window_length is None: window_length = shift_bit_length(int(n_frames / 10))
+    if n_fft is None: n_fft = window_length
+    if overlap_frac is None: overlap_frac = 0.75
+
+    if pad_mode == 'cycle':
+        pad_size = window_length // 2
+        front_pad = data[:,-pad_size:]
+        back_pad = data[:,:pad_size]
+        data = np.concatenate([front_pad, data, back_pad], axis=1)
+        boundary = None 
+
+    elif pad_mode == 'constant':
+        pad_size = window_length // 2
+        front_pad = np.zeros((data.shape[0], pad_size)) + data[:,0][:,None]
+        back_pad = np.zeros((data.shape[0], pad_size)) + data[:,-1][:,None]
+        data = np.concatenate([front_pad, data, back_pad], axis=1)
+        boundary = None 
+
+    elif pad_mode in ['odd', 'even', None]:
+        boundary = pad_mode
     
-    # Obtain values for the first point
-    freqs, bins, Z0 = short_time_fourier(data_ROI[0], window_type, window_length, overlap_frac, n_fft, pad_mode, detrend)
+    else:
+        print('Warning: Problem with pad_mode!')
+
+    stft_params = {
+        'fs' : sampling_rate,
+        'window' : window_type,
+        'nperseg' : window_length,
+        'noverlap' : int(overlap_frac * window_length),   # number of overlapping samples
+        'nfft' : n_fft,
+        'detrend' : detrend,
+        'return_onesided' : True,
+        'boundary' : boundary,
+        'padded' : True,
+        'axis' : -1,
+        }
+
+
+    # All the below S arrays have shape (n_freq, n_frames)
+    freqs, bins, Z0 = stft(x=data[0], **stft_params) #data[0] will be the first row
 
     S_sum = np.zeros_like(Z0, dtype=np.float64)
 
@@ -540,7 +428,7 @@ def average_spectrogram_in_ROI(data_ROI,
     # Case 2: Multiple points ROI
     else:
         for point in range(data.shape[0]):
-            _, _, Z_point = short_time_fourier(data_ROI[point], window_type, window_length, overlap_frac, n_fft, pad_mode, detrend)
+            _, _, Z_point = stft(x=data[point], **stft_params)
             S_point_power = np.abs(Z_point)**2
             S_sum += S_point_power 
         
@@ -597,13 +485,14 @@ def compute_spectrogram_wall_pressure(output_folder_files,
                                       clamp_threshold_dB=None):
 
     """
-    Assembles ROI time series and computes an average power spectrogram over multiple points in dB scale with configurable STFT parameters.
+    Assemble ROI time series and compute an average spectrogram (in dB) with configurable STFT parameters.
     """
     
     if spec_quantity == 'pressure':
         # Assembles data for the ROI
         wall_pressure_ROI = assemble_wall_pressure_for_ROI(output_folder_ROIs, wall_mesh, shared_pressure_ctype,
                             ROI_type, ROI_tag, ROI_center_coord, ROI_center_normal, ROI_radius, ROI_height, save_ROI_flag)
+        #print(f"Wall_pressure_ROI shape: {wall_pressure_ROI.shape}")
 
         n_snapshots = wall_pressure_ROI.shape[1] # total number of snapshots
         sampling_rate = timesteps_per_cyc/period_seconds # [Hz]
@@ -615,7 +504,7 @@ def compute_spectrogram_wall_pressure(output_folder_files,
         #overlap_frac = 0.75
         
         # Compute average spectrogram
-        spectrogram_data = average_spectrogram_in_ROI(
+        spectrogram_data = average_spectrogram(
                         data=wall_pressure_ROI,
                         sampling_rate = sampling_rate,
                         n_fft = n_fft,
@@ -624,7 +513,7 @@ def compute_spectrogram_wall_pressure(output_folder_files,
                         window_type = window_type,
                         pad_mode = pad_mode,
                         detrend = detrend)
-        
+
 
         #wall_mesh.spectrogram_data['p'] = spectrogram_data
         
@@ -691,11 +580,6 @@ def plot_spectrogram(output_folder_files, output_folder_imgs, case_name, spectro
     plt.close(fig)
 
 
-
-
-# ======================================================================================================
-# MAIN
-# ======================================================================================================
 
 
 # ---------------------------------------- Compute Hemodynamics Metrics -------------------------------------

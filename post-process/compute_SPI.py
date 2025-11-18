@@ -227,8 +227,6 @@ def compute_SPI(pids, shared_pressure_ctype, shared_SPI_ctype,
         SPI[point] = filter_SPI(pressure_window, ind_freq_zero, ind_freq_below_cutoff, "withmean" if with_mean else "withoutmean")
 
 
-
-
 # ---------------------------------------- Compute Hemodynamics Metrics -------------------------------------
 
 def hemodynamics(wall_mesh: pv.PolyData,
