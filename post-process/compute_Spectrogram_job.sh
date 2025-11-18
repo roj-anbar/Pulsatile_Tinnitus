@@ -60,19 +60,20 @@ python "$SCRIPT" \
     --overlap_fraction  0.9
 
 
-#python compute_Spectrogram.py \
-#    --input_folder      "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
-#    --mesh_folder       "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
-#    --case_name         "PTSeg028_base_0p64" \
-#    --output_folder     "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Spectrogram_wall_pressure/cy6_saveFreq1" \
-#    --n_process         192 \
-#    --spec_quantity     "pressure" \
-#    --ROI_type          "sphere" \
-#    --ROI_center_csv    "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data/PTSeg028_base_0p64_centerline_points_clipped.csv" \
-#    --ROI_radius        8 \
-#    --save_ROI_flag     True \
-#    --window_length     5000 \
-#    --overlap_fraction  0.9
+python compute_Spectrogram2.py \
+    --input_folder      "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
+    --mesh_folder       "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
+    --case_name         "PTSeg028_base_0p64" \
+    --output_folder     "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Spectrogram_wall_pressure/cy6_test" \
+    --n_process         192 \
+    --spec_quantity     "pressure" \
+    --ROI_type          "sphere" \
+    --ROI_center_csv    "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data/PTSeg028_base_0p64_centerline_points.csv" \
+    --ROI_radius        8 \
+    --ROI_height        2 \
+    --save_ROI_flag     True \
+    --window_length     5000 \
+    --overlap_fraction  0.9
 
 wait
 
