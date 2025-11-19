@@ -342,7 +342,7 @@ def short_time_fourier(data,
         data = np.concatenate([front_pad, data, back_pad], axis=1)
         boundary = None 
 
-    elif pad_mode in ['odd', 'even', None]:
+    elif pad_mode in ['odd', 'even', 'none', None]:
         boundary = pad_mode
     
     else:
@@ -487,8 +487,6 @@ def calculate_average_spectrogram_for_one_ROI(
                                       output_folder_ROIs,
                                       wall_mesh,
                                       wall_pressure,
-                                      period_seconds,
-                                      timesteps_per_cyc,
                                       spec_quantity,
                                       ROI_params,
                                       STFT_params,
@@ -499,6 +497,7 @@ def calculate_average_spectrogram_for_one_ROI(
     """
     
     # Unpack input parameters
+    sampling_rate = STFT_params.get("sampling_rate")
     window_length = STFT_params.get("window_length")
     overlap_frac  = STFT_params.get("overlap_frac")
     n_fft         = STFT_params.get("n_fft")
@@ -512,7 +511,6 @@ def calculate_average_spectrogram_for_one_ROI(
 
         n_points = wall_pressure_ROI.shape[0]
         n_snapshots = wall_pressure_ROI.shape[1] # total number of snapshots
-        sampling_rate = timesteps_per_cyc/period_seconds # [Hz]
 
 
         # If window_length is not defined, divide the signal by 10 by default 
@@ -651,6 +649,10 @@ def compute_and_save_spectrogram_for_all_ROIs(
     n_fft            = STFT_params.get("n_fft")
 
 
+    # Cmpute sampling rate and add to STFT_params
+    sampling_rate = timesteps_per_cyc/period_seconds # Hz
+    STFT_params["sampling_rate"] = sampling_rate 
+
     print (f"Now computing {spec_quantity} spectrograms for {ROI_type} ROIs with STFT parameters: \n \
     window_length (samples) = {window_length} \n \
     n_fft         (samples) = {n_fft} \n \
@@ -671,8 +673,6 @@ def compute_and_save_spectrogram_for_all_ROIs(
             output_folder_ROIs = output_folder_ROIs,
             wall_mesh = wall_mesh,
             wall_pressure = wall_pressure,
-            period_seconds = period_seconds,
-            timesteps_per_cyc = timesteps_per_cyc,
             spec_quantity = spec_quantity,
             clamp_threshold_dB = clamp_threshold_dB,
             ROI_params = ROI_params,
@@ -712,8 +712,6 @@ def compute_and_save_spectrogram_for_all_ROIs(
                 output_folder_ROIs = output_folder_ROIs,
                 wall_mesh = wall_mesh,
                 wall_pressure = wall_pressure,
-                period_seconds = period_seconds,
-                timesteps_per_cyc = timesteps_per_cyc,
                 spec_quantity = spec_quantity,
                 clamp_threshold_dB = clamp_threshold_dB,
                 ROI_params = ROI_params,
@@ -732,7 +730,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
             plot_spectrogram_for_one_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_title, clamp_threshold_dB)
 
     
-    print (f'\nFinished saving spetrograms.')
+    print (f'\nFinished computing and saving spetrograms.')
 
 
 

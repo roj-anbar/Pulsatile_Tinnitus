@@ -73,7 +73,7 @@ python compute_Spectrogram.py \
     --ROI_height        2 \
     --save_ROI_flag     True \
     --window_length     5000 \
-    --overlap_fraction  0.9
+    --overlap_fraction  0.5
 
 wait
 
