@@ -46,15 +46,26 @@ python "$SCRIPT" \
     --case_name     "$CASE" \
     --output_folder "$OUTPUT" \
     --n_process     "${SLURM_TASKS_PER_NODE}" \
-    --window_size   4000 \
+    --window_length   4000 \
     --window_overlap 0.75
 
+python compute_SPI_old.py \
+    --input_folder      "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
+    --mesh_folder       "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
+    --case_name         "PTSeg028_base_0p64" \
+    --output_folder     "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/SPI_wall_pressure/cy6_test" \
+    --n_process         192 \
+    --window_length     5000 \
+    --window_overlap    0.9
 
-#python compute_Qcriterion.py \
-#    --input_folder  "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg106_base_0p64/results/PTSeg106_base_0p64_ts10000_cy6_saveFreq5" \
-#    --mesh_folder   "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg106_base_0p64/data" \
-#    --case_name     "PTSeg106_base_0p64" \
-#    --output_folder "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg106_base_0p64/post-process/Qcriterion/cy6_saveFreq5/" \
-#    --n_process     192
+#python compute_SPI.py \
+#    --input_folder      "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
+#    --mesh_folder       "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
+#    --case_name         "PTSeg028_base_0p64" \
+#    --output_folder     "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/SPI_wall_pressure/cy6_test" \
+#    --n_process         192 \
+#    --window_length     5000 \
+#    --overlap_fraction  0.5
+
 
 wait

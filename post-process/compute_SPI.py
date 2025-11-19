@@ -1,54 +1,64 @@
 # -----------------------------------------------------------------------------------------------------------------------
-# compute-post-metrics_SPI.py 
-# To calculate windowed Spectral Power Index (SPI) of pressure on vessel wall from Oasis/BSLSolver CFD outputs.
+# compute_Spectrograms.py 
+# To compute the average power spectrogram in dB scale of pressure or velocity from Oasis/BSLSolver CFD outputs.
 #
 # __author__: Rojin Anbarafshan <rojin.anbar@gmail.com>
 # __date__:   2025-10
 #
 # PURPOSE:
 #   - This script is part of the BSL post-processing pipeline.
-#   - It computes windowed SPI for pressure at each wall point and saves the resultant array 'SPI_p' on the surface to a VTP file.
+#   - Reads CFD HDF5 snapshots for all timesteps, extracts the quantity of interest (wall pressure/velocity) time-series,
+#     computes ROI-averaged spectrograms, and saves both .npz data and .png images.
 #
 # REQUIREMENTS:
-#   - h5py
-#   - pyvista
-#   - On Trillium: virtual environment called pyvista36
+#   - h5py, pyvista, vtk, numpy, scipy, matplotlib
+#   - On Trillium: virtual environment called "pyvista36"
 #
 # EXECUTION:
-#   - Run using "compute-post-metrics_RUNME.sh" bash script.
+#   - Run using "compute_Spectrograms_job.sh" bash script.
 #   - Run directly on a login/debug node as below:
 #       > module load StdEnv/2023 gcc/12.3 python/3.12.4
 #       > source $HOME/virtual_envs/pyvista36/bin/activate
 #       > module load  vtk/9.3.0
-#       > python compute-post-metrics_SPI.py <path_to_CFD_results_folder> <path_to_case_mesh_data> <case_name> <path_to_output_folder> <period> <ncores> <f_cutoff> <flag_mean>
-#     
+#
+# EXAMPLE CLI (with required arguments):
+#       > python compute_Spectrograms.py \
+#           --input_folder       <path_to_CFD_results_folder> \
+#           --mesh_folder        <path_to_case_mesh_data>     \
+#           --output_folder      <path_to_output_folder>      \
+#           --case_name          PTSeg028_base_0p64           \
 #
 # INPUTS:
-#   - folder       Path to results directory with HDF5 snapshots
-#   - mesh         Path to the case mesh data files (with Mesh/Wall/{coordinates,topology,pointIds})
-#   - case         Case name (used only in output filename)
-#   - out          Output directory for the VTP result
-#   - period       Period in seconds (e.g., 0.915)
-#   - n_process        Number of worker processes (default: #logical CPUs)
-#   - f-cut        Frequency cutoff in Hz (default: 25.0)
-#   - with-mean    Keep the mean when computing FFT (default: subtract mean)
-#
+#   - input_folder        Path to results directory with HDF5 snapshots
+#   - mesh_folder         Path to the case mesh data files (with Mesh/Wall/{coordinates,topology,pointIds})
+#   - case_name           Case name (used only in output filename)
+#   - output_folder       Path to output directory to save results (will create subfolders files/, imgs/, ROIs/)
+#   --period_seconds      Flow period [s] (if omitted, try to parse from filenames with '_Per<ms>')
+#   --timesteps_per_cyc   Timesteps per cycle (if omitted, try to parse from filenames with '_ts<int>')
+#   --density             Blood density [kg/m3] (default = 1050 kg/m3)
+#   --window_length       STFT window length (samples, i.e., snapshots)
+#   --n_fft               STFT FFT length (bins)
+#   --overlap_frac        STFT noverlap = overlap_frac * window_length --> Overlap fraction between consequent windows (0-1)
+#   --window              STFT window type
+#   --pad_mode            Edge padding ('cycle','constant','odd','even','none')
+#   --detrend             STFT detrend ('linear','constant', or False)
+#   --clamp_threshold_dB  Floor for dB image (e.g., -60)
+#   --n_process         Number of worker processes (default: #logical CPUs)
 #
 # OUTPUTS:
-#   - output_folder/<case>_SPIp_<f-cut>Hz.vtp  PolyData with 'SPI_p' point-data
+
 #
 # NOTES:
-#   - Time step dt is inferred from: dt = period / (N-1) (one period covered by N files).
+#   - Sampling rate inferred as: fs = timesteps_per_cyc / period_seconds [Hz].
+#   - Filename helpers expect snapshots containing '_curcyc_' and optionally '_ts<int>' and '_Per<ms>'.
+#   - Pressure in Oasis is p/rho; multiply by density (default 1050 kg/m^3) to get Pa if desired.
 #
-#
-# Adapted from hemodynamic_indices_pressure.py originally written by Anna Haley (2024). 
+# Adapted from BSL-tools repository (Dan Macdonald 2022) and make_wall_pressure_specs.py (Anna Haley 2024). 
 # Copyright (C) 2025 University of Toronto, Biomedical Simulation Lab.
 # -----------------------------------------------------------------------------------------------------------------------
 
-#import os
 import sys
 import gc
-#import glob
 import h5py
 import warnings
 import argparse
@@ -59,13 +69,17 @@ from multiprocessing import sharedctypes
 
 import vtk
 import numpy as np
-from numpy.fft import fftfreq, fft
+#from numpy.fft import fftfreq, fft
+from scipy.signal import stft
 import pyvista as pv
-
+import matplotlib.pyplot as plt
 
 warnings.filterwarnings("ignore", category=DeprecationWarning) 
 
 
+# ======================================================================================================
+# GENERAL UTILITIES
+# ======================================================================================================
 
 # -------------------------------- Shared-memory Utilities ---------------------------------------------
 
@@ -78,6 +92,50 @@ def view_shared_array(shared_obj):
     """Get a NumPy view (no copy) onto a shared ctypes array created by create_shared_array."""
     return np.ctypeslib.as_array(shared_obj)
 
+
+# ---------------------------------------- Helper Utilities -----------------------------------------------------
+
+def extract_timestep_from_h5_filename(h5_file):
+        """
+        Extract integer timestep values of the current file from filename pattern '*_ts=<int>_...'.
+        Used to sort snapshot files chronologically.
+        """
+        stem = h5_file.stem
+
+        if "_ts=" in stem:
+            return int(stem.split("_ts=")[1].split("_")[0])
+        else:
+            raise ValueError(f"Filename '{h5_file}' does not contain expected '_ts=' pattern.")
+
+def extract_period_from_h5_filename(h5_file):
+        """
+        Extract period_seconds values from filename pattern '_Per<float>'.
+        """
+        stem = h5_file.stem
+
+        # Extract period (ms) if not provided
+        if "_Per" in stem:
+            period_ms = int(stem.split("_Per")[1].split("_")[0]) #period in milliseconds
+            period_seconds = period_ms/1000 #[s]
+        else:
+            raise ValueError(f"Filename '{h5_file}' does not contain expected '_Per' pattern.\nDefine --period_seconds in the CLI.")
+
+
+        return period_seconds
+
+def extract_timesteps_per_cyc_from_h5_filename(h5_file):
+        """
+        Extract timesteps_per_cyc value from filename pattern '_ts<int>'.
+        """
+        stem = h5_file.stem
+
+        # Extract timestep per cycle
+        if "_ts" in stem:
+            timesteps_per_cyc = int(stem.split("_ts")[1].split("_")[0])
+        else:
+            raise ValueError(f"Filename '{h5_file}' does not contain expected '_ts' pattern.\nDefine --timestep_per_cyc in the CLI.")
+
+        return timesteps_per_cyc
 
 
 # ---------------------------------------- Mesh Utilities -----------------------------------------------------
@@ -109,48 +167,38 @@ def assemble_wall_mesh(mesh_file):
 
     return surf
 
-
-# ---------------------------------------- Helper Utilities -----------------------------------------------------
-
-def extract_timestep_from_h5(h5_file):
-        """
-        Extract integer timestep from filename pattern '*_ts=<int>_...'.
-        Used to sort snapshot files chronologically.
-        """
-        return int(h5_file.stem.split('_ts=')[1].split('_')[0])
-
-
-def generate_windows(n_snapshots, window_size, window_overlap_frac):
+def assemble_volume_mesh(mesh_file):
     """
-    Generate (start, end) index pairs for windowed processing.
+    Create a PyVista UnstructuredGrid from the volumetric mesh stored in a BSLSolver-style HDF5.
 
-    window_overlap_frac : float in [0,1]  (fractional overlap)
-    Returns list of (start_idx, end_idx)
+    Expects datasets:
+      Mesh/coordinates : (Npoints, 3) float
+      Mesh/topology    : (Ncells,  4) int (tetrahedra expected)
     """
-    if window_size > n_snapshots:
-        return [(0, n_snapshots)]
+    
+    with h5py.File(mesh_file, 'r') as h5:
+        coords = np.array(h5['Mesh/coordinates'])  # coords of volumetric points (n_points, 3)
+        cells  = np.array(h5['Mesh/topology'])     # connectivity of volumetric points (n_cells, 4) -> tetrahedrons
 
-    step = int(window_size * (1 - window_overlap_frac))
-    windows = []
-    start = 0
-    while start + window_size <= n_snapshots:
-        end = start + window_size
-        windows.append((start, end))
-        start += step
-
-    # Add final window if partial remainder
-    if windows[-1][1] < n_snapshots:
-        windows.append((n_snapshots - window_size, n_snapshots))
-
-    return windows
+        
+    # Create connectivity array compatible with VTK --> requires a size prefix per cell (here '4' for tetrahedrons)
+    # VTK cell array layout = [nverts, v0, v1, v2, v3, nverts, ...]
+    n_cells        = cells.shape[0]
+    node_per_cell  = 4  # the volumetric cells are tets with size of 4 (4 nodes per elem)
+    cell_types     = np.full(n_cells, pv.CellType.TETRA, dtype=np.uint8)
+    cell_size      = np.full((n_cells, 1), node_per_cell, dtype = np.int64)  # array of size (n_cells, 1) filled with 4 
+    cells_vtk      = np.hstack([cell_size, cells]).ravel() # horizontal stacking of array / ravel: flattens the array into a 1d array
 
 
+    # Build grid and attach points
+    vol_mesh = pv.UnstructuredGrid(cells_vtk, cell_types, coords)
 
+    return vol_mesh, cells
 
 # --------------------------------- Parallel File Reader -----------------------------------------------
 
 
-def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype):
+def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype, density=1050):
     """
     Reads a *chunk* of time-snapshot HDF5 files, extracts wall pressures, and writes into the shared array.
 
@@ -159,10 +207,9 @@ def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_press
       wall_pids  : wall point indices (to slice pressure field)
       h5_files : list of Path objects to HDF5 snapshots
       shared_pressure_ctype  : shared ctypes array; viewed as press_[n_points, n_times]
+
+    Note: Multiply all pressures by density (since oasis return p/rho)
     """
-    
-    # Multiply all pressures by density (since oasis return p/rho)
-    density = 1050 #[kg/m3]
 
     # Create a shared (across processes) array of wall-pressure time-series
     shared_pressure = view_shared_array(shared_pressure_ctype)
@@ -172,14 +219,155 @@ def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_press
             pressure = np.array(h5['Solution']['p']) * density
             pressure_wall = pressure[wall_pids].flatten() # shape: (n_points,)
             
-            # For each wall point j, set shared_pressure[j, t_index] = p_wall[j]
-            #for j in range(pressure_wall.shape[0]):
-            #    shared_pressure[j][t_index] = pressure_wall[j]
         shared_pressure[:, t_index] = pressure_wall 
+
+def read_wall_pressure_from_h5_files_parallel(CFD_h5_files, wall_mesh, n_process, density):
+        
+        # Total number of saved frames
+        n_snapshots = len(CFD_h5_files)
+
+        # Wall point IDs and sizes
+        wall_pids = wall_mesh.point_data['vtkOriginalPtIds']
+        n_points  = len(wall_mesh.points)
+
+
+        # 2) Create shared arrays
+        # Array to hold pressures (n_points, n_times)
+        shared_pressure_ctype = create_shared_array([n_points, n_snapshots])
+
+
+        # 3) Parallel reading
+        print (f"Reading in parallel {n_snapshots} HDF5 files into 1 array of shape [{n_points}, {n_snapshots}] ... \n")
+        
+
+        # divide all snapshot files into groups and spread across processes
+        time_indices    = list(range(n_snapshots))
+        time_chunk_size = max(n_snapshots // n_process, 1)
+        time_groups     = [time_indices[i : i + time_chunk_size] for i in range(0, n_snapshots, time_chunk_size)]
+        
+        processes_list=[]
+        for idx, group in enumerate(time_groups):
+            proc = mp.Process(target = read_wall_pressure_from_h5_files, name=f"Reader{idx}", args=(group, wall_pids, CFD_h5_files, shared_pressure_ctype, density))
+            processes_list.append(proc)
+
+        # Start all readers
+        for proc in processes_list:
+            proc.start()
+
+        # Wait for all readers to finish
+        for proc in processes_list:
+            proc.join()
+
+        wall_pressure = view_shared_array(shared_pressure_ctype) # (n_points, n_times)
+        # Free up memory
+        gc.collect()
+
+        return wall_pressure
+
+
+
+# ---------------------------------- Fourier Transform Utilities -------------------------------------------
+# Used to determine STFT params if not given
+def shift_bit_length(x):
+    """ Round up to nearest power of 2.
+
+    Notes: See https://stackoverflow.com/questions/14267555/  
+    find-the-smallest-power-of-2-greater-than-n-in-python  
+    """
+    return 1<<(x-1).bit_length()
+
+def short_time_fourier(data,
+                        sampling_rate: float,
+                        window_type: str = 'hann',
+                        window_length: int | None = None,
+                        overlap_frac: float = 0.75,
+                        n_fft: int | None = None,
+                        pad_mode: str | None = 'cycle',
+                        detrend: str | bool = 'linear'):
+
+    """
+    Compute the windowed FFT for a timeseries data.
+    All scipy.signal STFT parameters are set to defaults if they are None.
+    See here for scipy.signal.stft documentation:  https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.stft.html 
+   
+    
+    Arguments: 
+        data: Timeseries data for the point of interest -> shape (n_points, n_frames)
+        sampling_rate: Number of samples per second [Hz]
+        window_type : Window type for stft
+        window_length (nperseg): Number of time samples in each window 
+        overlap_frca: Fraction (0-1) of overlap between segments (default = 0.75)
+        n_fft: Number of FFT bins in each segment (>= window_length) -> if a zero padded FFT is desired, if None, is equal to window_length (nperseg) 
+        pad_mode : Optional padding strategy to reduce edge artifacts {'cycle','constant','odd','even',None}
+        detrend : {'linear','constant', False}
+    
+    Returns:
+        array: Average spectrogram of data.
+        S_db : Average power spectrogram in dB -> shape (n_freqs, n_frames)
+        bins : Time vector in seconds -> shape (n_frames,)
+        freqs: Frequency vector in [Hz] -> shape (n_freqs,)
+        
+    """
+
+
+    n_frames = data.shape[1]
+
+    # Define defaults
+    if window_length is None: window_length = shift_bit_length(int(n_frames / 10))
+    if n_fft is None: n_fft = window_length
+    if overlap_frac is None: overlap_frac = 0.75
+
+    if pad_mode == 'cycle':
+        pad_size = window_length // 2
+        front_pad = data[:,-pad_size:]
+        back_pad = data[:,:pad_size]
+        data = np.concatenate([front_pad, data, back_pad], axis=1)
+        boundary = None 
+
+    elif pad_mode == 'constant':
+        pad_size = window_length // 2
+        front_pad = np.zeros((data.shape[0], pad_size)) + data[:,0][:,None]
+        back_pad = np.zeros((data.shape[0], pad_size)) + data[:,-1][:,None]
+        data = np.concatenate([front_pad, data, back_pad], axis=1)
+        boundary = None 
+
+    elif pad_mode in ['odd', 'even', 'none', None]:
+        boundary = pad_mode
+    
+    else:
+        print('Warning: Problem with pad_mode!')
+
+    stft_params = {
+        'fs' : sampling_rate,
+        'window' : window_type,
+        'nperseg' : window_length,
+        'noverlap' : int(overlap_frac * window_length),   # number of overlapping samples
+        'nfft' : n_fft,
+        'detrend' : detrend,
+        'return_onesided' : True,
+        'boundary' : boundary,
+        'padded' : True,
+        'axis' : -1,
+        }
+
+
+    # All the below S arrays have shape (n_freq, n_frames)
+    freqs, bins, Z = stft(x=data, **stft_params) #data[0] will be the first row
+
+    return freqs, bins, Z
+
+
+
+
+# ======================================================================================================
+# HEMODYNAMICS FUNCTIONS
+# ======================================================================================================
+
 
 # ---------------------------------------- Compute SPI -----------------------------------------------------
 
-def filter_SPI(signal, ind_freq_zero, ind_freq_below_cutoff, mean_tag):
+
+def calculate_windowed_SPI(signal, STFT_params, freq_cutoff, mean_tag):
     """
     Compute SPI for a single time series using frequency masks in W_low_cut.
 
@@ -191,11 +379,33 @@ def filter_SPI(signal, ind_freq_zero, ind_freq_below_cutoff, mean_tag):
 
     """
 
+    # Unpack input parameters
+    sampling_rate = STFT_params.get("sampling_rate")
+    window_length = STFT_params.get("window_length")
+    overlap_frac  = STFT_params.get("overlap_frac")
+    n_fft         = STFT_params.get("n_fft")
+    pad_mode      = STFT_params.get("pad_mode")
+    window_type   = STFT_params.get("window_type")
+    detrend       = STFT_params.get("detrend")
+
+    # If window_length is not defined, divide the signal by 10 by default 
+    n_snapshots = len(signal)
+    if window_length is None: window_length = shift_bit_length(int(n_snapshots / 10))
+
     # Subtract mean unless instructed otherwise
-    if mean_tag == "withmean":
-        fft_signal = fft(signal)
-    else:
-        fft_signal = fft(signal - np.mean(signal))
+    if mean_tag == "withoutmean":
+        signal = signal - np.mean(signal)
+    
+    #fft_signal = fft(signal)
+    freqs, _, fft_signal = short_time_fourier(signal, sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend)
+
+
+    #print (f'min/max frequency= {np.min(freqs):.2f} / {np.max(freqs):.2f}')
+
+
+    # Find indices for DC and <25 Hz
+    ind_freq_zero = np.where( np.abs(freqs) == 0 )
+    ind_freq_below_cutoff = np.where( np.abs(freqs) < freq_cutoff)
 
     # Filter any amplitude corresponding to frequency equal to 0Hz
     fft_signal_above_zero = fft_signal.copy()
@@ -215,166 +425,82 @@ def filter_SPI(signal, ind_freq_zero, ind_freq_below_cutoff, mean_tag):
     return Power_below_cutoff/Power_above_zero
 
 
-def compute_SPI(pids, shared_pressure_ctype, shared_SPI_ctype,
-                ind_freq_zero, ind_freq_below_cutoff, start_idx, end_idx, with_mean=False):
-    """Computes SPI for the given points (pids) over time window [start_idx:end_idx] and writes back into shared SPI array."""
+def compute_and_save_SPI(case_name, output_folder, wall_mesh, wall_pressure, period_seconds, timesteps_per_cyc,
+                        STFT_params, freq_cutoff: float=25.0, with_mean=False):
+
+    """Computes windowed SPI using scipy.signal.stft for the given points (pids) and writes back into shared SPI array."""
     
-    pressure = view_shared_array(shared_pressure_ctype) # (n_points, n_times)
-    SPI      = view_shared_array(shared_SPI_ctype)      # (n_points,)
+    print (f"Now computing windowed SPI with STFT parameters: \n \
+    window_length (samples) = {STFT_params['window_length']} \n \
+    n_fft         (samples) = {STFT_params['n_fft']} \n \
+    overlap_fraction        = {STFT_params['overlap_frac']} \n")
 
-    for point in pids:
-        pressure_window = pressure[point, start_idx:end_idx]
-        SPI[point] = filter_SPI(pressure_window, ind_freq_zero, ind_freq_below_cutoff, "withmean" if with_mean else "withoutmean")
+    n_points    = wall_pressure.shape[0]
+    n_snapshots = wall_pressure.shape[1] # total number of snapshots
 
+    sampling_rate = timesteps_per_cyc/period_seconds
+    STFT_params["sampling_rate"] = sampling_rate
 
-# ---------------------------------------- Compute Hemodynamics Metrics -------------------------------------
-
-def hemodynamics(wall_mesh: pv.PolyData,
-                 input_folder: Path,
-                 output_folder: Path,
-                 case_name: str,
-                 n_process: int,
-                 period_seconds: float,
-                 window_size: int,
-                 with_mean: bool,
-                 window_overlap_frac: float = 0.25,
-                 freq_cut: float=25.0
-                 ):
-    """
-    Main driver: Reads time-series pressures, computes windowed SPI, and writes it to a VTP file.
-
-    Args:
-      wall_mesh      : PyVista PolyData for the wall surface
-      input_folder   : folder containing '*_curcyc_*up.h5' snapshots
-      output_folder  : output folder for VTP
-      case_name      : prefix for output filename
-      n_process      : number of processes for parallel file reading
-      period_seconds : physical period of the cycle (seconds)
-      freq_cut       : cutoff frequency (Hz)
-      window_size
-      window_overlap_frac
-    """
-
-    # 1) Gather files
-    # Find & sort snapshot files by timestep 
-    snapshot_h5_files = sorted(Path(input_folder).glob('*_curcyc_*up.h5'), key = extract_timestep_from_h5)
-    n_snapshots = len(snapshot_h5_files)
-
-    if n_snapshots==0:
-        print('No files found in {}!'.format(input_folder))
-        sys.exit()
-    
     # Wall point IDs and sizes
     wall_pids = wall_mesh.point_data['vtkOriginalPtIds']
-    n_points  = len(wall_mesh.points)
-
-
-    # 2) Create shared arrays
-    # Array to hold pressures (n_points, n_times)
-    shared_pressure_ctype = create_shared_array([n_points, n_snapshots])
-
-
-
-    # 3) Parallel reading
-    print ('Reading in parallel', n_snapshots, 'files into 1 array of shape', [n_points, n_snapshots],' ...')
-
-    # divide all snapshot files into groups and spread across processes
-    time_indices    = list(range(n_snapshots))
-    time_chunk_size = max(n_snapshots // n_process, 1)
-    time_groups     = [time_indices[i : i + time_chunk_size] for i in range(0, n_snapshots, time_chunk_size)]
     
-    processes_list=[]
-    for idx, group in enumerate(time_groups):
-        proc = mp.Process(target = read_wall_pressure_from_h5_files, name=f"Reader{idx}", args=(group, wall_pids, snapshot_h5_files, shared_pressure_ctype))
-        processes_list.append(proc)
-
-    # Start all readers
-    for proc in processes_list:
-        proc.start()
-
-    # Wait for all readers to finish
-    for proc in processes_list:
-        proc.join()
-
-    # Free up memory
-    gc.collect()
-
-
-
-    # 4) Compute windowed SPI 
-    print ('Now computing windowed SPI in parallel ...')
-
-    shared_SPI_ctype = create_shared_array([n_points,]) # 1D
-
-    # Generate windows 
-    if window_size is None:
-        window_size = n_snapshots  # use entire signal
-
-    windows = generate_windows(n_snapshots, window_size, window_overlap_frac)
-    print(f"Generated {len(windows)} windows of size {window_size} with {window_overlap_frac*100:.0f}% overlap.\n")
-
-
-    # Loop over windows
-    for window_idx, (start_idx, end_idx) in enumerate(windows, 1):
-        print(f"Computing SPI for window {window_idx}/{len(windows)}: frames {start_idx}–{end_idx}")
-
-        # Set up frequencies
-        dt_seconds = period_seconds/10000 #float(n_snapshots-1)
-
-        #if window_size: # windowed fft
-        freqs = fftfreq(end_idx-start_idx, d = dt_seconds) # [Hz]
-        #else: # entire signal
-        #    freqs = fftfreq(n_snapshots, d = dt_seconds) # [Hz]
-        # Find indices for DC and <25 Hz
-        ind_freq_zero = np.where( np.abs(freqs) == 0 )
-        ind_freq_below_cutoff = np.where( np.abs(freqs) < freq_cut)
-
-        
-        if window_idx == 1:
-            print ('period (s)=', period_seconds, '  n_snapshots=', n_snapshots, '  dt (s)=', dt_seconds) # '  frequencies=',freqs
-            print (f'min/max frequency= {np.min(freqs):.2f} / {np.max(freqs):.2f}')
-
-  
-        # divide all snapshot files into chunks
-        point_indices    = list(range(n_points))
-        point_chunk_size = max(int(n_points // n_process), 1)
-        point_groups     = [point_indices[i : i + point_chunk_size] for i in range(0, n_points, point_chunk_size)]
-
-        for group in point_groups:
-            compute_SPI(group, shared_pressure_ctype, shared_SPI_ctype, ind_freq_zero, ind_freq_below_cutoff, start_idx, end_idx, with_mean)
-
-        # Free up memory
-        gc.collect()
-        
-        # 5) Attach SPI to wall surface and save VTP
-        SPI = view_shared_array(shared_SPI_ctype)
-        wall_mesh.point_data['SPI_p'] = SPI
-
-        output_file = Path(output_folder) / f"{case_name}_SPIp_win{window_idx:03d}.vtp"
-
-        wall_mesh.save(str(output_file))
     
-    print (f'Finished writing windowed SPI files to {output_folder}.')
+    # Create shared array to hold SPI
+    #shared_SPI_ctype = create_shared_array([n_points,n_snapshots]) # 1D
+    #SPI      = view_shared_array(shared_SPI_ctype)      # (n_points,)
+
+    #SPI = np.zeros([n_points,n_snapshots])
+
+    signal0 = wall_pressure[0, :][None,:]
+    SPI0 = calculate_windowed_SPI(signal0, STFT_params, freq_cutoff, "withmean" if with_mean else "withoutmean")
+
+    print(f"shape SPI is {SPI0.shape()}")
+    # Loop over all points on the wall
+    for i , point in enumerate(wall_pids):
+        signal = wall_pressure[i, :][None,:] #[None,:] is to keep the signal as a 1d row vector
+        SPI[i] = calculate_windowed_SPI(signal, STFT_params, freq_cutoff, "withmean" if with_mean else "withoutmean")
+    
+
+    wall_mesh.point_data['SPI_p'] = SPI
+    output_file = Path(output_folder) / f"{case_name}_SPIp_win{STFT_params['window_length']}.vtp"
+    wall_mesh.save(str(output_file))
+
+    print (f'\nFinished computing and saving SPIs.')
 
 
 
+# ======================================================================================================
+# MAIN
+# ======================================================================================================
 
 # ---------------------------------------- Run the script -----------------------------------------------------
 
 def parse_args():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input_folder",  required=True,       help="Results folder with CFD .h5 files")
-    ap.add_argument("--mesh_folder",   required=True,       help="Case mesh folder containing HDF5 mesh file")
-    ap.add_argument("--case_name",     required=True,       help="Case name")
-    ap.add_argument("--output_folder", required=True,       help="Output directory for SPI VTP file")
-    ap.add_argument("--period",        type=float,          help="Period in seconds (default: 0.915)", default=0.915)
-    ap.add_argument("--window_size",   type=int,            help="Size of window (number of snapshots for each window)")
-    ap.add_argument("--window_overlap",type=float,          help="Fraction of overlap between windows (0 to 1)", default=0)
-    ap.add_argument("--n_process",     type=int,            help="Number of parallel processes", default=max(1, mp.cpu_count() - 1))
-    ap.add_argument("--freq_cut",      type=float,          help="Cutoff frequency in Hz", default=25.0)
+    ap.add_argument("--input_folder",   required=True,       help="Results folder with CFD .h5 files")
+    ap.add_argument("--mesh_folder",    required=True,       help="Case mesh folder containing HDF5 mesh file")
+    ap.add_argument("--output_folder",  required=True,       help="Output directory for SPI VTP file")
+    ap.add_argument("--case_name",      required=True,       help="Case name")
+    ap.add_argument("--n_process",      type=int,            help="Number of parallel processes", default=max(1, mp.cpu_count() - 1))
+
+    ap.add_argument("--density",           type=float,  default=1050,   help="Blood density [kg/m3] (default: 1050)")
+    ap.add_argument("--period_seconds",    type=float,  default=0.915,  help="Period in seconds (default: 0.915)")
+    ap.add_argument("--timesteps_per_cyc", type=int,                    help="Number of timesteps per cycle")
+
+    # Short-time Fourier Transform control (all optional)
+    ap.add_argument("--window_length",    type=int,   default=None,     help="Length of FFT window in samples (number of snapshots for each window)")
+    ap.add_argument("--n_fft",            type=int,   default=None,     help="FFT length (bins)")
+    ap.add_argument("--overlap_fraction", type=float, default=0.75,     help="Overlap fraction between consequent windows [0,1] (default: 0.75)")
+    ap.add_argument("--window_type",      type=str,   default="hann",   choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT")
+    ap.add_argument("--pad_mode",         type=str,   default="cycle",  choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts")
+    ap.add_argument("--detrend",          type=str,   default="linear", help="Detrend option for STFT: 'linear', 'constant', or False")
+
+    # SPI control
+    ap.add_argument("--freq_cutoff",       type=float,          help="Cutoff frequency in Hz", default=25.0)
     ap.add_argument("--with_mean",     action="store_true", help="Flag to keep mean in FFT or not")
     
     return ap.parse_args()
+
 
 
 def main():
@@ -382,20 +508,74 @@ def main():
     input_folder  = Path(args.input_folder)
     mesh_folder   = Path(args.mesh_folder)
     output_folder = Path(args.output_folder)
-
+    
+    # Create paths
     if not Path(output_folder).exists():
         Path(output_folder).mkdir(parents=True, exist_ok=True)
 
+    output_folder_SPI = output_folder/f"window{args.window_length}_overlap{args.overlap_fraction}"
+    output_folder_SPI.mkdir(parents=True, exist_ok=True)
+
+
+    # Put input arguments into dictionaries
+    short_time_fourier_params = {
+        "window_length": args.window_length,
+        "n_fft": args.n_fft,
+        "overlap_frac": args.overlap_fraction,
+        "window_type": args.window_type,
+        "pad_mode": args.pad_mode,
+        "detrend": args.detrend}
+
+    # Assemble mesh
     mesh_file = list(Path(mesh_folder).glob('*.h5'))[0]
-    print(f"Loading mesh: {mesh_file}")
     wall_mesh = assemble_wall_mesh(mesh_file)
+    #vol_mesh  = assemble_volume_mesh(mesh_file)
 
-    print(f"Processing on {args.n_process} processes…")
+    print(f"\n[info] Mesh file:    {mesh_file}")
+    print(f"[info] Reading from: {input_folder}")
+    print(f"[info] Writing to:   {output_folder} \n")
 
-    #print ('Performing hemodynamics computation on %d core%s.'%(ncore,'s' if ncore>1 else '') )
-    hemodynamics(wall_mesh, input_folder, output_folder, case_name = args.case_name,
-                 n_process = args.n_process, period_seconds = args.period, freq_cut = args.freq_cut,
-                 window_size = args.window_size, window_overlap_frac = args.window_overlap, with_mean = args.with_mean)
+    # Gather CFD results h5 files
+    # Find & sort snapshot files by timestep 
+    CFD_h5_files = sorted(Path(input_folder).glob('*_curcyc_*up.h5'), key = extract_timestep_from_h5_filename)
+    n_snapshots = len(CFD_h5_files)
+
+    if n_snapshots==0:
+        print('No files found in {}!'.format(input_folder))
+        sys.exit()
+            
+    # Obtain simulation temporal parameters from filename (if not given as input argument)
+    timesteps_per_cyc = args.timesteps_per_cyc
+    period_seconds = args.period_seconds
+
+    if timesteps_per_cyc is None:
+        timesteps_per_cyc = extract_timesteps_per_cyc_from_h5_filename(CFD_h5_files[0])
+        print (f"Found timesteps_per_cycle = {timesteps_per_cyc} from HDF5 file names. \n")
+
+    if period_seconds is None:
+        period_seconds = extract_period_from_h5_filename(CFD_h5_files[0])
+        print (f"Found period (s) = {period_seconds} from HDF5 file names. \n")
+
+
+    # Assemble CFD data
+    wall_pressure = read_wall_pressure_from_h5_files_parallel(CFD_h5_files, wall_mesh, args.n_process, args.density)    
+    
+
+    # Run post-processing of assembled CFD results
+    print (f"Performing post-processing computation on {args.n_process} cores ... \n" )
+
+
+    # Computing spectrograms 
+    compute_and_save_SPI(
+            case_name = args.case_name,
+            output_folder = output_folder_SPI,
+            wall_mesh = wall_mesh,
+            wall_pressure = wall_pressure,
+            period_seconds = period_seconds,
+            timesteps_per_cyc = timesteps_per_cyc,
+            STFT_params = short_time_fourier_params,
+            freq_cutoff = args.freq_cutoff,
+            with_mean   = args.with_mean)
 
 
 
