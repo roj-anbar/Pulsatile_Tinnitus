@@ -370,7 +370,7 @@ def short_time_fourier(data,
 
 
 # ---------------------------------- ROI Utilities -------------------------------------------
-def read_ROI_points_from_csv(csv_path: str) -> np.ndarray:
+def read_ROI_points_from_csv(csv_path: str, ROI_type) -> np.ndarray:
     """
     Read a CSV of ROI points with columns:
     - Points:0, Points:1, Points:2
@@ -388,8 +388,13 @@ def read_ROI_points_from_csv(csv_path: str) -> np.ndarray:
 
     # Change the header names for your dataset
     x = data['Points0']; y = data['Points1']; z = data['Points2']
-    normx = data['FrenetTangent0']; normy = data['FrenetTangent1']; normz = data['FrenetTangent2']
+    
+    # We need the normals just for cylindrical ROI
+    if ROI_type == "cylinder":
+        normx = data['FrenetTangent0']; normy = data['FrenetTangent1']; normz = data['FrenetTangent2']
 
+    elif ROI_type == "sphere":
+        normx, normy, normz = np.zeros_like(x), np.zeros_like(y), np.zeros_like(z) 
 
     coords = np.vstack([x,y,z]).T
     normals = np.vstack([normx,normy,normz]).T
@@ -602,7 +607,7 @@ def plot_spectrogram_for_one_ROI(output_folder_files, output_folder_imgs, case_n
     fig, ax = plt.subplots(1,1, figsize=(14,8))
     spectrogram = ax.pcolormesh(bins_Q, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
     
-    # Set axis
+    # Set properties
     ax.set_title(plot_title)
     #ax.set_xlabel('Time (s)', fontweight='bold', labelpad=0)
     ax.set_xlabel('Q_inlet (ml/s)', fontweight='bold', labelpad=0)
@@ -611,6 +616,8 @@ def plot_spectrogram_for_one_ROI(output_folder_files, output_folder_imgs, case_n
     ax.set_ylim([0, 1500])
     cbar = plt.colorbar(spectrogram, ax=ax) # Adding the colorbar
     cbar.set_label('Power (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
+    spectrogram.set_clim(-30, 30)
+
     #ax.set_xticks([0, 0.9])
     #ax.set_xticklabels(['0.0', '0.9'])
     #ax.set_yticks([0, 600, 800])
@@ -690,7 +697,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
     # Case 2: CSV mode
     # Coordinates of multiple points given in a CSV file
     if ROI_center_csv is not None:
-        ROI_centers, ROI_normals = read_ROI_points_from_csv(ROI_center_csv)
+        ROI_centers, ROI_normals = read_ROI_points_from_csv(ROI_center_csv, ROI_type)
         print(f"Loaded {ROI_centers.shape[0]} ROI points from {ROI_center_csv}: \n")
 
         # Loop over all center points (or with a stride set below)

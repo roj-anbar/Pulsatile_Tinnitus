@@ -10,12 +10,12 @@
 set -euo pipefail
 
 # ---------------------------------- Define Paths ---------------------------------------
-CASE=PTSeg043_base_0p64
+CASE=PTSeg043_noLabbe_base
 BASE_DIR=$SCRATCH/PT/PT_Ramp/PT_cases/$CASE
 MESH="$BASE_DIR/data"
-INPUT="$BASE_DIR/results/${CASE}_ts12000_cy6_saveFreq6"
-OUTPUT="$BASE_DIR/post-process/SPI_pressure/cy6_ts12000_saveFreq6"
-SCRIPT="$SLURM_SUBMIT_DIR/compute_SPI.py"  # ensure to submit from script dir
+INPUT="$BASE_DIR/results/${CASE}_ts10000_cy6_saveFreq1"
+OUTPUT="$BASE_DIR/post-process/SPI_wall_pressure/cy6_saveFreq1"
+SCRIPT="$SLURM_SUBMIT_DIR/compute_SPI_old.py"  # ensure to submit from script dir
 
 
 # --------------------------------- Load Modules ----------------------------------------
@@ -41,22 +41,22 @@ export PYVISTA_USE_PANEL=true
 # ------------------------------ Run Scripts ---------------------------------------------
 
 python "$SCRIPT" \
+    --case_name     "$CASE" \
     --input_folder  "$INPUT" \
     --mesh_folder   "$MESH" \
-    --case_name     "$CASE" \
     --output_folder "$OUTPUT" \
     --n_process     "${SLURM_TASKS_PER_NODE}" \
-    --window_length   4000 \
-    --window_overlap 0.75
+    --window_length  5000 \
+    --window_overlap 0.9
 
-python compute_SPI_old.py \
-    --input_folder      "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
-    --mesh_folder       "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
-    --case_name         "PTSeg028_base_0p64" \
-    --output_folder     "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/SPI_wall_pressure/cy6_test" \
-    --n_process         192 \
-    --window_length     5000 \
-    --window_overlap    0.9
+#python compute_SPI_old.py \
+#    --input_folder      "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
+#    --mesh_folder       "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
+#    --case_name         "PTSeg028_base_0p64" \
+#    --output_folder     "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/SPI_wall_pressure/cy6_test" \
+#    --n_process         192 \
+#    --window_length     5000 \
+#    --window_overlap    0.9
 
 #python compute_SPI.py \
 #    --input_folder      "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
