@@ -80,7 +80,6 @@ from multiprocessing import sharedctypes
 
 import vtk
 import numpy as np
-#from numpy.fft import fftfreq, fft
 from scipy.signal import stft
 import pyvista as pv
 import matplotlib.pyplot as plt
@@ -604,26 +603,38 @@ def plot_spectrogram_for_one_ROI(output_folder_files, output_folder_imgs, case_n
     plt.rc('axes', labelsize=16)         # fontsize of the x and y labels
 
 
-    fig, ax = plt.subplots(1,1, figsize=(14,8))
+    fig, ax = plt.subplots(1,1, figsize=(16,8))
     spectrogram = ax.pcolormesh(bins_Q, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
-    
-    # Set properties
+
+    #----- Set properties
     ax.set_title(plot_title)
     #ax.set_xlabel('Time (s)', fontweight='bold', labelpad=0)
-    ax.set_xlabel('Q_inlet (ml/s)', fontweight='bold', labelpad=0)
+    #ax.set_xlabel('Q_inlet (ml/s)', fontweight='bold', labelpad=0)
     ax.set_ylabel('Frequency (Hz)', fontweight='bold', labelpad=0)
     ax.set_xlim([2, 10]) # for time it should be [1, 5]
     ax.set_ylim([0, 1500])
-    cbar = plt.colorbar(spectrogram, ax=ax) # Adding the colorbar
-    cbar.set_label('Power (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
-    spectrogram.set_clim(-30, 30)
-
+    
     #ax.set_xticks([0, 0.9])
     #ax.set_xticklabels(['0.0', '0.9'])
     #ax.set_yticks([0, 600, 800])
     #ax.set_yticklabels(['0', '600', '800'])
-    #spectrogram.set_clim([-20, 0])
 
+
+    #----- Adding the colorbar
+    cbar = fig.colorbar(spectrogram, ax=ax, orientation='horizontal', pad=0.15)
+    spectrogram.set_clim(-30, 30)
+
+    # Define the ticks you want
+    #ticks = [-30, -15, 0, 15, 30]
+    #cbar.set_ticks(ticks)
+    #cbar.set_ticklabels([str(t) for t in ticks])   # optional if you want custom text
+
+    # Style
+    #cbar.ax.xaxis.set_label_position('top')
+    #cbar.ax.xaxis.tick_top()
+    #cbar.ax.tick_params(labelsize=46)
+    cbar.set_label('Power (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
+    
     
     plt.tight_layout()
     plt.savefig(Path(output_folder_imgs) / f"{plot_title}.png")#, transparent=True)
@@ -701,7 +712,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
         print(f"Loaded {ROI_centers.shape[0]} ROI points from {ROI_center_csv}: \n")
 
         # Loop over all center points (or with a stride set below)
-        for i in range(0, len(ROI_centers), 1):
+        for i in range(0, 1): #len(ROI_centers), 1):
             
             center = ROI_centers[i]
             normal = ROI_normals[i]
