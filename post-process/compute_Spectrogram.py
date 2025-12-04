@@ -401,7 +401,7 @@ def read_ROI_points_from_csv(csv_path: str, ROI_type) -> np.ndarray:
     return coords, normals
 
 
-def assemble_wall_pressure_for_ROI(output_folder_ROIs, wall_mesh, wall_pressure, ROI_params):
+def assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_pressure, ROI_params):
     """
     Select wall points inside a ROI with defined shape (ROI_type) and return the wall-pressure time series for those points.
     Note: Units of the radius should be the same as units of the mesh.
@@ -477,7 +477,6 @@ def assemble_wall_pressure_for_ROI(output_folder_ROIs, wall_mesh, wall_pressure,
     return wall_pressure_ROI
 
 
-
 # ======================================================================================================
 # HEMODYNAMICS FUNCTIONS
 # ======================================================================================================
@@ -485,19 +484,17 @@ def assemble_wall_pressure_for_ROI(output_folder_ROIs, wall_mesh, wall_pressure,
 
 # ---------------------------------------- Compute Spectrograms -----------------------------------------------------
 
-def calculate_average_spectrogram_for_one_ROI(
+def calculate_avg_spectrogram_for_quantity_of_interest(
                                       output_folder_files,
                                       output_folder_imgs,
                                       output_folder_ROIs,
-                                      wall_mesh,
-                                      wall_pressure,
                                       spec_quantity,
-                                      ROI_params,
+                                      array_quantity_of_interest,
                                       STFT_params,
                                       clamp_threshold_dB=None):
 
     """
-    Assemble ROI time series and compute an average spectrogram (in dB) with configurable STFT parameters.
+    Compute an average spectrogram (in dB) based on the given array for the quantity of interest with configurable STFT parameters.
     """
     
     # Unpack input parameters
@@ -511,10 +508,11 @@ def calculate_average_spectrogram_for_one_ROI(
 
     if spec_quantity == 'pressure':
         # Assembles pressure data for the ROI
-        wall_pressure_ROI = assemble_wall_pressure_for_ROI(output_folder_ROIs, wall_mesh, wall_pressure, ROI_params)
+        #wall_pressure_ROI = assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_pressure, ROI_params)
+        signal_pressure = array_quantity_of_interest
 
-        n_points = wall_pressure_ROI.shape[0]
-        n_snapshots = wall_pressure_ROI.shape[1] # total number of snapshots
+        n_points = pressure_signal.shape[0]
+        n_snapshots = pressure_signal.shape[1] # total number of snapshots
 
 
         # If window_length is not defined, divide the signal by 10 by default 
@@ -524,7 +522,7 @@ def calculate_average_spectrogram_for_one_ROI(
         # Note: All the below S arrays have shape (n_freq, n_frames)
 
         # Compute FFT for first point. # Pass data as row vectors
-        freqs, bins, Z0 = short_time_fourier(wall_pressure_ROI[0][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend)
+        freqs, bins, Z0 = short_time_fourier(signal_pressure[0][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend)
         S_sum = np.zeros_like(Z0, dtype=np.float64)
 
         # Case 1: Single point ROI
@@ -537,7 +535,7 @@ def calculate_average_spectrogram_for_one_ROI(
         else:
             for point in range(n_points):
                 # Pass data as row vectors
-                _, _, Z_point = short_time_fourier(wall_pressure_ROI[point][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend)
+                _, _, Z_point = short_time_fourier(signal_pressure[point][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend)
                 S_point_power = np.abs(Z_point)**2
                 S_sum += S_point_power 
             
@@ -621,7 +619,7 @@ def plot_spectrogram_for_one_ROI(output_folder_files, output_folder_imgs, case_n
 
 
     #----- Adding the colorbar
-    cbar = fig.colorbar(spectrogram, ax=ax, orientation='horizontal', pad=0.15)
+    cbar = fig.colorbar(spectrogram, ax=ax, orientation='vertical') #pad=0.15
     spectrogram.set_clim(-30, 30)
 
     # Define the ticks you want
@@ -685,21 +683,19 @@ def compute_and_save_spectrogram_for_all_ROIs(
         ROI_params["ROI_id"] = "single"
         ROI_params["ROI_center_coord"] = ROI_center_coord
 
-        spectrogram_data = calculate_average_spectrogram_for_one_ROI(
+        # Assemble pressure data for each ROI
+        wall_pressure_ROI = assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_pressure, ROI_params)
+
+        spectrogram_data = calculate_avg_spectrogram_for_quantity_of_interest(
             output_folder_files = output_folder_files,
             output_folder_imgs = output_folder_imgs,
             output_folder_ROIs = output_folder_ROIs,
-            wall_mesh = wall_mesh,
-            wall_pressure = wall_pressure,
             spec_quantity = spec_quantity,
+            array_quantity_of_interest = wall_pressure_ROI,
             clamp_threshold_dB = clamp_threshold_dB,
-            ROI_params = ROI_params,
             STFT_params = STFT_params)
 
         # Save spectrogram
-        # Creates the output filename (npz format: numpy zipped file)
-        #cx, cy, cz = map(float, ROI_center_coord)
-        #center_tag = f"cx{cx:.2f}cy{cy:.2f}cz{cz:.2f}"
         spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac}_r{ROI_radius}_h{ROI_height}' 
         
         plot_spectrogram_for_one_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_title, clamp_threshold_dB)
@@ -710,42 +706,81 @@ def compute_and_save_spectrogram_for_all_ROIs(
     if ROI_center_csv is not None:
         ROI_centers, ROI_normals = read_ROI_points_from_csv(ROI_center_csv, ROI_type)
         print(f"Loaded {ROI_centers.shape[0]} ROI points from {ROI_center_csv}: \n")
-
+        
         # Loop over all center points (or with a stride set below)
-        for i in range(0, 1): #len(ROI_centers), 1):
+        # Choose which ROIs you want (based on the center_ID)
+        ROI_start   = 57
+        ROI_end     = 71
+        ROI_stride  = 1 
+
+        # Case 1: Generate one spectrogram for multiple ROIs (regional averaging)
+        if multi_ROI_averaging:
+            # Here we assemble the pressure data for multiple ROIs first and then extract the average spectrogram
+            wall_pressure_ROI_multi = []
+
+            # Loop over center points in the specified region
+            for i in range(ROI_start, ROI_end, ROI_stride):
+                center = ROI_centers[i]
+                normal = ROI_normals[i]
+                ROI_id = f"ROI{i:02d}"
+
+                # Make a *copy* of ROI_params so we don't overwrite in-place
+                ROI_params_multi = ROI_params.copy()
+                ROI_params_multi["ROI_id"] = ROI_id
+                ROI_params_multi["ROI_center_coord"]  = center
+                ROI_params_multi["ROI_center_normal"] = normal
+
+                # Assemble pressure data for each ROI
+                wall_pressure_this_ROI = assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_pressure, ROI_params_multi)
+
+                wall_pressure_ROI_multi.append(wall_pressure_this_ROI)
             
-            center = ROI_centers[i]
-            normal = ROI_normals[i]
-            ROI_id = f"ROI{i:02d}"
+            # Calculate average spectrogram for each ROI
+                spectrogram_data = calculate_avg_spectrogram_for_quantity_of_interest(
+                    output_folder_files = output_folder_files,
+                    output_folder_imgs = output_folder_imgs,
+                    output_folder_ROIs = output_folder_ROIs,
+                    spec_quantity = spec_quantity,
+                    array_quantity_of_interest = wall_pressure_ROI,
+                    clamp_threshold_dB = clamp_threshold_dB,
+                    STFT_params = STFT_params)
 
-            # Add extra fields to ROI_params
-            ROI_params["ROI_id"] = ROI_id
-            ROI_params["ROI_center_coord"]  = center
-            ROI_params["ROI_center_normal"] = normal
 
+        
+        # Case 2: Generate one spectrogram per ROI
+        else:
+            for i in range(ROI_start, ROI_end, ROI_stride): #range(0, len(ROI_centers), 1):
+                
+                center = ROI_centers[i]
+                normal = ROI_normals[i]
+                ROI_id = f"ROI{i:02d}"
 
-            spectrogram_data = calculate_average_spectrogram_for_one_ROI(
-                output_folder_files = output_folder_files,
-                output_folder_imgs = output_folder_imgs,
-                output_folder_ROIs = output_folder_ROIs,
-                wall_mesh = wall_mesh,
-                wall_pressure = wall_pressure,
-                spec_quantity = spec_quantity,
-                clamp_threshold_dB = clamp_threshold_dB,
-                ROI_params = ROI_params,
-                STFT_params = STFT_params)
+                # Add extra fields to ROI_params
+                ROI_params["ROI_id"] = ROI_id
+                ROI_params["ROI_center_coord"]  = center
+                ROI_params["ROI_center_normal"] = normal
 
-            # Save spectrogram plot
-            # Creates the output filename (npz format: numpy zipped file)
-            #cx, cy, cz = map(float, center)
-            #center_tag = f"cx{cx:.2f}cy{cy:.2f}cz{cz:.2f}"
-            if ROI_type == "sphere":
-                spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_{ROI_id}_{ROI_type}_r{ROI_radius}' 
-            
-            elif ROI_type == "cylinder":
-                spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_{ROI_id}_{ROI_type}_r{ROI_radius}_h{ROI_height}' 
-            
-            plot_spectrogram_for_one_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_title, clamp_threshold_dB)
+                # Assemble pressure data for each ROI
+                wall_pressure_ROI = assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_pressure, ROI_params)
+
+                # Calculate average spectrogram for each ROI
+                spectrogram_data = calculate_avg_spectrogram_for_quantity_of_interest(
+                    output_folder_files = output_folder_files,
+                    output_folder_imgs = output_folder_imgs,
+                    output_folder_ROIs = output_folder_ROIs,
+                    spec_quantity = spec_quantity,
+                    array_quantity_of_interest = wall_pressure_ROI,
+                    clamp_threshold_dB = clamp_threshold_dB,
+                    STFT_params = STFT_params)
+
+                # Save spectrogram plot
+                if ROI_type == "sphere":
+                    spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_{ROI_id}_{ROI_type}_r{ROI_radius}' 
+                
+                elif ROI_type == "cylinder":
+                    spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_{ROI_id}_{ROI_type}_r{ROI_radius}_h{ROI_height}' 
+                
+                plot_spectrogram_for_one_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_title, clamp_threshold_dB)
 
     
     print (f'\nFinished computing and saving spetrograms.')
