@@ -80,7 +80,7 @@ from multiprocessing import sharedctypes
 
 import vtk
 import numpy as np
-from scipy.signal import stft
+from scipy.signal import stft, find_peaks
 import pyvista as pv
 import matplotlib.pyplot as plt
 
@@ -680,7 +680,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
         
         # Loop over all center points (or with a stride set below)
         # Choose which ROIs you want (based on the center_ID)
-        ROI_start   = 53
+        ROI_start   = 36
         ROI_end     = 40
         ROI_stride  = 1 
 
@@ -709,7 +709,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
             ROI_point_indices = np.unique(ROI_point_indices)
             wall_pressure_ROI_multi = wall_pressure[ROI_point_indices, :]
 
-            print(f"Found {ROI_point_indices.size()} unique wall points in total in this region. \n")
+            print(f"Found {len(ROI_point_indices)} unique wall points in total in the specified region. \n")
 
             # Calculate average spectrogram for all the ROIs combined
             spectrogram_data = calculate_avg_spectrogram_for_quantity_of_interest(
@@ -788,6 +788,78 @@ def compute_and_save_spectrogram_for_all_ROIs(
     print (f'\nFinished computing and saving spetrograms.')
 
 
+# ======================================================================================================
+# QUANTIFICATION FUNCTIONS
+# ======================================================================================================
+
+def calculate_metrics_to_classify_spectrogram_phases(freqs, spec_col_dB, f_min=100.0):
+    """
+    Compute simple metrics for one spectrogram column (one Q_inlet).
+    spec_col_dB: 1D array (n_freq,) in dB.
+    """
+    mask = freqs >= f_min
+    col = spec_col_dB[mask]
+
+    if col.size == 0:
+        return dict(mean_power=-np.inf,
+                    frac_above_0=0.0,
+                    frac_above_10=0.0,
+                    flatness=0.0,
+                    n_peaks=0)
+
+    # Basic level metrics
+    mean_power   = np.mean(col)
+    frac_above_0 = np.mean(col > 0.0)
+    frac_above_10 = np.mean(col > 10.0)
+
+    # Spectral flatness (0 = very peaky, 1 = white noise)
+    lin = 10.0**(col/10.0)
+    eps = 1e-12
+    geometric_mean = np.exp(np.mean(np.log(lin + eps)))
+    arithmetic_mean = np.mean(lin + eps)
+    flatness = geometric_mean / arithmetic_mean
+
+    # Number of prominent peaks (harmonic-like structure)
+    peaks, _ = find_peaks(col, height=0.0, prominence=3.0, distance=3)
+    n_peaks = len(peaks)
+
+    return dict(mean_power=mean_power,
+                frac_above_0=frac_above_0,
+                frac_above_10=frac_above_10,
+                flatness=flatness,
+                n_peaks=n_peaks)
+
+
+def classify_spectrogram_phases(m):
+    """
+    Map metrics dict -> phase {0,1,2,3}.
+    Intended meaning:
+      0: quiet / laminar
+      1: weak HF activity
+      2: harmonic / narrowband
+      3: broadband strong activity
+    """
+
+    mean_p   = m["mean_power"]
+    frac0    = m["frac_above_0"]
+    frac10   = m["frac_above_10"]
+    flatness = m["flatness"]
+    n_peaks  = m["n_peaks"]
+
+    # --- Phase 0: essentially nothing above noise ---
+    if frac0 < 0.01 and mean_p < -5.0 and n_peaks == 0:
+        return 0
+
+    # --- Phase 3: strong broadband noise ---
+    if (frac10 > 0.5 and flatness > 0.3 and mean_p > 5.0):
+        return 3
+
+    # --- Phase 2: clear harmonics, not yet broadband ---
+    if (frac10 > 0.05 and flatness < 0.3 and n_peaks >= 2):
+        return 2
+
+    # --- Everything in between is Phase 1 (weak onset) ---
+    return 1
 
 # ======================================================================================================
 # MAIN
@@ -845,9 +917,9 @@ def main():
     if not Path(output_folder).exists():
         Path(output_folder).mkdir(parents=True, exist_ok=True)
 
-    output_folder_files = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}/files")
-    output_folder_imgs = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}/imgs")
-    output_folder_ROIs = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}/ROIs")
+    output_folder_files = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.multi_ROI_flag}/files")
+    output_folder_imgs = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.multi_ROI_flag}/imgs")
+    output_folder_ROIs = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.multi_ROI_flag}/ROIs")
     
     output_folder_files.mkdir(parents=True, exist_ok=True)
     output_folder_imgs.mkdir(parents=True, exist_ok=True)
