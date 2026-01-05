@@ -58,6 +58,8 @@ python "$SCRIPT" \
     --ROI_center_csv    "$CENTERLINE" \
     --ROI_radius        8 \
     --ROI_height        2 \
+    --ROI_start_id      43 \
+    --ROI_end_id        52 \
     --multi_ROI_flag    True \
     --window_length     5000 \
     --overlap_fraction  0.9
@@ -73,7 +75,8 @@ python compute_Spectrogram.py \
     --ROI_type          "cylinder" \
     --ROI_center_csv    "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data/PTSeg028_base_0p64_centerline_points_clip_v7.csv" \
     --ROI_radius        10 \
-    --ROI_height        1 \
+    --ROI_start_id      43 \
+    --ROI_end_id        52 \
     --multi_ROI_flag    True \
     --window_length     5000 \
     --overlap_fraction  0.9
