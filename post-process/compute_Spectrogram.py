@@ -51,7 +51,7 @@
 #   --window              STFT window type
 #   --pad_mode            Edge padding ('cycle','constant','odd','even','none')
 #   --detrend             STFT detrend ('linear','constant', or False)
-#   --cutoff_dB           Minimum threshold for calculated power in dB (e.g., -30) --> anything below that will be set to this value
+#   --cutoff_dB           Minimum threshold for calculated power in dB (e.g., 0) --> anything below that will be set to this value
 #   --n_process           Number of worker processes (default: #logical CPUs)
 #
 # OUTPUTS:
@@ -247,7 +247,7 @@ def read_wall_pressure_from_h5_files_parallel(CFD_h5_files, wall_mesh, n_process
 
 
         # 3) Parallel reading
-        print (f"Reading in parallel {n_snapshots} HDF5 files into 1 array of shape [{n_points}, {n_snapshots}] ... \n")
+        print (f"Reading in parallel {n_snapshots} CFD results HDF5 files into 1 array of shape [{n_points}, {n_snapshots}] ... \n")
         
 
         # divide all snapshot files into groups and spread across processes
@@ -537,7 +537,7 @@ def calculate_avg_spectrogram_for_quantity_of_interest(spec_quantity, array_quan
                 S_sum += S_point_power 
             
             S_avg_power = S_sum / n_points
-            S_ref = (2e-5)**2 #np.mean(S_avg_power)
+            S_ref = (2e-5)**2 #np.mean(S_avg_power) 
             S_avg_dB = 10.0 * np.log10(S_avg_power / S_ref)
             S_avg_dB = np.squeeze(S_avg_dB)
 
@@ -584,118 +584,118 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_min, f_max):
     - 
     - 
     """
-
+    
     # Filter the low frequencies
-    mask_fmin = freqs >= f_min
-    spec_above_fmin = spec_col_dB[mask_fmin]
+    mask_below_fmin = freqs <= f_min
+    mask_above_fmin = (freqs > f_min) & (freqs < 1500)
+
+    spec_below_fmin = spec_col_dB[mask_below_fmin]
+    spec_above_fmin = spec_col_dB[mask_above_fmin]
 
     # Filter the high frequencies
-    mask_fmax = freqs >= f_max
-    spec_above_fmax = spec_col_dB[mask_fmax]
+    mask_above_fmax = (freqs >= f_max) & (freqs < 1500)
+    spec_above_fmax = spec_col_dB[mask_above_fmax]
 
-    # For no activity above fmin
-    if spec_above_fmin.size == 0:
-        spec_col_metrics = dict(mean_power_above_fmin = -np.inf,
-                                mean_power_above_fmax = 0.0,
-                                frac_above_0dB  = 0.0,
-                                frac_above_10dB = 0.0,
-                                flatness      = 0.0,
-                                n_peaks       = 0)
-        return spec_col_metrics
 
     # Basic level metrics
+    # Perform the averaging in linear space and convert to dB again
+    mean_power_below_fmin = np.mean(spec_below_fmin)    #10 * np.log10(np.mean(10**(spec_below_fmin/10)))
     mean_power_above_fmin = np.mean(spec_above_fmin)
-    mean_power_above_fmax = np.mean(spec_above_fmax)      
-    frac_above_0dB  = np.mean(spec_above_fmin > 0.0)  #fraction of frequencies with power > 0dB
-    frac_above_minus10dB = np.mean(spec_above_fmin > -10.0) #fraction of frequencies with power > -10dB
+    mean_power_above_fmax = np.mean(spec_above_fmax)
+    frac_above_80dB  = np.mean(spec_above_fmin > 80)  #fraction of frequencies with power > 80dB
 
     # Spectral flatness (0 = very peaky, 1 = white noise)
-    linear_power = 10.0**(spec_above_fmin/10.0)
+    linear_power = 10.0**(spec_above_fmax/10.0)
     eps = 1e-12
     geometric_mean = np.exp(np.mean(np.log(linear_power + eps)))
     arithmetic_mean = np.mean(linear_power + eps)
-    flatness = geometric_mean / arithmetic_mean
+    flatness_highFreq = geometric_mean / arithmetic_mean
 
     # Number of prominent peaks (harmonic-like structure)
-    peaks, _ = find_peaks(spec_above_fmin, height= 0.0, prominence=3.0, distance=3)
+    peaks, _ = find_peaks(spec_above_fmin, height= 80.0, distance=10)
     n_peaks = len(peaks)
 
-    spec_col_metrics = dict(mean_power_above_fmin = mean_power_above_fmin,
+    spec_col_metrics = dict(mean_power_below_fmin = mean_power_below_fmin,
+                            mean_power_above_fmin = mean_power_above_fmin,
                             mean_power_above_fmax = mean_power_above_fmax,
-                            frac_above_0dB  = frac_above_0dB,
-                            frac_above_minus10dB = frac_above_minus10dB,
-                            flatness=flatness,
-                            n_peaks=n_peaks)
+                            frac_above_80dB  = frac_above_80dB,
+                            flatness_highFreq = flatness_highFreq)
+                            #n_peaks=n_peaks)
 
+    print(f"above_fmin, f_max: {mean_power_above_fmin:.2f}, {mean_power_above_fmax:.2f}\n")  
     return spec_col_metrics
 
 
 
 def classify_spectrogram_phase_per_column(metrics_col):
-    
+    mean_power_below_fmin   = metrics_col["mean_power_below_fmin"]
     mean_power_above_fmin   = metrics_col["mean_power_above_fmin"]
     mean_power_above_fmax   = metrics_col["mean_power_above_fmax"]
-    frac_above_0dB    = metrics_col["frac_above_0dB"]
-    frac_above_neg10dB   = metrics_col["frac_above_minus10dB"]
-    flatness = metrics_col["flatness"]
-    n_peaks  = metrics_col["n_peaks"]
+    frac_above_80dB         = metrics_col["frac_above_80dB"]
+    flatness_highFreq       = metrics_col["flatness_highFreq"]
+    #n_peaks  = metrics_col["n_peaks"]
 
     # Define phases
-    # --- Phase 0: essentially nothing above noise ---
-    if (mean_power_above_fmin < -15.0): #and frac_above_0dB < 0.01 and n_peaks == 0):
+    # --- Phase 0: Quiet (nothing above noise) ---
+    if (mean_power_below_fmin <= 60): 
         return 0
 
-    # --- Phase 2: clear harmonics, not yet broadband ---
-    if (flatness < 0.3 and n_peaks >= 2):
+    # --- Phase 1: Laminar (onset of activity) ---
+    elif (mean_power_below_fmin > 60 and mean_power_above_fmin <= 40):
+        return 1
+
+    # --- Phase 2: Transitional (harmonics, weak high-frequency) ---
+    elif (mean_power_above_fmin > 40 and mean_power_above_fmax <= 60 and flatness_highFreq < 0.3):
         return 2
 
-    # --- Phase 3: strong broadband noise ---
-    if (mean_power_above_fmax > -15.0):# and frac_above_0dB > 0.3 and flatness > 0.3):
+    # --- Phase 3: Turbulent (strong broadband) ---
+    elif (mean_power_above_fmax > 60 or flatness_highFreq > 0.5): #frac_above_80dB > 0.1
         return 3
 
-
-    # --- Everything in between is Phase 1 (weak onset) ---
-    return 1
+    else:
+        return 0
 
 
 def classify_spectrogram_phases(spectrogram_data, f_min=100, f_max=1000):
     """
     Map metrics dict -> phase {0,1,2,3}.
     Intended meaning:
-      0: quiet / laminar
-      1: weak HF activity
+      0: quiet / nothing
+      1: laminar / weak activity
       2: harmonic / narrowband
-      3: broadband strong activity
+      3: turbulent / strong broadband activity
     """
     freqs   = spectrogram_data['freqs']
     spec_dB = spectrogram_data['power_avg_dB']
 
     # Total number of columns of the spectrogram (#times)
-    n_frames = spec_dB.shape[1] 
+    n_cols = spec_dB.shape[1] 
 
     # Initialize arrays
-    phases = np.zeros(n_frames, dtype=int)
+    phases = np.zeros(n_cols, dtype=int)
     metrics_list = []
 
     # Loop over each frame and calculate the metrics for it
-    for col in range(n_frames):
+    for col in range(n_cols):
         metrics_column = extract_metrics_from_spectrogram_column(freqs, spec_dB[:, col], f_min, f_max)
         metrics_list.append(metrics_column)
         phases[col] = classify_spectrogram_phase_per_column(metrics_column)
 
     # Optional: enforce non-decreasing phases along Q_inlet
-    #for j in range(1, n_cols):
-    #    if phases[j] < phases[j-1]:
-    #        phases[j] = phases[j-1]
+    #for col in range(1, n_cols):
+    #    if phases[col] < phases[col-1]:
+    #        phases[col] = phases[col-1]
 
-    print(metrics_list[60])
-    print(metrics_list[100])
-    print(metrics_list[118])
+    print(metrics_list[30], '\n')
+    print(metrics_list[90], '\n')
+    print(metrics_list[110], '\n')
+    print(metrics_list[-12:-10], '\n')
+
     return phases
 
 
 
-def plot_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, plot_title):
+def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, plot_title):
     """
     Save spectrogram data (.npz) and a PNG image.
     """
@@ -713,8 +713,9 @@ def plot_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name,
     # Create bins to show Q_inlet (instead of time) --> specify based on the ramp slope
     bins_Q = 2*bins # Q_in = 2*t
 
-    # Clamp values below a certain dB threshold
+    # Clamp values below or above a certain dB threshold
     # spectrogram_signal[spectrogram_signal < cutoff_dB] = cutoff_dB
+    # spectrogram_signal[spectrogram_signal > 100] = 100
 
     # Setting plot properties
     font_size = 12
@@ -745,7 +746,7 @@ def plot_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name,
 
     #----- Adding the colorbar
     cbar = fig.colorbar(spectrogram, ax=ax, orientation='vertical') #pad=0.15
-    spectrogram.set_clim(0, 100)
+    spectrogram.set_clim(60, 120)
 
     # Define the ticks you want
     #ticks = [-30, -15, 0, 15, 30]
@@ -759,11 +760,11 @@ def plot_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name,
     cbar.set_label('Power (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
     
     #---- Adding the phases
-    #ax2 = ax.twinx()
-    #ax2.step(bins_Q, spectrogram_phases, where="mid", color="white", linewidth=2)
-    #ax2.set_ylabel("Phase")
-    #ax2.set_yticks([0,1,2,3])
-    #ax2.set_ylim(-0.2, 3.2)
+    ax2 = ax.twinx()
+    ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=1)
+    ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
+    ax2.set_yticks([0,1,2,3])
+    ax2.set_ylim(-0.05, 3.05)
     
     plt.tight_layout()
     plt.savefig(Path(output_folder_imgs) / f"{plot_title}.png")#, transparent=True)
@@ -785,14 +786,14 @@ def compute_and_save_spectrogram_for_all_ROIs(
                     STFT_params: dict):
 
     # Unpack input parameters
-    ROI_type         = ROI_params.get("ROI_type")
-    ROI_center_coord = ROI_params.get("ROI_center_coord")
-    ROI_center_csv   = ROI_params.get("ROI_center_csv")
-    ROI_radius       = ROI_params.get("ROI_radius")
-    ROI_height       = ROI_params.get("ROI_height")
-    ROI_start_id     = ROI_params.get("ROI_start_id")
-    ROI_end_id       = ROI_params.get("ROI_end_id")
-    ROI_stride       = ROI_params.get("ROI_stride")
+    ROI_type             = ROI_params.get("ROI_type")
+    ROI_center_coord     = ROI_params.get("ROI_center_coord")
+    ROI_center_csv       = ROI_params.get("ROI_center_csv")
+    ROI_radius           = ROI_params.get("ROI_radius")
+    ROI_height           = ROI_params.get("ROI_height")
+    ROI_start_center_id  = ROI_params.get("ROI_start_center_id")
+    ROI_end_center_id    = ROI_params.get("ROI_end_center_id")
+    ROI_stride           = ROI_params.get("ROI_stride")
 
     window_length    = STFT_params.get("window_length")
     overlap_frac     = STFT_params.get("overlap_frac")
@@ -813,22 +814,23 @@ def compute_and_save_spectrogram_for_all_ROIs(
     # Coordinates of multiple points given in a CSV file
     if ROI_center_csv is not None:
         ROI_centers, ROI_normals = read_ROI_points_from_csv(ROI_center_csv, ROI_type)
-        print(f"Loaded {ROI_centers.shape[0]} ROI points from {ROI_center_csv}: \n")
+        
+        #print(f"Loaded {ROI_centers.shape[0]} ROI points from {ROI_center_csv}: \n")
         
         # Loop over all center points (or with a stride set below)
         # Choose which ROIs you want (based on the center_ID)
-        #ROI_start_id   = 43
-        #ROI_end_id     = 52
+        #ROI_start_center_id   = 43
+        #ROI_end_center_id     = 52
         #ROI_stride  = 1 
 
-        #-----Case 1A: Generate one spectrogram based on multiple ROIs (regional averaging)
+        #-----Case 1A: Sweeping method. Generate one spectrogram based on multiple ROIs (regional averaging)
         # Here we assemble the pressure data for multiple ROIs first and then extract the average spectrogram
         if ROI_params["multi_ROI_flag"]:
 
             ROI_point_indices = []
 
             # Loop over center points in the specified region
-            for i in range(ROI_start_id, ROI_end_id, ROI_stride):
+            for i in range(ROI_start_center_id, ROI_end_center_id, ROI_stride):
                 center = ROI_centers[i]
                 normal = ROI_normals[i]
                 ROI_id = f"ROI{i:02d}"
@@ -856,21 +858,21 @@ def compute_and_save_spectrogram_for_all_ROIs(
                                                 STFT_params = STFT_params)
 
             # Classify spectrogram phases
-            spectrogram_phases = classify_spectrogram_phases(spectrogram_data, f_min=100, f_max=1000)
+            spectrogram_phases = classify_spectrogram_phases(spectrogram_data) #, f_min=100, f_max=1000
 
             # Save spectrogram plot
             if ROI_type == "sphere":
-                spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_ROI{ROI_start_id}to{ROI_end_id}_r{ROI_radius}' 
+                spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_ROI{ROI_start_center_id}to{ROI_end_center_id}_r{ROI_radius}' 
                 
             elif ROI_type == "cylinder":
-                spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_ROI{ROI_star_id}to{ROI_end_id}_r{ROI_radius}_h{ROI_height}' 
+                spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_ROI{ROI_start_center_id}to{ROI_end_center_id}_r{ROI_radius}_h{ROI_height}' 
                 
-            plot_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectrogram_title)
+            plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectrogram_title)
 
         
-        #--------Case 1B: Generate one spectrogram per ROI
+        #-----Case 1B: Generate one spectrogram per ROI
         else:
-            for i in range(ROI_start_id, ROI_end_id, ROI_stride): #range(0, len(ROI_centers), 1):
+            for i in range(ROI_start_center_id, ROI_end_center_id, ROI_stride): #range(0, len(ROI_centers), 1):
                 
                 center = ROI_centers[i]
                 normal = ROI_normals[i]
@@ -892,7 +894,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
                                                     STFT_params = STFT_params)
 
                 # Classify spectrogram phases
-                spectrogram_phases = classify_spectrogram_phases(spectrogram_data, f_min=100)
+                spectrogram_phases = classify_spectrogram_phases(spectrogram_data) # f_min=100
 
                 # Save spectrogram plot
                 if ROI_type == "sphere":
@@ -901,7 +903,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
                 elif ROI_type == "cylinder":
                     spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_{ROI_id}_{ROI_type}_r{ROI_radius}_h{ROI_height}' 
                 
-                plot_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectrogram_title)
+                plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectrogram_title)
 
 
     #------- Case 2: Coords mode
@@ -923,12 +925,12 @@ def compute_and_save_spectrogram_for_all_ROIs(
                                                 STFT_params = STFT_params)
 
         # Classify spectrogram phases
-        spectrogram_phases = classify_spectrogram_phases(spectrogram_data, f_min=100)
+        spectrogram_phases = classify_spectrogram_phases(spectrogram_data) #f_min=100
 
         # Save spectrogram
         spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac}_r{ROI_radius}_h{ROI_height}' 
         
-        plot_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectrogram_title)
+        plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectrogram_title)
     
 
     print (f'\nFinished computing and saving spetrograms.')
@@ -957,17 +959,18 @@ def parse_args():
 
     # ROI parameters: It allows for either a single center OR a CSV of center
     ROI_group = ap.add_mutually_exclusive_group(required=True)
-    ROI_group.add_argument("--ROI_center_coord", nargs=3, type=float, metavar=("X", "Y", "Z"), help="XYZ coordinates for a single ROI center (mesh units)")
-    ROI_group.add_argument("--ROI_center_csv", type=str, help="CSV file with multiple ROI points; coords columns = Points:0/1/2")
+    ROI_group.add_argument("--ROI_center_coord", nargs=3,  type=float, metavar=("X", "Y", "Z"), help="XYZ coordinates for a single ROI center (mesh units)")
+    ROI_group.add_argument("--ROI_center_csv",   type=str, help="CSV file with multiple ROI points; coords columns = Points:0/1/2")
     
-    ap.add_argument("--ROI_type",       type=str,   default="cylinder", choices=["point","sphere","cylinder"], help="Type of ROI shape")
-    ap.add_argument("--ROI_radius",     type=float, required=True,      help="Radius of ROI in mesh units (mm in most cases)")
-    ap.add_argument("--ROI_height",     type=float, default=1,          help="Height of cylindrical ROI in mesh units (mm in most cases)")
-    ap.add_argument("--ROI_start_id",   type=int,   required=True,      help="ROI center ID of the start of the region of inerest")
-    ap.add_argument("--ROI_end_id",     type=int,   required=True,      help="ROI center ID of the end of the region of inerest")
-    ap.add_argument("--ROI_stride",     type=int,   default=1,          help="Stride between ROIs to sweep the region of inerest")
-    ap.add_argument("--save_ROI_flag",  type=bool,  default=True,       help="Flag to save ROI.vtp surface file or not")
-    ap.add_argument("--multi_ROI_flag", type=bool,  default=False,      help="Flag to compute spectrogram based on regional multiple ROIs or not")
+    ap.add_argument("--ROI_type",            type=str,   default="cylinder", choices=["point","sphere","cylinder"], help="Type of ROI shape")
+    ap.add_argument("--ROI_radius",          type=float, required=True,      help="Radius of ROI in mesh units (mm in most cases)")
+    ap.add_argument("--ROI_height",          type=float, default=1,          help="Height of cylindrical ROI in mesh units (mm in most cases)")
+    ap.add_argument("--ROI_start_center_id", type=int,   default=1,          help="ROI center ID of the start of the region of inerest")
+    ap.add_argument("--ROI_end_center_id",   type=int,   default=10,         help="ROI center ID of the end of the region of inerest")
+    ap.add_argument("--ROI_stride",          type=int,   default=1,          help="Stride between ROIs to sweep the region of inerest")
+    ap.add_argument("--save_ROI_flag",       type=bool,  default=True,       help="Flag to save ROI.vtp surface file or not")
+    ap.add_argument("--multi_ROI_flag",      type=bool,  default=False,      help="Flag to compute spectrogram based on regional multiple ROIs or not")
+
 
 
     # Short-time Fourier Transform control (all optional)
@@ -977,7 +980,7 @@ def parse_args():
     ap.add_argument("--window_type",      type=str,   default="hann",   choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT")
     ap.add_argument("--pad_mode",         type=str,   default="cycle",  choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts")
     ap.add_argument("--detrend",          type=str,   default="linear", help="Detrend option for STFT: 'linear', 'constant', or False")
-    ap.add_argument("--cutoff_dB",        type=float, default=-30.0,    help="Minimum dB floor for visualization")
+    ap.add_argument("--cutoff_dB",        type=float, default=0.0,      help="Minimum dB floor for visualization")
 
     
     return ap.parse_args()
@@ -1009,8 +1012,8 @@ def main():
         "ROI_center_csv": args.ROI_center_csv,
         "ROI_radius": args.ROI_radius,
         "ROI_height": args.ROI_height,
-        "ROI_start_id": args.ROI_start_id,
-        "ROI_end_id": args.ROI_end_id,
+        "ROI_start_center_id": args.ROI_start_center_id,
+        "ROI_end_center_id": args.ROI_end_center_id,
         "ROI_stride": args.ROI_stride,
         "save_ROI_flag": args.save_ROI_flag,
         "multi_ROI_flag": args.multi_ROI_flag}
@@ -1028,9 +1031,14 @@ def main():
     wall_mesh = assemble_wall_mesh(mesh_file)
     #vol_mesh  = assemble_volume_mesh(mesh_file)
 
-    print(f"\n[info] Mesh file:    {mesh_file}")
-    print(f"[info] Reading from: {input_folder}")
-    print(f"[info] Writing to:   {output_folder} \n")
+    print(f"\n[info] Mesh file:               {mesh_file}")
+    print(f"[info] Read CFD results from:    {input_folder}")
+    print(f"[info] Write spectrograms to:    {output_folder}")
+
+    if args.ROI_center_csv is not None:
+        print(f"[info] Read ROI centers from:  {args.ROI_center_csv}: \n")
+    else:
+        print(f"[info] Read ROI center from:   {args.ROI_center_coord}: \n")
 
     # Gather CFD results h5 files
     # Find & sort snapshot files by timestep 
@@ -1047,11 +1055,11 @@ def main():
 
     if timesteps_per_cyc is None:
         timesteps_per_cyc = extract_timesteps_per_cyc_from_h5_filename(CFD_h5_files[0])
-        print (f"Found timesteps_per_cycle = {timesteps_per_cyc} from HDF5 file names. \n")
+        print (f"Found timesteps_per_cycle = {timesteps_per_cyc} from CFD results HDF5 file names. \n")
 
     if period_seconds is None:
         period_seconds = extract_period_from_h5_filename(CFD_h5_files[0])
-        print (f"Found period (s) = {period_seconds} from HDF5 file names. \n")
+        print (f"Found period (s) = {period_seconds} from CFD results HDF5 file names. \n")
 
     # Assemble CFD data
     wall_pressure = read_wall_pressure_from_h5_files_parallel(CFD_h5_files, wall_mesh, args.n_process, args.density)    
