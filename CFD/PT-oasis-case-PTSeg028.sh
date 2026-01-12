@@ -39,7 +39,7 @@ scinet_user=ranbar                # your cluster username (need to specify this 
 group_name=def-steinman           # group allocation to run the job under
 debug=off                          # job partition -> choose between 'on'/'off' (Whether or not you are using debug node)
 num_cores=100                     # number of cores to use per node (everything runs on a single node) 
-required_time="23:59:59"          # amount of time cluster will need to run the case (max 24 hours)
+required_time="10:59:59"          # amount of time cluster will need to run the case (max 24 hours)
 post_processing_time_minutes=180  # amount of time needed to post-process the case (this is run on a single proc)
 
 casename="PTSeg028_base_0p64"     # What your case will be called in the output files & on cluster -- should be the same name as this script without the sh
@@ -49,7 +49,7 @@ timesteps_per_cycle=10000         # number of timesteps for each cycle (default:
 viscosity=0.0035                  # kinematic viscosity [mm^2/ms] (≡ m^2/s in consistent units) (default: 0.0035 mm^2/ms)
 uOrder=1                          # velocity FE order (default: 1)
 
-save_frequency=2                  # write solution every N steps (default: 5)
+save_frequency=5                  # write solution every N steps (default: 5)
 checkpoint=500                    # write restart every N steps
 save_first_cycle=True             # flag to save first cycle or not (default: False)
 #solver_env_name=oasis            # solver environment name (specific to you)

@@ -622,7 +622,7 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_min, f_max):
                             flatness_highFreq = flatness_highFreq)
                             #n_peaks=n_peaks)
 
-    print(f"above_fmin, f_max: {mean_power_above_fmin:.2f}, {mean_power_above_fmax:.2f}\n")  
+    #print(f"above_fmin, f_max: {mean_power_above_fmin:.2f}, {mean_power_above_fmax:.2f}\n")  
     return spec_col_metrics
 
 
@@ -645,7 +645,7 @@ def classify_spectrogram_phase_per_column(metrics_col):
         return 1
 
     # --- Phase 2: Transitional (harmonics, weak high-frequency) ---
-    elif (mean_power_above_fmin > 40 and mean_power_above_fmax <= 60 and flatness_highFreq < 0.3):
+    elif (mean_power_above_fmin > 40 and mean_power_above_fmax <= 60): #and flatness_highFreq < 0.3):
         return 2
 
     # --- Phase 3: Turbulent (strong broadband) ---
@@ -760,11 +760,11 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     cbar.set_label('Power (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
     
     #---- Adding the phases
-    ax2 = ax.twinx()
-    ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=1)
-    ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
-    ax2.set_yticks([0,1,2,3])
-    ax2.set_ylim(-0.05, 3.05)
+    #ax2 = ax.twinx()
+    #ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=1)
+    #ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
+    #ax2.set_yticks([0,1,2,3])
+    #ax2.set_ylim(-0.05, 3.05)
     
     plt.tight_layout()
     plt.savefig(Path(output_folder_imgs) / f"{plot_title}.png")#, transparent=True)
@@ -1032,8 +1032,8 @@ def main():
     #vol_mesh  = assemble_volume_mesh(mesh_file)
 
     print(f"\n[info] Mesh file:               {mesh_file}")
-    print(f"[info] Read CFD results from:    {input_folder}")
-    print(f"[info] Write spectrograms to:    {output_folder}")
+    print(f"[info] Read CFD results from:   {input_folder}")
+    print(f"[info] Write spectrograms to:   {output_folder}")
 
     if args.ROI_center_csv is not None:
         print(f"[info] Read ROI centers from:  {args.ROI_center_csv}: \n")

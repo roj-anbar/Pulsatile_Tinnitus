@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --partition=debug
+#SBATCH --partition=compute
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=192
-#SBATCH --time=00:59:59
+#SBATCH --time=10:59:59
 #SBATCH --job-name PT_Qcriterion
 #SBATCH --output=PT_Qcriterion_%j.txt
 
@@ -10,7 +10,7 @@
 set -euo pipefail
 
 # ---------------------------------- Define Paths ---------------------------------------
-CASE=PTSeg106_base_0p64
+CASE=PTSeg043_noLabbe_base
 BASE_DIR=$SCRATCH/PT/PT_Ramp/PT_cases/$CASE
 MESH="$BASE_DIR/data"
 INPUT="$BASE_DIR/results/${CASE}_ts10000_cy6_saveFreq5"

@@ -10,14 +10,14 @@
 set -euo pipefail
 
 # ---------------------------------- Define Paths -------------------------------------------------------------------------------
-CASE=PTSeg043_noLabbe_base                                              # Case name
-BASE_DIR=$SCRATCH/PT/PT_Ramp/PT_cases/$CASE                             # Parent directory of the case
+CASE=PTSeg106_base_0p64                                             # Case name
+BASE_DIR=$SCRATCH/PT/PT_Ramp/cases/$CASE                             # Parent directory of the case
 MESH="$BASE_DIR/data"                                                   # Path to mesh data folder containing the h5 mesh
-CENTERLINE="$MESH/${CASE}_centerline_points_v6.csv"                     # Path to centerline csv file used to construct ROIs
+CENTERLINE="$MESH/${CASE}_centerline_points.csv"                     # Path to centerline csv file used to construct ROIs
 INPUT="$BASE_DIR/results/${CASE}_ts10000_cy6_saveFreq1"                 # Path to CFD results folder containing timeseries HDF5 files
-OUTPUT="$BASE_DIR/post-process/Spectrogram_wall_pressure/cy6_saveFreq1" # Path to saving spectrogram files
+OUTPUT="$BASE_DIR/post-process/Spectrogram_wall_pressure/cy6_saveFreq1/run2_centerline_fine" # Path to saving spectrogram files
 
-SCRIPT="$SLURM_SUBMIT_DIR/compute_Spectrogram.py"  # ensure to submit from script dir
+SCRIPT="/scratch/ranbar/PT/PT_Ramp/scripts/post-process/compute_Spectrogram.py"  # ensure to submit from script dir
 
 
 # --------------------------------- Load Modules -------------------------------------------------------------------------------
@@ -44,43 +44,104 @@ export PYVISTA_OFF_SCREEN=true                              #tells pyvista to us
 # ------------------------------ Run Scripts ------------------------------------------------------------------------------------
 
 
-#    --timesteps_per_cyc 10000 \
+#--timesteps_per_cyc 10000 \
+
+# Run the script once for each topological region of interest (i.e. stenosis, sigmoid sinus, ...)
 
 python "$SCRIPT" \
-    --case_name         "$CASE" \
-    --input_folder      "$INPUT" \
-    --mesh_folder       "$MESH" \
-    --output_folder     "$OUTPUT" \
-    --n_process         "${SLURM_TASKS_PER_NODE}" \
-    --period_seconds    0.915 \
-    --spec_quantity     "pressure" \
-    --ROI_type          "sphere" \
-    --ROI_center_csv    "$CENTERLINE" \
-    --ROI_radius        8 \
-    --ROI_height        2 \
-    --ROI_start_id      43 \
-    --ROI_end_id        52 \
-    --multi_ROI_flag    True \
-    --window_length     5000 \
-    --overlap_fraction  0.9
-
-
-python compute_Spectrogram.py \
-    --case_name             "PTSeg028_base_0p64" \
-    --input_folder          "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/results/PTSeg028_base_0p64_ts10000_cy6_Q=2t_saveFreq1" \
-    --mesh_folder           "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data" \
-    --output_folder         "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/post-process/Spectrogram_wall_pressure/cy6_saveFreq1" \
-    --ROI_center_csv        "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg028_base_0p64/data/PTSeg028_base_0p64_centerline_points.csv" \
-    --n_process             192 \
+    --case_name             "$CASE" \
+    --input_folder          "$INPUT" \
+    --mesh_folder           "$MESH" \
+    --output_folder         "$OUTPUT" \
+    --ROI_center_csv        "$CENTERLINE" \
+    --n_process             "${SLURM_TASKS_PER_NODE}" \
     --spec_quantity         "pressure" \
     --window_length         5000 \
     --overlap_fraction      0.9 \
     --ROI_type              "cylinder" \
-    --ROI_radius            10 \
-    --ROI_start_center_id   627 \
-    --ROI_end_center_id     664 \
-    --ROI_stride            2 \
+    --ROI_radius            8 \
+    --ROI_height            2 \
+    --ROI_start_center_id   1280 \
+    --ROI_end_center_id     1360 \
+    --ROI_stride            4 \
     --multi_ROI_flag        True
+
+
+python "$SCRIPT" \
+    --case_name             "$CASE" \
+    --input_folder          "$INPUT" \
+    --mesh_folder           "$MESH" \
+    --output_folder         "$OUTPUT" \
+    --ROI_center_csv        "$CENTERLINE" \
+    --n_process             "${SLURM_TASKS_PER_NODE}" \
+    --spec_quantity         "pressure" \
+    --window_length         5000 \
+    --overlap_fraction      0.9 \
+    --ROI_type              "cylinder" \
+    --ROI_radius            8 \
+    --ROI_height            2 \
+    --ROI_start_center_id   1200 \
+    --ROI_end_center_id     1240 \
+    --ROI_stride            4 \
+    --multi_ROI_flag        True
+
+
+python "$SCRIPT" \
+    --case_name             "$CASE" \
+    --input_folder          "$INPUT" \
+    --mesh_folder           "$MESH" \
+    --output_folder         "$OUTPUT" \
+    --ROI_center_csv        "$CENTERLINE" \
+    --n_process             "${SLURM_TASKS_PER_NODE}" \
+    --spec_quantity         "pressure" \
+    --window_length         5000 \
+    --overlap_fraction      0.9 \
+    --ROI_type              "cylinder" \
+    --ROI_radius            8 \
+    --ROI_height            2 \
+    --ROI_start_center_id   1100 \
+    --ROI_end_center_id     1182 \
+    --ROI_stride            4 \
+    --multi_ROI_flag        True
+
+
+python "$SCRIPT" \
+    --case_name             "$CASE" \
+    --input_folder          "$INPUT" \
+    --mesh_folder           "$MESH" \
+    --output_folder         "$OUTPUT" \
+    --ROI_center_csv        "$CENTERLINE" \
+    --n_process             "${SLURM_TASKS_PER_NODE}" \
+    --spec_quantity         "pressure" \
+    --window_length         5000 \
+    --overlap_fraction      0.9 \
+    --ROI_type              "cylinder" \
+    --ROI_radius            8 \
+    --ROI_height            2 \
+    --ROI_start_center_id   990 \
+    --ROI_end_center_id     1090 \
+    --ROI_stride            4 \
+    --multi_ROI_flag        True
+
+
+# For running directly from commandline use below
+#python compute_Spectrogram.py \
+#    --case_name             "PTSeg043_noLabbe_base" \
+#    --input_folder          "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/results/PTSeg043_noLabbe_base_ts10000_cy6_saveFreq1" \
+#    --mesh_folder           "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/data" \
+#    --output_folder         "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/post-process/Spectrogram_wall_pressure/cy6_saveFreq1" \
+#    --ROI_center_csv        "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/data/PTSeg043_noLabbe_base_centerline_points.csv" \
+#    --n_process             192 \
+#    --spec_quantity         "pressure" \
+#    --window_length         5000 \
+#    --overlap_fraction      0.9 \
+#    --ROI_type              "cylinder" \
+#    --ROI_radius            8 \
+#    --ROI_height            2 \
+#    --ROI_start_center_id   986 \
+#    --ROI_end_center_id     1080 \
+#    --ROI_stride            2 \
+#    --multi_ROI_flag        True
 
 
 wait
