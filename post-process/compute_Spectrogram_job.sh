@@ -64,7 +64,8 @@ python "$SCRIPT" \
     --ROI_start_center_id   1280 \
     --ROI_end_center_id     1360 \
     --ROI_stride            4 \
-    --multi_ROI_flag        True
+    --flag_multi_ROI        \
+    --flag_save_ROI
 
 
 python "$SCRIPT" \
@@ -83,7 +84,8 @@ python "$SCRIPT" \
     --ROI_start_center_id   1200 \
     --ROI_end_center_id     1240 \
     --ROI_stride            4 \
-    --multi_ROI_flag        True
+    --flag_multi_ROI        \
+    --flag_save_ROI
 
 
 python "$SCRIPT" \
@@ -102,7 +104,8 @@ python "$SCRIPT" \
     --ROI_start_center_id   1100 \
     --ROI_end_center_id     1182 \
     --ROI_stride            4 \
-    --multi_ROI_flag        True
+    --flag_multi_ROI        \
+    --flag_save_ROI
 
 
 python "$SCRIPT" \
@@ -121,7 +124,8 @@ python "$SCRIPT" \
     --ROI_start_center_id   990 \
     --ROI_end_center_id     1090 \
     --ROI_stride            4 \
-    --multi_ROI_flag        True
+    --flag_multi_ROI        \
+    --flag_save_ROI
 
 
 # For running directly from commandline use below
@@ -141,7 +145,8 @@ python "$SCRIPT" \
 #    --ROI_start_center_id   986 \
 #    --ROI_end_center_id     1080 \
 #    --ROI_stride            2 \
-#    --multi_ROI_flag        True
+#    --flag_multi_ROI        \
+#    --flag_save_ROI
 
 
 wait

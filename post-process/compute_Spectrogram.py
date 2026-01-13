@@ -44,7 +44,8 @@
 #   --ROI_center_coord    X Y Z center of spherical ROI (mesh units).
 #   --ROI_center_csv      Path to CSV file containing the coordinates of multiple points for ROI center.
 #   --ROI_radius          Sphere radius (mesh units). If 0, treat ROI_center as the **point ID** to sample.
-#   --save_ROI_flag       Boolean flag to save the ROI.vtp surface file or not (default = False)
+#   --flag_save_ROI       Flag to save the ROI.vtp surface file (If it's included in args then it's True if not it's False)
+#   --flag_multi_ROI      Flag to compute spectrogram in a segment based on multiple ROIs (If it's included in args then it's True if not it's False)
 #   --window_length       STFT window length (samples, i.e., snapshots)
 #   --n_fft               STFT FFT length (bins)
 #   --overlap_frac        STFT noverlap = overlap_frac * window_length --> Overlap fraction between consequent windows (0-1)
@@ -414,7 +415,7 @@ def assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_press
     ROI_center_normal = ROI_params.get("ROI_center_normal")
     ROI_radius        = ROI_params.get("ROI_radius")
     ROI_height        = ROI_params.get("ROI_height")
-    save_ROI_flag     = ROI_params.get("save_ROI_flag")
+    flag_save_ROI     = ROI_params.get("flag_save_ROI")
 
 
     # Find coordinate of ROI center
@@ -438,7 +439,7 @@ def assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_press
         ROI_pids = np.where(points_in_ROI)[0]
 
         # Save the sphere to a .vtp file (for visualization in paraview later)
-        if save_ROI_flag:
+        if flag_save_ROI:
             ROI_sphere.save(f'{output_folder_ROIs}/{ROI_id}_{ROI_type}_c{ROI_center_coord}_r{ROI_radius}.vtp') 
 
     
@@ -456,7 +457,7 @@ def assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_press
         ROI_pids = np.where(points_in_ROI)[0]
 
         # Save the cylinder to a .vtp file (for visualization in paraview later)
-        if save_ROI_flag:
+        if flag_save_ROI:
             ROI_cylinder.save(f'{output_folder_ROIs}/{ROI_id}_{ROI_type}_c{ROI_center_coord}_r{ROI_radius}_h{ROI_height}.vtp') 
 
     # For any other types    
@@ -745,19 +746,19 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
 
 
     #----- Adding the colorbar
-    cbar = fig.colorbar(spectrogram, ax=ax, orientation='vertical') #pad=0.15
-    spectrogram.set_clim(60, 120)
+    cbar = fig.colorbar(spectrogram, ax=ax, orientation='horizontal', pad=0.5) #pad=0.15
+    spectrogram.set_clim(40, 100)
 
     # Define the ticks you want
-    #ticks = [-30, -15, 0, 15, 30]
-    #cbar.set_ticks(ticks)
-    #cbar.set_ticklabels([str(t) for t in ticks])   # optional if you want custom text
+    ticks = [40, 60, 80, 100]
+    cbar.set_ticks(ticks)
+    cbar.set_ticklabels([str(t) for t in ticks])   # optional if you want custom text
 
     # Style
+    cbar.ax.xaxis.tick_top()
+    cbar.ax.tick_params(labelsize=46)
     #cbar.ax.xaxis.set_label_position('top')
-    #cbar.ax.xaxis.tick_top()
-    #cbar.ax.tick_params(labelsize=46)
-    cbar.set_label('Power (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
+    #cbar.set_label('Power (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
     
     #---- Adding the phases
     #ax2 = ax.twinx()
@@ -825,7 +826,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
 
         #-----Case 1A: Sweeping method. Generate one spectrogram based on multiple ROIs (regional averaging)
         # Here we assemble the pressure data for multiple ROIs first and then extract the average spectrogram
-        if ROI_params["multi_ROI_flag"]:
+        if ROI_params["flag_multi_ROI"]:
 
             ROI_point_indices = []
 
@@ -968,8 +969,8 @@ def parse_args():
     ap.add_argument("--ROI_start_center_id", type=int,   default=1,          help="ROI center ID of the start of the region of inerest")
     ap.add_argument("--ROI_end_center_id",   type=int,   default=10,         help="ROI center ID of the end of the region of inerest")
     ap.add_argument("--ROI_stride",          type=int,   default=1,          help="Stride between ROIs to sweep the region of inerest")
-    ap.add_argument("--save_ROI_flag",       type=bool,  default=True,       help="Flag to save ROI.vtp surface file or not")
-    ap.add_argument("--multi_ROI_flag",      type=bool,  default=False,      help="Flag to compute spectrogram based on regional multiple ROIs or not")
+    ap.add_argument("--flag_save_ROI",       action="store_true",            help="Flag to save ROI.vtp surface file")
+    ap.add_argument("--flag_multi_ROI",      action="store_true",            help="Flag to compute spectrogram in a segment based on multiple ROIs")
 
 
 
@@ -997,13 +998,13 @@ def main():
     if not Path(output_folder).exists():
         Path(output_folder).mkdir(parents=True, exist_ok=True)
 
-    output_folder_files = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.multi_ROI_flag}/files")
-    output_folder_imgs = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.multi_ROI_flag}/imgs")
-    output_folder_ROIs = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.multi_ROI_flag}/ROIs")
+    output_folder_files = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.flag_multi_ROI}/files")
+    output_folder_imgs = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.flag_multi_ROI}/imgs")
+    output_folder_ROIs = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.flag_multi_ROI}/ROIs")
     
     output_folder_files.mkdir(parents=True, exist_ok=True)
     output_folder_imgs.mkdir(parents=True, exist_ok=True)
-    output_folder_ROIs.mkdir(parents=True, exist_ok=True)
+    if flag_save_ROI: output_folder_ROIs.mkdir(parents=True, exist_ok=True)
 
     # Put input arguments into dictionaries
     ROI_params = {
@@ -1015,8 +1016,8 @@ def main():
         "ROI_start_center_id": args.ROI_start_center_id,
         "ROI_end_center_id": args.ROI_end_center_id,
         "ROI_stride": args.ROI_stride,
-        "save_ROI_flag": args.save_ROI_flag,
-        "multi_ROI_flag": args.multi_ROI_flag}
+        "flag_save_ROI": args.flag_save_ROI,
+        "flag_multi_ROI": args.flag_multi_ROI}
 
     short_time_fourier_params = {
         "window_length": args.window_length,
