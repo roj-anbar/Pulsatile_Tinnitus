@@ -772,7 +772,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     
     #---- Adding the phases
     ax2 = ax.twinx()
-    ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=1)
+    ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=2)
     ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
     ax2.set_yticks([0,1,2,3])
     ax2.set_ylim(-0.05, 3.05)

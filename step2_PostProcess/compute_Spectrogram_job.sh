@@ -44,10 +44,13 @@ export PYVISTA_OFF_SCREEN=true                              #tells pyvista to us
 # ------------------------------ Run Scripts ------------------------------------------------------------------------------------
 
 
-#--timesteps_per_cyc 10000 \
+# Run the script once for each anatomical region of interest (i.e. stenosis, sigmoid sinus, ...).
+# You can obtain the ROI parameters (e.g. ROI_start_center_id, ROI_end_center_id, ...) from the spreadsheet below:
+# https://utoronto-my.sharepoint.com/:x:/g/personal/rojin_anbarafshan_mail_utoronto_ca/IQAE4WxcfxZtTa3r6agUO6xUAUsh_3MP7hhnwm9_BzdpsV0?e=WVALzt
 
-# Run the script once for each topological region of interest (i.e. stenosis, sigmoid sinus, ...)
 
+
+# Transverse Sinus
 python "$SCRIPT" \
     --case_name             "$CASE" \
     --input_folder          "$INPUT" \
@@ -65,9 +68,12 @@ python "$SCRIPT" \
     --ROI_end_center_id     430 \
     --ROI_stride            4 \
     --flag_multi_ROI        
-#    --flag_save_ROI
+#   --flag_save_ROI
+#   --timesteps_per_cyc 10000 
 
 
+
+# Stenosis/fenestration
 python "$SCRIPT" \
     --case_name             "$CASE" \
     --input_folder          "$INPUT" \
@@ -88,6 +94,7 @@ python "$SCRIPT" \
 #    --flag_save_ROI
 
 
+# Post-stenotic Dilatation
 python "$SCRIPT" \
     --case_name             "$CASE" \
     --input_folder          "$INPUT" \
@@ -108,6 +115,7 @@ python "$SCRIPT" \
 #    --flag_save_ROI
 
 
+# Sigmoid Sinus
 python "$SCRIPT" \
     --case_name             "$CASE" \
     --input_folder          "$INPUT" \
@@ -128,7 +136,31 @@ python "$SCRIPT" \
 #    --flag_save_ROI
 
 
-# For running directly from commandline use below
+# Jugular Bulb
+python "$SCRIPT" \
+    --case_name             "$CASE" \
+    --input_folder          "$INPUT" \
+    --mesh_folder           "$MESH" \
+    --output_folder         "$OUTPUT" \
+    --ROI_center_csv        "$CENTERLINE" \
+    --n_process             "${SLURM_TASKS_PER_NODE}" \
+    --spec_quantity         "pressure" \
+    --window_length         5000 \
+    --overlap_fraction      0.9 \
+    --ROI_type              "cylinder" \
+    --ROI_radius            10 \
+    --ROI_height            2 \
+    --ROI_start_center_id   986 \
+    --ROI_end_center_id     1060 \
+    --ROI_stride            2 \
+    --flag_multi_ROI       
+
+
+
+
+
+
+#--------- For running directly from commandline use below
 #python compute_Spectrogram.py \
 #    --case_name             "PTSeg043_noLabbe_base" \
 #    --input_folder          "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/step1_CFD/results/PTSeg043_noLabbe_base_ts10000_cy6_saveFreq1" \
