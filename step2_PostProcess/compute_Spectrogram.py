@@ -783,10 +783,10 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     
     #---- Adding the phases
     ax2 = ax.twinx()
-    ax2.step(bins_Q, spectrogram_phases, where="mid", color="white", linewidth=2.5)
+    ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=4)
     ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
     ax2.set_yticks([0,1,2,3])
-    ax2.set_ylim(-0.05, 3.05)
+    ax2.set_ylim(-0.15, 3.15)
     
     plt.tight_layout()
     plt.savefig(Path(output_folder_imgs) / f"{plot_title}.png")#, transparent=True)
@@ -982,7 +982,7 @@ def parse_args():
     
     ap.add_argument("--ROI_type",            type=str,   default="cylinder", choices=["point","sphere","cylinder"], help="Type of ROI shape")
     ap.add_argument("--ROI_radius",          type=float, required=True,      help="Radius of ROI in mesh units (mm in most cases)")
-    ap.add_argument("--ROI_height",          type=float, default=1,          help="Height of cylindrical ROI in mesh units (mm in most cases)")
+    ap.add_argument("--ROI_height",          type=float, default=2,          help="Height of cylindrical ROI in mesh units (mm in most cases)")
     ap.add_argument("--ROI_start_center_id", type=int,   default=1,          help="ROI center ID of the start of the region of inerest")
     ap.add_argument("--ROI_end_center_id",   type=int,   default=10,         help="ROI center ID of the end of the region of inerest")
     ap.add_argument("--ROI_stride",          type=int,   default=1,          help="Stride between ROIs to sweep the region of inerest")
@@ -994,7 +994,7 @@ def parse_args():
     # Short-time Fourier Transform control (all optional)
     ap.add_argument("--window_length",    type=int,   default=None,     help="Length of FFT window in samples (number of snapshots for each window)")
     ap.add_argument("--n_fft",            type=int,   default=None,     help="FFT length (bins)")
-    ap.add_argument("--overlap_fraction", type=float, default=0.75,     help="Overlap fraction between consequent windows [0,1] (default: 0.75)")
+    ap.add_argument("--overlap_fraction", type=float, default=0.9,     help="Overlap fraction between consequent windows [0,1] (default: 0.75)")
     ap.add_argument("--window_type",      type=str,   default="hann",   choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT")
     ap.add_argument("--pad_mode",         type=str,   default="cycle",  choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts")
     ap.add_argument("--detrend",          type=str,   default="linear", help="Detrend option for STFT: 'linear', 'constant', or False")

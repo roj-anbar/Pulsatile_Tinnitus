@@ -60,10 +60,8 @@ python "$SCRIPT" \
     --n_process             "${SLURM_TASKS_PER_NODE}" \
     --spec_quantity         "pressure" \
     --window_length         5000 \
-    --overlap_fraction      0.9 \
     --ROI_type              "cylinder" \
     --ROI_radius            8 \
-    --ROI_height            2 \
     --ROI_start_center_id   350 \
     --ROI_end_center_id     430 \
     --ROI_stride            4 \
@@ -83,10 +81,8 @@ python "$SCRIPT" \
     --n_process             "${SLURM_TASKS_PER_NODE}" \
     --spec_quantity         "pressure" \
     --window_length         5000 \
-    --overlap_fraction      0.9 \
     --ROI_type              "cylinder" \
     --ROI_radius            8 \
-    --ROI_height            2 \
     --ROI_start_center_id   462 \
     --ROI_end_center_id     608 \
     --ROI_stride            4 \
@@ -104,10 +100,8 @@ python "$SCRIPT" \
     --n_process             "${SLURM_TASKS_PER_NODE}" \
     --spec_quantity         "pressure" \
     --window_length         5000 \
-    --overlap_fraction      0.9 \
     --ROI_type              "cylinder" \
     --ROI_radius            8 \
-    --ROI_height            2 \
     --ROI_start_center_id   1162 \
     --ROI_end_center_id     1232 \
     --ROI_stride            2 \
@@ -125,10 +119,8 @@ python "$SCRIPT" \
     --n_process             "${SLURM_TASKS_PER_NODE}" \
     --spec_quantity         "pressure" \
     --window_length         5000 \
-    --overlap_fraction      0.9 \
     --ROI_type              "cylinder" \
     --ROI_radius            8 \
-    --ROI_height            2 \
     --ROI_start_center_id   1072 \
     --ROI_end_center_id     1150 \
     --ROI_stride            2 \
@@ -146,10 +138,8 @@ python "$SCRIPT" \
     --n_process             "${SLURM_TASKS_PER_NODE}" \
     --spec_quantity         "pressure" \
     --window_length         5000 \
-    --overlap_fraction      0.9 \
     --ROI_type              "cylinder" \
     --ROI_radius            10 \
-    --ROI_height            2 \
     --ROI_start_center_id   986 \
     --ROI_end_center_id     1060 \
     --ROI_stride            2 \
@@ -170,15 +160,14 @@ python "$SCRIPT" \
 #    --n_process             192 \
 #    --spec_quantity         "pressure" \
 #    --window_length         5000 \
-#    --overlap_fraction      0.9 \
 #    --ROI_type              "cylinder" \
 #    --ROI_radius            8 \
 #    --ROI_height            2 \
 #    --ROI_start_center_id   1162 \
 #    --ROI_end_center_id     1232 \
-#    --ROI_stride            2 \
-#    --flag_multi_ROI        \
-#    --flag_save_ROI
+#    --ROI_stride            4 \
+#    --flag_multi_ROI        
+#    #--flag_save_ROI
 
 
 wait
