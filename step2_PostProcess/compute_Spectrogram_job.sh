@@ -10,14 +10,14 @@
 set -euo pipefail
 
 # ---------------------------------- Define Paths -------------------------------------------------------------------------------
-CASE=PTSeg106_base_0p64                                             # Case name
-BASE_DIR=$SCRATCH/PT/PT_Ramp/cases/$CASE                             # Parent directory of the case
-MESH="$BASE_DIR/data"                                                   # Path to mesh data folder containing the h5 mesh
-CENTERLINE="$MESH/${CASE}_centerline_points.csv"                     # Path to centerline csv file used to construct ROIs
-INPUT="$BASE_DIR/results/${CASE}_ts10000_cy6_saveFreq1"                 # Path to CFD results folder containing timeseries HDF5 files
-OUTPUT="$BASE_DIR/post-process/Spectrogram_wall_pressure/cy6_saveFreq1/run2_centerline_fine" # Path to saving spectrogram files
+CASE=PTSeg043_noLabbe_base                                                           # Case name
+BASE_DIR=$SCRATCH/PT/PT_Ramp/cases/$CASE                                          # Parent directory of the case
+MESH="$BASE_DIR/step1_CFD/data"                                                   # Path to mesh data folder containing the h5 mesh
+CENTERLINE="$MESH/${CASE}_centerline_points.csv"                                  # Path to centerline csv file used to construct ROIs
+INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq1"                 # Path to CFD results folder containing timeseries HDF5 files
+OUTPUT="$BASE_DIR/step2_PostProcess/Spectrogram_wall_pressure/cy6_saveFreq1"      # Path to saving spectrogram files
 
-SCRIPT="/scratch/ranbar/PT/PT_Ramp/scripts/post-process/compute_Spectrogram.py"  # ensure to submit from script dir
+SCRIPT="/scratch/ranbar/PT/PT_Ramp/scripts/step2_PostProcess/compute_Spectrogram.py"
 
 
 # --------------------------------- Load Modules -------------------------------------------------------------------------------
@@ -61,11 +61,11 @@ python "$SCRIPT" \
     --ROI_type              "cylinder" \
     --ROI_radius            8 \
     --ROI_height            2 \
-    --ROI_start_center_id   1280 \
-    --ROI_end_center_id     1360 \
+    --ROI_start_center_id   350 \
+    --ROI_end_center_id     430 \
     --ROI_stride            4 \
-    --flag_multi_ROI        \
-    --flag_save_ROI
+    --flag_multi_ROI        
+#    --flag_save_ROI
 
 
 python "$SCRIPT" \
@@ -81,11 +81,11 @@ python "$SCRIPT" \
     --ROI_type              "cylinder" \
     --ROI_radius            8 \
     --ROI_height            2 \
-    --ROI_start_center_id   1200 \
-    --ROI_end_center_id     1240 \
+    --ROI_start_center_id   462 \
+    --ROI_end_center_id     608 \
     --ROI_stride            4 \
-    --flag_multi_ROI        \
-    --flag_save_ROI
+    --flag_multi_ROI        
+#    --flag_save_ROI
 
 
 python "$SCRIPT" \
@@ -101,11 +101,11 @@ python "$SCRIPT" \
     --ROI_type              "cylinder" \
     --ROI_radius            8 \
     --ROI_height            2 \
-    --ROI_start_center_id   1100 \
-    --ROI_end_center_id     1182 \
-    --ROI_stride            4 \
-    --flag_multi_ROI        \
-    --flag_save_ROI
+    --ROI_start_center_id   1162 \
+    --ROI_end_center_id     1232 \
+    --ROI_stride            2 \
+    --flag_multi_ROI        
+#    --flag_save_ROI
 
 
 python "$SCRIPT" \
@@ -121,20 +121,20 @@ python "$SCRIPT" \
     --ROI_type              "cylinder" \
     --ROI_radius            8 \
     --ROI_height            2 \
-    --ROI_start_center_id   990 \
-    --ROI_end_center_id     1090 \
-    --ROI_stride            4 \
-    --flag_multi_ROI        \
-    --flag_save_ROI
+    --ROI_start_center_id   1072 \
+    --ROI_end_center_id     1150 \
+    --ROI_stride            2 \
+    --flag_multi_ROI        
+#    --flag_save_ROI
 
 
 # For running directly from commandline use below
 #python compute_Spectrogram.py \
 #    --case_name             "PTSeg043_noLabbe_base" \
-#    --input_folder          "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/results/PTSeg043_noLabbe_base_ts10000_cy6_saveFreq1" \
-#    --mesh_folder           "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/data" \
-#    --output_folder         "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/post-process/Spectrogram_wall_pressure/cy6_saveFreq1" \
-#    --ROI_center_csv        "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/data/PTSeg043_noLabbe_base_centerline_points.csv" \
+#    --input_folder          "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/step1_CFD/results/PTSeg043_noLabbe_base_ts10000_cy6_saveFreq1" \
+#    --mesh_folder           "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/step1_CFD/data" \
+#    --output_folder         "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/step2_PostProcess/Spectrogram_wall_pressure/cy6_saveFreq1" \
+#    --ROI_center_csv        "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/step1_CFD/data/PTSeg043_noLabbe_base_centerline_points.csv" \
 #    --n_process             192 \
 #    --spec_quantity         "pressure" \
 #    --window_length         5000 \
@@ -142,8 +142,8 @@ python "$SCRIPT" \
 #    --ROI_type              "cylinder" \
 #    --ROI_radius            8 \
 #    --ROI_height            2 \
-#    --ROI_start_center_id   986 \
-#    --ROI_end_center_id     1080 \
+#    --ROI_start_center_id   1162 \
+#    --ROI_end_center_id     1232 \
 #    --ROI_stride            2 \
 #    --flag_multi_ROI        \
 #    --flag_save_ROI

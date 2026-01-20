@@ -575,97 +575,107 @@ def calculate_avg_spectrogram_for_quantity_of_interest(spec_quantity, array_quan
 # CLASSIFICATION FUNCTIONS
 # ======================================================================================================
 
-def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_min, f_max):
+def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_high, f_max):
     """
     Compute simple metrics for one spectrogram column (one time).
     spec_col_dB: 1D array (n_freq,) in dB.
-    f_min: minimum frequency in Hz to be considered as acoustic activity.
+    f_low:       low frequency threshold in Hz (default = 100 Hz).
+    f_high:      high frequency threshold in Hz (default = 1000 Hz).
+    f_max:       max frequency threshold in Hz (default = 1500 Hz).
+    
     Returns a dictionary of metrics for each column:
-    - mean_power_above_fmin: Average acoustic power above minimum frequency
-    - 
+    - mean_power_below_f_low: Average acoustic power below low frequency f_low.
+    - mean_power_above_f_low: Average acoustic power above low frequency f_low.
+    - mean_power_above_f_high: Average acoustic power above high frequency f_high and below max frequency f_max.
     - 
     """
     
     # Filter the low frequencies
-    mask_below_fmin = freqs <= f_min
-    mask_above_fmin = (freqs > f_min) & (freqs < 1500)
+    mask_below_f_low = freqs <= f_low
+    mask_above_f_low = (freqs > f_low) & (freqs < f_max)
 
-    spec_below_fmin = spec_col_dB[mask_below_fmin]
-    spec_above_fmin = spec_col_dB[mask_above_fmin]
+    spec_below_f_low = spec_col_dB[mask_below_f_low]
+    spec_above_f_low = spec_col_dB[mask_above_f_low]
 
     # Filter the high frequencies
-    mask_above_fmax = (freqs >= f_max) & (freqs < 1500)
-    spec_above_fmax = spec_col_dB[mask_above_fmax]
+    mask_above_f_high = (freqs >= f_high) & (freqs < f_max)
+    spec_above_f_high = spec_col_dB[mask_above_f_high]
 
 
     # Basic level metrics
     # Perform the averaging in linear space and convert to dB again
-    mean_power_below_fmin = np.mean(spec_below_fmin)    #10 * np.log10(np.mean(10**(spec_below_fmin/10)))
-    mean_power_above_fmin = np.mean(spec_above_fmin)
-    mean_power_above_fmax = np.mean(spec_above_fmax)
-    frac_above_80dB  = np.mean(spec_above_fmin > 80)  #fraction of frequencies with power > 80dB
+    mean_power_below_f_low = np.mean(spec_below_f_low)    #10 * np.log10(np.mean(10**(spec_below_f_low/10)))
+    mean_power_above_f_low = np.mean(spec_above_f_low)
+    mean_power_above_f_high = np.mean(spec_above_f_high)
+    frac_above_80dB  = np.mean(spec_above_f_high > 80)  #fraction of frequencies with power > 80dB
 
     # Spectral flatness (0 = very peaky, 1 = white noise)
-    linear_power = 10.0**(spec_above_fmax/10.0)
+    linear_power = 10.0**(spec_above_f_high/10.0)
     eps = 1e-12
     geometric_mean = np.exp(np.mean(np.log(linear_power + eps)))
     arithmetic_mean = np.mean(linear_power + eps)
     flatness_highFreq = geometric_mean / arithmetic_mean
 
     # Number of prominent peaks (harmonic-like structure)
-    peaks, _ = find_peaks(spec_above_fmin, height= 80.0, distance=10)
+    peaks, _ = find_peaks(spec_above_f_low, height= 80.0, distance=10)
     n_peaks = len(peaks)
 
-    spec_col_metrics = dict(mean_power_below_fmin = mean_power_below_fmin,
-                            mean_power_above_fmin = mean_power_above_fmin,
-                            mean_power_above_fmax = mean_power_above_fmax,
+    spec_col_metrics = dict(mean_power_below_f_low = mean_power_below_f_low,
+                            mean_power_above_f_low = mean_power_above_f_low,
+                            mean_power_above_f_high = mean_power_above_f_high,
                             frac_above_80dB  = frac_above_80dB,
                             flatness_highFreq = flatness_highFreq)
                             #n_peaks=n_peaks)
 
-    #print(f"above_fmin, f_max: {mean_power_above_fmin:.2f}, {mean_power_above_fmax:.2f}\n")  
+    #print(f"above_flow, f_high: {mean_power_above_f_low:.2f}, {mean_power_above_f_high:.2f}\n")  
     return spec_col_metrics
 
 
 
 def classify_spectrogram_phase_per_column(metrics_col):
-    mean_power_below_fmin   = metrics_col["mean_power_below_fmin"]
-    mean_power_above_fmin   = metrics_col["mean_power_above_fmin"]
-    mean_power_above_fmax   = metrics_col["mean_power_above_fmax"]
+    mean_power_below_f_low   = metrics_col["mean_power_below_f_low"]
+    mean_power_above_f_low   = metrics_col["mean_power_above_f_low"]
+    mean_power_above_f_high  = metrics_col["mean_power_above_f_high"]
     frac_above_80dB         = metrics_col["frac_above_80dB"]
     flatness_highFreq       = metrics_col["flatness_highFreq"]
     #n_peaks  = metrics_col["n_peaks"]
 
     # Define phases
     # --- Phase 0: Quiet (nothing above noise) ---
-    if (mean_power_below_fmin <= 60): 
+    if (mean_power_below_f_low <= 60): 
         return 0
 
     # --- Phase 1: Laminar (onset of activity) ---
-    elif (mean_power_below_fmin > 60 and mean_power_above_fmin <= 40):
+    elif (mean_power_below_f_low > 60 and mean_power_above_f_low <= 40):
         return 1
 
     # --- Phase 2: Transitional (harmonics, weak high-frequency) ---
-    elif (mean_power_above_fmin > 40 and mean_power_above_fmax <= 60): #and flatness_highFreq < 0.3):
+    elif (mean_power_above_f_low > 40 and mean_power_above_f_high <= 60): #and flatness_highFreq < 0.3):
         return 2
 
     # --- Phase 3: Turbulent (strong broadband) ---
-    elif (mean_power_above_fmax > 60 or flatness_highFreq > 0.5): #frac_above_80dB > 0.1
+    elif (mean_power_above_f_high > 60 or flatness_highFreq > 0.5): #frac_above_80dB > 0.1
         return 3
 
     else:
         return 0
 
 
-def classify_spectrogram_phases(spectrogram_data, f_min=100, f_max=1000):
+def classify_spectrogram_phases(spectrogram_data, f_low=100, f_high=1000, f_max=1500):
     """
     Map metrics dict -> phase {0,1,2,3}.
+    
+    f_low:       low frequency threshold in Hz (default = 100 Hz).
+    f_high:      high frequency threshold in Hz (default = 1000 Hz).
+    f_max:       max frequency threshold in Hz (default = 1500 Hz).
+
     Intended meaning:
       0: quiet / nothing
       1: laminar / weak activity
       2: harmonic / narrowband
       3: turbulent / strong broadband activity
     """
+
     freqs   = spectrogram_data['freqs']
     spec_dB = spectrogram_data['power_avg_dB']
 
@@ -678,7 +688,7 @@ def classify_spectrogram_phases(spectrogram_data, f_min=100, f_max=1000):
 
     # Loop over each frame and calculate the metrics for it
     for col in range(n_cols):
-        metrics_column = extract_metrics_from_spectrogram_column(freqs, spec_dB[:, col], f_min, f_max)
+        metrics_column = extract_metrics_from_spectrogram_column(freqs, spec_dB[:, col], f_low, f_high, f_max)
         metrics_list.append(metrics_column)
         phases[col] = classify_spectrogram_phase_per_column(metrics_column)
 
@@ -687,10 +697,9 @@ def classify_spectrogram_phases(spectrogram_data, f_min=100, f_max=1000):
     #    if phases[col] < phases[col-1]:
     #        phases[col] = phases[col-1]
 
-    print(metrics_list[30], '\n')
-    print(metrics_list[90], '\n')
-    print(metrics_list[110], '\n')
-    print(metrics_list[-12:-10], '\n')
+    #print(metrics_list[90], '\n')
+    #print(metrics_list[110], '\n')
+    #print(metrics_list[-12:-10], '\n')
 
     return phases
 
@@ -739,33 +748,34 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     ax.set_xlim([2, 10]) # for time it should be [1, 5]
     ax.set_ylim([0, 1500])
     
+
+    #----- Adding the colorbar
+    cbar = fig.colorbar(spectrogram, ax=ax, orientation='vertical') #pad=0.5
+    spectrogram.set_clim(60, 120)
+
+    #---- For customizing the colorbar and axis for figures
+    
     #ax.set_xticks([0, 0.9])
     #ax.set_xticklabels(['0.0', '0.9'])
     #ax.set_yticks([0, 600, 800])
     #ax.set_yticklabels(['0', '600', '800'])
 
-
-    #----- Adding the colorbar
-    cbar = fig.colorbar(spectrogram, ax=ax, orientation='horizontal', pad=0.5) #pad=0.15
-    spectrogram.set_clim(40, 100)
-
     # Define the ticks you want
-    ticks = [40, 60, 80, 100]
-    cbar.set_ticks(ticks)
-    cbar.set_ticklabels([str(t) for t in ticks])   # optional if you want custom text
+    #ticks = [40, 60, 80, 100]
+    #cbar.set_ticks(ticks)
+    #cbar.set_ticklabels([str(t) for t in ticks])   # optional if you want custom text
 
-    # Style
-    cbar.ax.xaxis.tick_top()
-    cbar.ax.tick_params(labelsize=46)
+    #cbar.ax.xaxis.tick_top()
+    #cbar.ax.tick_params(labelsize=46)
     #cbar.ax.xaxis.set_label_position('top')
     #cbar.set_label('Power (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
     
     #---- Adding the phases
-    #ax2 = ax.twinx()
-    #ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=1)
-    #ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
-    #ax2.set_yticks([0,1,2,3])
-    #ax2.set_ylim(-0.05, 3.05)
+    ax2 = ax.twinx()
+    ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=1)
+    ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
+    ax2.set_yticks([0,1,2,3])
+    ax2.set_ylim(-0.05, 3.05)
     
     plt.tight_layout()
     plt.savefig(Path(output_folder_imgs) / f"{plot_title}.png")#, transparent=True)
@@ -818,20 +828,16 @@ def compute_and_save_spectrogram_for_all_ROIs(
         
         #print(f"Loaded {ROI_centers.shape[0]} ROI points from {ROI_center_csv}: \n")
         
-        # Loop over all center points (or with a stride set below)
-        # Choose which ROIs you want (based on the center_ID)
-        #ROI_start_center_id   = 43
-        #ROI_end_center_id     = 52
-        #ROI_stride  = 1 
+        # Loop over all center points (or with a stride)
 
-        #-----Case 1A: Sweeping method. Generate one spectrogram based on multiple ROIs (regional averaging)
+        #-----Case 1A: Sweeping method. Generate one spectrogram for a segment chosen based on multiple ROIs
         # Here we assemble the pressure data for multiple ROIs first and then extract the average spectrogram
         if ROI_params["flag_multi_ROI"]:
 
             ROI_point_indices = []
 
             # Loop over center points in the specified region
-            for i in range(ROI_start_center_id, ROI_end_center_id, ROI_stride):
+            for i in range(ROI_start_center_id, ROI_end_center_id+1, ROI_stride): #to be inclusive of ROI_end
                 center = ROI_centers[i]
                 normal = ROI_normals[i]
                 ROI_id = f"ROI{i:02d}"
@@ -859,7 +865,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
                                                 STFT_params = STFT_params)
 
             # Classify spectrogram phases
-            spectrogram_phases = classify_spectrogram_phases(spectrogram_data) #, f_min=100, f_max=1000
+            spectrogram_phases = classify_spectrogram_phases(spectrogram_data) #, f_low=100, f_high=1000
 
             # Save spectrogram plot
             if ROI_type == "sphere":
@@ -895,7 +901,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
                                                     STFT_params = STFT_params)
 
                 # Classify spectrogram phases
-                spectrogram_phases = classify_spectrogram_phases(spectrogram_data) # f_min=100
+                spectrogram_phases = classify_spectrogram_phases(spectrogram_data)
 
                 # Save spectrogram plot
                 if ROI_type == "sphere":
@@ -926,7 +932,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
                                                 STFT_params = STFT_params)
 
         # Classify spectrogram phases
-        spectrogram_phases = classify_spectrogram_phases(spectrogram_data) #f_min=100
+        spectrogram_phases = classify_spectrogram_phases(spectrogram_data) #f_low=100
 
         # Save spectrogram
         spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac}_r{ROI_radius}_h{ROI_height}' 
@@ -1004,7 +1010,7 @@ def main():
     
     output_folder_files.mkdir(parents=True, exist_ok=True)
     output_folder_imgs.mkdir(parents=True, exist_ok=True)
-    if flag_save_ROI: output_folder_ROIs.mkdir(parents=True, exist_ok=True)
+    if args.flag_save_ROI: output_folder_ROIs.mkdir(parents=True, exist_ok=True)
 
     # Put input arguments into dictionaries
     ROI_params = {
