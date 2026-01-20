@@ -746,12 +746,23 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     ax.set_xlabel('Q_inlet (ml/s)', fontweight='bold', labelpad=0)
     ax.set_ylabel('Frequency (Hz)', fontweight='bold', labelpad=0)
     ax.set_xlim([2, 10]) # for time it should be [1, 5]
-    ax.set_ylim([0, 1500])
+
+    # Set different limits based on the case
+    if 'PTSeg043' in case_name:
+        ax.set_ylim([0, 600])
+    else:
+        ax.set_ylim([0, 1500])
     
 
     #----- Adding the colorbar
     cbar = fig.colorbar(spectrogram, ax=ax, orientation='vertical') #pad=0.5
-    spectrogram.set_clim(60, 120)
+
+    # Set different limits based on the case
+    if 'PTSeg043' in case_name:
+        spectrogram.set_clim(40, 100)
+    else:
+        spectrogram.set_clim(60, 120)
+
 
     #---- For customizing the colorbar and axis for figures
     
@@ -772,7 +783,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     
     #---- Adding the phases
     ax2 = ax.twinx()
-    ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=2)
+    ax2.step(bins_Q, spectrogram_phases, where="mid", color="white", linewidth=2.5)
     ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
     ax2.set_yticks([0,1,2,3])
     ax2.set_ylim(-0.05, 3.05)

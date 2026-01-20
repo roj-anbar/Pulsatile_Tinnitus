@@ -50,7 +50,7 @@ export PYVISTA_OFF_SCREEN=true                              #tells pyvista to us
 
 
 
-# Transverse Sinus
+# Region 1: Transverse Sinus
 python "$SCRIPT" \
     --case_name             "$CASE" \
     --input_folder          "$INPUT" \
@@ -73,7 +73,7 @@ python "$SCRIPT" \
 
 
 
-# Stenosis/fenestration
+# Region 2: Stenosis/fenestration
 python "$SCRIPT" \
     --case_name             "$CASE" \
     --input_folder          "$INPUT" \
@@ -94,7 +94,7 @@ python "$SCRIPT" \
 #    --flag_save_ROI
 
 
-# Post-stenotic Dilatation
+# Region 3: Post-stenotic Dilatation
 python "$SCRIPT" \
     --case_name             "$CASE" \
     --input_folder          "$INPUT" \
@@ -115,7 +115,7 @@ python "$SCRIPT" \
 #    --flag_save_ROI
 
 
-# Sigmoid Sinus
+# Region 4: Sigmoid Sinus
 python "$SCRIPT" \
     --case_name             "$CASE" \
     --input_folder          "$INPUT" \
