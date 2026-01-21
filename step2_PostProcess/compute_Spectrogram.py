@@ -671,9 +671,9 @@ def classify_spectrogram_phases(spectrogram_data, f_low=100, f_high=1000, f_max=
 
     Intended meaning:
       0: quiet / nothing
-      1: laminar / weak activity
-      2: harmonic / narrowband
-      3: turbulent / strong broadband activity
+      1: weak low-frequency activity (laminar)
+      2: mid-frequency activity (harmonics)
+      3: strong high-frequency activity (turbulent-like)
     """
 
     freqs   = spectrogram_data['freqs']
@@ -697,7 +697,6 @@ def classify_spectrogram_phases(spectrogram_data, f_low=100, f_high=1000, f_max=
     #    if phases[col] < phases[col-1]:
     #        phases[col] = phases[col-1]
 
-    #print(metrics_list[90], '\n')
     #print(metrics_list[110], '\n')
     #print(metrics_list[-12:-10], '\n')
 
@@ -705,10 +704,50 @@ def classify_spectrogram_phases(spectrogram_data, f_low=100, f_high=1000, f_max=
 
 
 
+def first_phase_transitions(phases, x_axis, x_min, x_max, phase_values=(1, 2, 3)):
+    """
+    Find first occurrence of each phase within a restricted x-range.
+
+    Parameters
+    ----------
+    phases : np.ndarray
+        Phase array (shape: n_cols), values in {0,1,2,3}
+    x_axis : np.ndarray
+        Physical x-axis (e.g. Q_inlet), same length as phases
+    x_min, x_max : float
+        Search limits (must match plot xlim)
+    phase_values : iterable
+        Phases to search for (default = (1,2,3))
+
+    Returns
+    -------
+    transitions : dict
+        {phase: index or None}
+    """
+
+    # Mask indices within plotting/search window
+    window_mask = (x_axis >= x_min) & (x_axis <= x_max)
+
+    transitions = {}
+
+    for p in phase_values:
+        # Indices where phase == p AND inside window
+        idx = np.where((phases == p) & window_mask)[0]
+        transitions[p] = int(idx[0]) if idx.size > 0 else None
+        
+    return transitions
+
+
+
 def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, plot_title):
     """
     Save spectrogram data (.npz) and a PNG image.
     """
+
+    # Set plot parameters
+    # x-axis limits (below values are for flowrate, for time it should be [1, 5])
+    xmin = 2
+    xmax = 10  
 
     spec_output_npz = Path(output_folder_files) / f"{plot_title}.npz"
     np.savez(spec_output_npz, spectrogram_data)
@@ -745,7 +784,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     #ax.set_xlabel('Time (s)', fontweight='bold', labelpad=0)
     ax.set_xlabel('Q_inlet (ml/s)', fontweight='bold', labelpad=0)
     ax.set_ylabel('Frequency (Hz)', fontweight='bold', labelpad=0)
-    ax.set_xlim([2, 10]) # for time it should be [1, 5]
+    ax.set_xlim([xmin, xmax]) 
 
     # Set different limits based on the case
     if 'PTSeg043' in case_name:
@@ -763,8 +802,28 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     else:
         spectrogram.set_clim(60, 120)
 
+    
+    #---------------- Adding the phases ------------------
+    # Method 1: Add as vertical lines
+    # Find first points of transition
+    phase_transitions = first_phase_transitions(spectrogram_phases, x_axis=bins_Q, x_min=xmin, x_max=xmax)
+    #print(phase_transitions)
 
-    #---- For customizing the colorbar and axis for figures
+    for phase, idx in phase_transitions.items():
+        if idx is None:
+            continue
+        x = bins_Q[idx]
+        ax.axvline(x, color="white", linestyle="- -", linewidth=3, alpha=0.7)
+
+    # Method 2: Add as steps
+    #ax2 = ax.twinx()
+    #ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=4)
+    #ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
+    #ax2.set_yticks([0,1,2,3])
+    #ax2.set_ylim(-0.15, 3.15)
+
+
+    #----- For customizing the colorbar and axis for figures ----
     
     #ax.set_xticks([0, 0.9])
     #ax.set_xticklabels(['0.0', '0.9'])
@@ -781,13 +840,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     #cbar.ax.xaxis.set_label_position('top')
     #cbar.set_label('Power (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
     
-    #---- Adding the phases
-    ax2 = ax.twinx()
-    ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=4)
-    ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
-    ax2.set_yticks([0,1,2,3])
-    ax2.set_ylim(-0.15, 3.15)
-    
+
     plt.tight_layout()
     plt.savefig(Path(output_folder_imgs) / f"{plot_title}.png")#, transparent=True)
     plt.close(fig)
