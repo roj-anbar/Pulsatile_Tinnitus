@@ -14,7 +14,7 @@ CASE=PTSeg043_noLabbe_base
 BASE_DIR=$SCRATCH/PT/PT_Ramp/PT_cases/$CASE
 MESH="$BASE_DIR/data"
 INPUT="$BASE_DIR/results/${CASE}_ts10000_cy6_saveFreq1"
-OUTPUT="$BASE_DIR/post-process/SPI_wall_pressure/cy6_saveFreq1"
+OUTPUT="$BASE_DIR/post-process/SPI_WallPressure"
 SCRIPT="$SLURM_SUBMIT_DIR/compute_SPI_old.py"  # ensure to submit from script dir
 
 
