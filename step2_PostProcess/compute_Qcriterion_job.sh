@@ -10,11 +10,11 @@
 set -euo pipefail
 
 # ---------------------------------- Define Paths ---------------------------------------
-CASE=PTSeg043_noLabbe_base
-BASE_DIR=$SCRATCH/PT/PT_Ramp/PT_cases/$CASE
-MESH="$BASE_DIR/data"
-INPUT="$BASE_DIR/results/${CASE}_ts10000_cy6_saveFreq5"
-OUTPUT="$BASE_DIR/post-process/Qcriterion/cy6_saveFreq5"
+CASE=PTSeg028_base_0p64
+BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE
+MESH="$BASE_DIR/step1_CFD/data"
+INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq5"
+OUTPUT="$BASE_DIR/step2_PostProcess/Qcriterion/cy6_saveFreq5"
 SCRIPT="$SLURM_SUBMIT_DIR/compute_Qcriterion.py"  # ensure to submit from script dir
 
 
@@ -49,10 +49,10 @@ python "$SCRIPT" \
 
 
 #python compute_Qcriterion.py \
-#    --input_folder  "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg106_base_0p64/results/PTSeg106_base_0p64_ts10000_cy6_saveFreq5" \
-#    --mesh_folder   "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg106_base_0p64/data" \
+#    --input_folder  "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/results/PTSeg106_base_0p64_ts10000_cy6_saveFreq5" \
+#    --mesh_folder   "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/data" \
 #    --case_name     "PTSeg106_base_0p64" \
-#    --output_folder "$SCRATCH/PT/PT_Ramp/PT_cases/PTSeg106_base_0p64/post-process/Qcriterion/cy6_saveFreq5/" \
+#    --output_folder "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/post-process/Qcriterion/cy6_saveFreq5/" \
 #    --n_process     192
 
 wait

@@ -11,13 +11,13 @@ set -euo pipefail
 
 # ---------------------------------- Define Paths -------------------------------------------------------------------------------
 CASE=PTSeg028_base_0p64                                             # Case name
-BASE_DIR=$SCRATCH/PT/PT_Ramp/cases/$CASE                            # Parent directory of the case
+BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE                            # Parent directory of the case
 MESH="$BASE_DIR/step1_CFD/data"                                     # Path to mesh data folder containing the h5 mesh
 CENTERLINE="$MESH/${CASE}_centerline_points.csv"                    # Path to centerline csv file used to construct ROIs
 INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq1"   # Path to CFD results folder containing timeseries HDF5 files
 OUTPUT="$BASE_DIR/step2_PostProcess/Spectrogram_WallPressure"      # Path to saving spectrogram files
 
-SCRIPT="/scratch/ranbar/PT/PT_Ramp/scripts/step2_PostProcess/compute_Spectrogram.py"
+SCRIPT="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/compute_Spectrogram.py"
 
 
 # --------------------------------- Load Modules -------------------------------------------------------------------------------
@@ -153,10 +153,10 @@ python "$SCRIPT" \
 #--------- For running directly from commandline use below
 python compute_Spectrogram.py \
     --case_name             "PTSeg043_noLabbe_base" \
-    --input_folder          "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/step1_CFD/results/PTSeg043_noLabbe_base_ts10000_cy6_saveFreq1" \
-    --mesh_folder           "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/step1_CFD/data" \
-    --output_folder         "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/step2_PostProcess/Spectrogram_wall_pressure/cy6_saveFreq1" \
-    --ROI_center_csv        "$SCRATCH/PT/PT_Ramp/cases/PTSeg043_noLabbe_base/step1_CFD/data/PTSeg043_noLabbe_base_centerline_points.csv" \
+    --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/results/PTSeg043_noLabbe_base_ts10000_cy6_saveFreq1" \
+    --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data" \
+    --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step2_PostProcess/Spectrogram_wall_pressure/cy6_saveFreq1" \
+    --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data/PTSeg043_noLabbe_base_centerline_points.csv" \
     --n_process             192 \
     --spec_quantity         "pressure" \
     --window_length         5000 \

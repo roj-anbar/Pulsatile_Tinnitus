@@ -15,12 +15,13 @@
 #   - On Trillium: virtual environment called pyvista36
 #
 # EXECUTION:
-#   - Run using "compute-post-metrics_RUNME.sh" bash script.
+#   - Run using bash script:
+#       > sbatch compute_Qcriterion_job.sh
 #   - Run directly on a login/debug node as below:
 #       > module load StdEnv/2023 gcc/12.3 python/3.12.4
 #       > source $HOME/virtual_envs/pyvista36/bin/activate
 #       > module load  vtk/9.3.0
-#       > python compute-post-metrics_Qcriterion.py <path_to_CFD_results_folder> <path_to_case_mesh_data> <case_name> <path_to_output_folder> <ncores>
+#       > python compute_Qcriterion.py <path_to_CFD_results_folder> <path_to_case_mesh_data> <case_name> <path_to_output_folder> <ncores>
 #     
 #
 # INPUTS:

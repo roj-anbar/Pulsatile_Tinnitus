@@ -778,7 +778,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
 
     fig, ax = plt.subplots(1,1, figsize=(16,8))
     spectrogram = ax.pcolormesh(bins_Q, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
-
+    
     #----- Set properties
     ax.set_title(plot_title)
     #ax.set_xlabel('Time (s)', fontweight='bold', labelpad=0)
@@ -795,6 +795,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
 
     #----- Adding the colorbar
     cbar = fig.colorbar(spectrogram, ax=ax, orientation='vertical') #pad=0.5
+    cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
 
     # Set different limits based on the case
     if 'PTSeg043' in case_name:
@@ -813,7 +814,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
         if idx is None:
             continue
         x = bins_Q[idx]
-        ax.axvline(x, color="white", linestyle="- -", linewidth=3, alpha=0.7)
+        ax.axvline(x, color="white", linestyle="solid", linewidth=3, alpha=0.7)
 
     # Method 2: Add as steps
     #ax2 = ax.twinx()
