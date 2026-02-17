@@ -152,19 +152,19 @@ python "$SCRIPT" \
 
 #--------- For running directly from commandline use below
 python compute_Spectrogram.py \
-    --case_name             "PTSeg043_noLabbe_base" \
-    --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/results/PTSeg043_noLabbe_base_ts10000_cy6_saveFreq1" \
-    --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data" \
-    --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step2_PostProcess/Spectrogram_wall_pressure/cy6_saveFreq1" \
-    --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data/PTSeg043_noLabbe_base_centerline_points.csv" \
+    --case_name             "PTSeg028_base_0p64" \
+    --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq1" \
+    --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data" \
+    --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/Spectrogram_WallPressure/" \
+    --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data/PTSeg028_base_0p64_centerline_points.csv" \
     --n_process             192 \
     --spec_quantity         "pressure" \
     --window_length         5000 \
     --ROI_type              "cylinder" \
     --ROI_radius            8 \
     --ROI_height            2 \
-    --ROI_start_center_id   1162 \
-    --ROI_end_center_id     1200 \
+    --ROI_start_center_id   550 \
+    --ROI_end_center_id     551 \
     --ROI_stride            4 \
     --flag_multi_ROI        
     #--flag_save_ROI

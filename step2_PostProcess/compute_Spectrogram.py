@@ -922,6 +922,13 @@ def compute_and_save_spectrogram_for_all_ROIs(
 
             print(f"Found {len(ROI_point_indices)} unique wall points in total in the specified region. \n")
 
+            fig, ax = plt.subplots(1,1, figsize=(16,8))
+            ax.plot(wall_pressure[10,:])
+            ax.set_xlabel('time (s)', fontweight='bold', fontsize=16, labelpad=0)
+            ax.set_ylabel('wall pressure (Pa)', fontweight='bold', fontsize=16, labelpad=0)
+            plt.tight_layout()
+            plt.savefig(f"wall_pressure_signal.png") 
+
             # Calculate average spectrogram for all the ROIs combined
             spectrogram_data = calculate_avg_spectrogram_for_quantity_of_interest(
                                                 spec_quantity = spec_quantity,
