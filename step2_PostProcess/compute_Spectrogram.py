@@ -39,7 +39,7 @@
 #   --period_seconds      Flow period [s] (if omitted, try to parse from filenames with '_Per<ms>')
 #   --timesteps_per_cyc   Timesteps per cycle (if omitted, try to parse from filenames with '_ts<int>')
 #   --density             Blood density [kg/m3] (default = 1050 kg/m3)
-#   --spec_quantity       Quantity to compute spectrogram from: 'pressure' or 'velocity'
+#   --spec_quantity       Quantity to compute spectrogram from: ['wallpressure', 'velocity', 'qcriterion']
 #   --ROI_type            (default = 'cylinder')
 #   --ROI_center_coord    X Y Z center of spherical ROI (mesh units).
 #   --ROI_center_csv      Path to CSV file containing the coordinates of multiple points for ROI center.
@@ -151,7 +151,7 @@ def extract_timesteps_per_cyc_from_h5_filename(h5_file):
 
 # ---------------------------------------- Mesh Utilities -----------------------------------------------------
 
-def assemble_wall_mesh(mesh_file):
+def assemble_surface_mesh(mesh_file):
     """
     Create a Pyvista PolyData surface from the wall mesh stored in a BSLSolver-style HDF5.
 
@@ -209,7 +209,7 @@ def assemble_volume_mesh(mesh_file):
 # --------------------------------- Parallel File Reader -----------------------------------------------
 
 
-def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype, density=1050):
+def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype, density=1060):
     """
     Reads a *chunk* of time-snapshot HDF5 files, extracts wall pressures, and writes into the shared array.
 
@@ -368,7 +368,6 @@ def short_time_fourier(data,
     return freqs, bins, Z
 
 
-
 # ---------------------------------- ROI Utilities -------------------------------------------
 def read_ROI_points_from_csv(csv_path: str, ROI_type) -> np.ndarray:
     """
@@ -419,14 +418,9 @@ def assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_press
 
 
     # Find coordinate of ROI center
-    #ROI_center_coord = np.asarray(ROI_center_coord, dtype=float) 
 
-    # Case 1: Obtain spectrograms at a single point
-    if ROI_type == 'point':
-        ROI_pids = ROI_center_coord
-
-    # Case 2: Obtain spectrograms in a spherical ROI (using pyvista)
-    elif ROI_type == 'sphere':
+    # Case 1: Obtain spectrograms in a spherical ROI (using pyvista)
+    if ROI_type == 'sphere':
         
         # Creates a surface sphere centered at desired point
         ROI_sphere = pv.Sphere(radius = ROI_radius, center = ROI_center_coord)
@@ -443,7 +437,7 @@ def assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_press
             ROI_sphere.save(f'{output_folder_ROIs}/{ROI_id}_{ROI_type}_c{ROI_center_coord}_r{ROI_radius}.vtp') 
 
     
-    # Case 3: Obtain spectrograms in a cylindrical ROI (using pyvista)
+    # Case 2: Obtain spectrograms in a cylindrical ROI (using pyvista)
     elif ROI_type == 'cylinder':
 
         # Note: needed to add clean() to the surface to make it compatible with vtk 'select_enclosed_points'
@@ -459,6 +453,11 @@ def assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_press
         # Save the cylinder to a .vtp file (for visualization in paraview later)
         if flag_save_ROI:
             ROI_cylinder.save(f'{output_folder_ROIs}/{ROI_id}_{ROI_type}_c{ROI_center_coord}_r{ROI_radius}_h{ROI_height}.vtp') 
+
+
+    # Case 3: Obtain spectrograms at a single point
+    elif ROI_type == 'point':
+        ROI_pids = ROI_center_coord
 
     # For any other types    
     else:
@@ -481,6 +480,80 @@ def assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_press
 
     return wall_pressure_ROI
 
+def assemble_var_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, var_name, var_array, ROI_params, return_indices=False):
+    """
+    Select mesh points inside a ROI with defined shape (ROI_type) and return the time series of variable of interest for those points.
+    Note: Units of the radius should be the same as units of the mesh.
+    """
+
+    # Unpack input parameters
+    ROI_id            = ROI_params.get("ROI_id")
+    ROI_type          = ROI_params.get("ROI_type")
+    ROI_center_coord  = ROI_params.get("ROI_center_coord")
+    ROI_center_normal = ROI_params.get("ROI_center_normal")
+    ROI_radius        = ROI_params.get("ROI_radius")
+    ROI_height        = ROI_params.get("ROI_height")
+    flag_save_ROI     = ROI_params.get("flag_save_ROI")
+
+    # --- Choose the mesh domain based on the given variable name
+    surface_vars = {'wallpressure'}
+    volume_vars = {'velocity', 'qcriterion'}
+    mesh_domain = "surface" if var_name in surface_vars else "volume"
+    
+    if mesh_domain == "surface":
+        mesh = surf_mesh
+    elif mesh_domain == "volume":
+        mesh = vol_mesh
+
+
+    # --- Compute coordinate of ROI center
+    # Case 1: Obtain spectrograms at a single point
+    if ROI_type == 'point':
+        ROI_pids = ROI_center_coord
+
+    # Case 2: Obtain spectrograms in a spherical or cylindrical ROI (using pyvista)
+    elif ROI_type in ['sphere', 'cylinder']:
+        
+        # Creates a surface geometry of ROI_type centered at the ROI point
+        if ROI_type == 'sphere':
+            ROI_geom = pv.Sphere(radius = ROI_radius, center = ROI_center_coord)
+        elif ROI_type == 'cylinder':
+            # Note: needed to add clean() to the surface to make it compatible with vtk 'select_enclosed_points'
+            ROI_geom = pv.Cylinder(center = ROI_center_coord, direction = ROI_center_normal, radius = ROI_radius, height = ROI_height).clean()
+
+        # Selects mesh points inside the ROI geometry surface with a certain tolerance (using pyvista)
+        ROI_mesh = mesh.select_enclosed_points(ROI_geom, tolerance=0.01)
+        
+        # Get indices of the points that falls in the ROI
+        points_in_ROI = ROI_mesh.point_data['SelectedPoints'].astype(bool)
+        ROI_pids = np.where(points_in_ROI)[0]
+
+        # Save ROI geometry to a .vtp file if requested (for visualization in paraview later)
+        if flag_save_ROI:
+            ROI_geom.save(f'{output_folder_ROIs}/{ROI_id}_{ROI_type}_c{ROI_center_coord}_r{ROI_radius}.vtp') 
+
+    # For any other types    
+    else:
+        raise ValueError("--ROI_type is not supported, choose from ['point', 'sphere', 'cylinder'].")
+
+
+    # --- Sanity check: ensure ROI is not empty ---
+    if ROI_pids.size == 0:
+        raise ValueError("No mesh points found in ROI. Try increasing --ROI_radius (check mesh units: mm vs m) or choose a different --ROI_center_coord. ")
+    else:
+        print(f"Found {ROI_pids.size} mesh points in {ROI_id} with center coordinate {ROI_center_coord} ...")
+
+    # Assemble variable array for ROI points
+    var_array_ROI = var_array[ROI_pids,:]
+
+    # Return the point ids if requested
+    if return_indices:
+        return ROI_pids
+
+    return var_array_ROI
+
+
+        
 
 # ======================================================================================================
 # HEMODYNAMICS FUNCTIONS
@@ -489,10 +562,14 @@ def assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_press
 
 # ---------------------------------------- Compute Spectrograms -----------------------------------------------------
 
-def calculate_avg_spectrogram_for_quantity_of_interest(spec_quantity, array_quantity_of_interest, STFT_params, cutoff_dB=None):
+def calculate_mean_spectrogram(var_name, var_array, STFT_params):
 
     """
-    Compute an average spectrogram (in dB) based on the given array for the quantity of interest with configurable STFT parameters.
+    Compute an average spectrogram (in dB) based on the given array for the variable of interest with configurable STFT parameters.
+
+    var_name:
+    var_array:
+    STFT_params: 
     """
     
     # Unpack input parameters
@@ -503,11 +580,12 @@ def calculate_avg_spectrogram_for_quantity_of_interest(spec_quantity, array_quan
     pad_mode      = STFT_params.get("pad_mode")
     window_type   = STFT_params.get("window_type")
     detrend       = STFT_params.get("detrend")
+    cutoff_dB     = STFT_params.get("cutoff_dB")
 
-    if spec_quantity == 'pressure':
+    if var_name == 'wallpressure':
         # Assembles pressure data for the ROI
         #wall_pressure_ROI = assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_pressure, ROI_params)
-        signal_pressure = array_quantity_of_interest
+        signal_pressure = var_array
 
         n_points = signal_pressure.shape[0]
         n_snapshots = signal_pressure.shape[1] # total number of snapshots
@@ -564,10 +642,11 @@ def calculate_avg_spectrogram_for_quantity_of_interest(spec_quantity, array_quan
             'overlap_frac': overlap_frac,
         }
 
-    elif spec_quantity == 'velocity':
+    elif var_name == 'velocity':
         # the variable is 'u' but bsl tools calculate the norm of it -> 'umag'
         print("Spectrogram calculation for velocity is not implemented yet!")
 
+    
     return spectrogram_data
 
 
@@ -629,7 +708,6 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_high, f
 
     #print(f"above_flow, f_high: {mean_power_above_f_low:.2f}, {mean_power_above_f_high:.2f}\n")  
     return spec_col_metrics
-
 
 
 def classify_spectrogram_phase_per_column(metrics_col):
@@ -852,15 +930,23 @@ def compute_and_save_spectrogram_for_all_ROIs(
                     output_folder_files: Path,
                     output_folder_imgs: Path,
                     output_folder_ROIs: Path,
-                    wall_mesh: pv.PolyData,
-                    wall_pressure,
+                    surf_mesh: pv.PolyData,
+                    vol_mesh: pv.PolyData,
+                    spec_quantity: str,
+                    spec_quantity_array: np.array,
                     period_seconds: float, 
                     timesteps_per_cyc: int,
-                    spec_quantity: str,
-                    cutoff_dB: float,
                     ROI_params: dict,
                     STFT_params: dict):
+    """
+    Computes and saves spectrograms for:
+      1) Multiple ROIs defined by roi_params["ROI_center_csv"], optionally:
+         a) one regional (multi-ROI) spectrogram
+         b) one spectrogram per ROI
+      2) A single ROI defined by roi_params["ROI_center_coord"], if provided
 
+    """
+    
     # Unpack input parameters
     ROI_type             = ROI_params.get("ROI_type")
     ROI_center_coord     = ROI_params.get("ROI_center_coord")
@@ -876,14 +962,13 @@ def compute_and_save_spectrogram_for_all_ROIs(
     n_fft            = STFT_params.get("n_fft")
 
 
-    # Cmpute sampling rate and add to STFT_params
+    # Compute sampling rate and add to STFT_params
     sampling_rate = timesteps_per_cyc/period_seconds # Hz
     STFT_params["sampling_rate"] = sampling_rate 
 
-    print (f"Now computing {spec_quantity} spectrograms for {ROI_type} ROIs with STFT parameters: \n \
-    window_length (samples) = {window_length} \n \
-    n_fft         (samples) = {n_fft} \n \
-    overlap_fraction        = {overlap_frac} \n")
+    print (f"Now computing {spec_quantity} spectrograms for {ROI_type} ROIs with STFT parameters: \n"
+           f"window_length (samples) = {window_length} \n"
+           f"overlap_fraction        = {overlap_frac} \n")
 
 
     #----------------- Case 1: CSV mode --------------------
@@ -893,6 +978,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
         
         #print(f"Loaded {ROI_centers.shape[0]} ROI points from {ROI_center_csv}: \n")
         
+
         # Loop over all center points (or with a stride)
 
         #-----Case 1A: Sweeping method. Generate one spectrogram for a segment chosen based on multiple ROIs
@@ -914,30 +1000,29 @@ def compute_and_save_spectrogram_for_all_ROIs(
                 ROI_params_multi["ROI_center_normal"] = normal
 
                 # Obtain the point ID of all ROIs combined
-                ROI_point_indices.extend(assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_pressure, ROI_params_multi, return_indices=True))
+                #ROI_point_indices.extend(assemble_wall_pressure_for_one_ROI(output_folder_ROIs, surf_mesh, wall_pressure, ROI_params_multi, return_indices=True))
+                
+                ROI_point_indices.extend(assemble_var_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, spec_quantity, spec_quantity_array, ROI_params_multi, return_indices=True))
 
             # Keep only the unique indices
             ROI_point_indices = np.unique(ROI_point_indices)
-            wall_pressure_ROI_multi = wall_pressure[ROI_point_indices, :]
+            spec_quantity_array_ROI_multi = spec_quantity_array[ROI_point_indices, :]
 
-            print(f"Found {len(ROI_point_indices)} unique wall points in total in the specified region. \n")
+            print(f"Found {len(ROI_point_indices)} unique mesh points in total in the specified region. \n")
 
-            fig, ax = plt.subplots(1,1, figsize=(16,8))
-            ax.plot(wall_pressure[10,:])
-            ax.set_xlabel('time (s)', fontweight='bold', fontsize=16, labelpad=0)
-            ax.set_ylabel('wall pressure (Pa)', fontweight='bold', fontsize=16, labelpad=0)
-            plt.tight_layout()
-            plt.savefig(f"wall_pressure_signal.png") 
+            # For plotting the wall pressure signal at a single node
+            #fig, ax = plt.subplots(1,1, figsize=(16,8))
+            #ax.plot(wall_pressure[10,:])
+            #ax.set_xlabel('time (s)', fontweight='bold', fontsize=16, labelpad=0)
+            #ax.set_ylabel('wall pressure (Pa)', fontweight='bold', fontsize=16, labelpad=0)
+            #plt.tight_layout()
+            #plt.savefig(f"wall_pressure_signal.png") 
 
             # Calculate average spectrogram for all the ROIs combined
-            spectrogram_data = calculate_avg_spectrogram_for_quantity_of_interest(
-                                                spec_quantity = spec_quantity,
-                                                array_quantity_of_interest = wall_pressure_ROI_multi,
-                                                cutoff_dB = cutoff_dB,
-                                                STFT_params = STFT_params)
+            spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = spec_quantity_array_ROI_multi, STFT_params = STFT_params)
 
             # Classify spectrogram phases
-            spectrogram_phases = classify_spectrogram_phases(spectrogram_data) #, f_low=100, f_high=1000
+            spectrogram_phases = classify_spectrogram_phases(spectrogram_data)
 
             # Save spectrogram plot
             if ROI_type == "sphere":
@@ -966,11 +1051,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
                 wall_pressure_ROI = assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_pressure, ROI_params)
 
                 # Calculate average spectrogram for each ROI
-                spectrogram_data = calculate_avg_spectrogram_for_quantity_of_interest(
-                                                    spec_quantity = spec_quantity,
-                                                    array_quantity_of_interest = wall_pressure_ROI,
-                                                    cutoff_dB = cutoff_dB,
-                                                    STFT_params = STFT_params)
+                spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = wall_pressure_ROI, STFT_params = STFT_params)
 
                 # Classify spectrogram phases
                 spectrogram_phases = classify_spectrogram_phases(spectrogram_data)
@@ -997,11 +1078,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
         # Assemble pressure data for each ROI
         wall_pressure_ROI = assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_pressure, ROI_params)
 
-        spectrogram_data = calculate_avg_spectrogram_for_quantity_of_interest(
-                                                spec_quantity = spec_quantity,
-                                                array_quantity_of_interest = wall_pressure_ROI,
-                                                cutoff_dB = cutoff_dB,
-                                                STFT_params = STFT_params)
+        spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = wall_pressure_ROI, STFT_params = STFT_params)
 
         # Classify spectrogram phases
         spectrogram_phases = classify_spectrogram_phases(spectrogram_data) #f_low=100
@@ -1030,10 +1107,10 @@ def parse_args():
     ap.add_argument("--case_name",      required=True,       help="Case name")
     ap.add_argument("--n_process",      type=int,            help="Number of parallel processes", default=max(1, mp.cpu_count() - 1))
 
-    ap.add_argument("--density",           type=float,  default=1050,   help="Blood density [kg/m3] (default: 1050)")
+    ap.add_argument("--density",           type=float,  default=1060,   help="Blood density [kg/m3] (default: 1050)")
     ap.add_argument("--period_seconds",    type=float,  default=0.915,  help="Period in seconds (default: 0.915)")
     ap.add_argument("--timesteps_per_cyc", type=int,                    help="Number of timesteps per cycle")
-    ap.add_argument("--spec_quantity",     type=str,    required=True,  choices=["pressure","velocity"], help="Quantity of interest used for spectrogram")
+    ap.add_argument("--spec_quantity",     type=str,    required=True,  choices=["wallpressure","velocity","qcriterion"], help="Quantity of interest used for spectrogram")
     
 
     # ROI parameters: It allows for either a single center OR a CSV of center
@@ -1055,7 +1132,7 @@ def parse_args():
     # Short-time Fourier Transform control (all optional)
     ap.add_argument("--window_length",    type=int,   default=None,     help="Length of FFT window in samples (number of snapshots for each window)")
     ap.add_argument("--n_fft",            type=int,   default=None,     help="FFT length (bins)")
-    ap.add_argument("--overlap_fraction", type=float, default=0.9,     help="Overlap fraction between consequent windows [0,1] (default: 0.75)")
+    ap.add_argument("--overlap_fraction", type=float, default=0.9,      help="Overlap fraction between consequent windows [0,1] (default: 0.75)")
     ap.add_argument("--window_type",      type=str,   default="hann",   choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT")
     ap.add_argument("--pad_mode",         type=str,   default="cycle",  choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts")
     ap.add_argument("--detrend",          type=str,   default="linear", help="Detrend option for STFT: 'linear', 'constant', or False")
@@ -1077,8 +1154,8 @@ def main():
         Path(output_folder).mkdir(parents=True, exist_ok=True)
 
     output_folder_files = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.flag_multi_ROI}/files")
-    output_folder_imgs = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.flag_multi_ROI}/imgs")
-    output_folder_ROIs = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.flag_multi_ROI}/ROIs")
+    output_folder_imgs  = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.flag_multi_ROI}/imgs")
+    output_folder_ROIs  = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.flag_multi_ROI}/ROIs")
     
     output_folder_files.mkdir(parents=True, exist_ok=True)
     output_folder_imgs.mkdir(parents=True, exist_ok=True)
@@ -1103,12 +1180,13 @@ def main():
         "overlap_frac": args.overlap_fraction,
         "window_type": args.window_type,
         "pad_mode": args.pad_mode,
-        "detrend": args.detrend}
+        "detrend": args.detrend,
+        "cutoff_dB": args.cutoff_dB}
 
     # Assemble mesh
     mesh_file = list(Path(mesh_folder).glob('*.h5'))[0]
-    wall_mesh = assemble_wall_mesh(mesh_file)
-    #vol_mesh  = assemble_volume_mesh(mesh_file)
+    surf_mesh = assemble_surface_mesh(mesh_file)
+    vol_mesh  = assemble_volume_mesh(mesh_file)
 
     print(f"\n[info] Mesh file:               {mesh_file}")
     print(f"[info] Read CFD results from:   {input_folder}")
@@ -1119,14 +1197,34 @@ def main():
     else:
         print(f"[info] Read ROI center from:   {args.ROI_center_coord}: \n")
 
-    # Gather CFD results h5 files
-    # Find & sort snapshot files by timestep 
-    CFD_h5_files = sorted(Path(input_folder).glob('*_curcyc_*up.h5'), key = extract_timestep_from_h5_filename)
-    n_snapshots = len(CFD_h5_files)
+    
+    # Reading the input files for quantity used to generate spectrograms
+    input_path = Path(input_folder)
 
-    if n_snapshots==0:
-        print('No files found in {}!'.format(input_folder))
+    # Sanity check
+    if not any(input_path.iterdir()):
+        print(f'No files found in {input_folder}!')
         sys.exit()
+
+    if args.spec_quantity in ['wallpressure', 'velocity']:
+        # Find & sort CFD results h5 files by timestep 
+        CFD_h5_files = sorted(input_path.glob('*_curcyc_*up.h5'), key = extract_timestep_from_h5_filename)
+
+        # Assemble variable array
+        spec_quantity_array = read_wall_pressure_from_h5_files_parallel(CFD_h5_files, surf_mesh, args.n_process, args.density) 
+        
+    elif args.spec_quantity == 'qcriterion':
+        Q_h5_file = input_path / f"{case_name}_Qcriterion.h5"
+
+        print(f"Reading Q-criterion file ...")
+
+        with h5py.File(Q_h5_file, 'r') as h5:
+            spec_quantity_array = np.array(h5['Data']['Q']) 
+        
+
+
+
+
             
     # Obtain simulation temporal parameters from filename (if not given as input argument)
     timesteps_per_cyc = args.timesteps_per_cyc
@@ -1140,9 +1238,6 @@ def main():
         period_seconds = extract_period_from_h5_filename(CFD_h5_files[0])
         print (f"Found period (s) = {period_seconds} from CFD results HDF5 file names. \n")
 
-    # Assemble CFD data
-    wall_pressure = read_wall_pressure_from_h5_files_parallel(CFD_h5_files, wall_mesh, args.n_process, args.density)    
-    
 
     # Run post-processing of assembled CFD results
     print (f"Performing post-processing computation on {args.n_process} cores ... \n" )
@@ -1154,12 +1249,12 @@ def main():
                         output_folder_files = output_folder_files,
                         output_folder_imgs = output_folder_imgs,
                         output_folder_ROIs = output_folder_ROIs,
-                        wall_mesh = wall_mesh,
-                        wall_pressure = wall_pressure,
+                        surf_mesh = surf_mesh,
+                        vol_mesh = vol_mesh,
+                        spec_quantity = args.spec_quantity,
+                        spec_quantity_array = spec_quantity_array,
                         period_seconds = period_seconds,
                         timesteps_per_cyc = timesteps_per_cyc,
-                        spec_quantity = args.spec_quantity,
-                        cutoff_dB = args.cutoff_dB,
                         ROI_params = ROI_params,
                         STFT_params = short_time_fourier_params)
 
