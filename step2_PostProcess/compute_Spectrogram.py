@@ -52,7 +52,8 @@
 #   --window              STFT window type
 #   --pad_mode            Edge padding ('cycle','constant','odd','even','none')
 #   --detrend             STFT detrend ('linear','constant', or False)
-#   --cutoff_dB           Minimum threshold for calculated power in dB (e.g., 0) --> anything below that will be set to this value
+#   --cutoff_dB           Minimum threshold for calculated power in SPL dB (default: 0) --> anything below that will be set to this value
+#   --cutoff_freq         Maximum frequency threshold in Hz for filtering high frequencies (default: 1500 Hz) --> anything above this frequency is cut from the spectrogram
 #   --n_process           Number of worker processes (default: #logical CPUs)
 #
 # OUTPUTS:
@@ -209,7 +210,7 @@ def assemble_volume_mesh(mesh_file):
 # --------------------------------- Parallel File Reader -----------------------------------------------
 
 
-def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype, density=1060):
+def read_wallpressure_from_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype, density=1060):
     """
     Reads a *chunk* of time-snapshot HDF5 files, extracts wall pressures, and writes into the shared array.
 
@@ -232,7 +233,7 @@ def read_wall_pressure_from_h5_files(file_ids, wall_pids, h5_files, shared_press
             
         shared_pressure[:, t_index] = pressure_wall 
 
-def read_wall_pressure_from_h5_files_parallel(CFD_h5_files, wall_mesh, n_process, density):
+def read_wallpressure_from_h5_files_parallel(CFD_h5_files, wall_mesh, n_process, density):
         
         # Total number of saved frames
         n_snapshots = len(CFD_h5_files)
@@ -258,7 +259,7 @@ def read_wall_pressure_from_h5_files_parallel(CFD_h5_files, wall_mesh, n_process
         
         processes_list=[]
         for idx, group in enumerate(time_groups):
-            proc = mp.Process(target = read_wall_pressure_from_h5_files, name=f"Reader{idx}", args=(group, wall_pids, CFD_h5_files, shared_pressure_ctype, density))
+            proc = mp.Process(target = read_wallpressure_from_h5_files, name=f"Reader{idx}", args=(group, wall_pids, CFD_h5_files, shared_pressure_ctype, density))
             processes_list.append(proc)
 
         # Start all readers
@@ -496,13 +497,10 @@ def assemble_var_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, var_
     flag_save_ROI     = ROI_params.get("flag_save_ROI")
 
     # --- Choose the mesh domain based on the given variable name
-    surface_vars = {'wallpressure'}
-    volume_vars = {'velocity', 'qcriterion'}
-    mesh_domain = "surface" if var_name in surface_vars else "volume"
-    
-    if mesh_domain == "surface":
+
+    if var_name in {'wallpressure'}:
         mesh = surf_mesh
-    elif mesh_domain == "volume":
+    elif var_name in {'velocity', 'qcriterion'}:
         mesh = vol_mesh
 
 
@@ -567,9 +565,11 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
     """
     Compute an average spectrogram (in dB) based on the given array for the variable of interest with configurable STFT parameters.
 
-    var_name:
     var_array:
     STFT_params: 
+
+    Returns:
+    spectrogram_data
     """
     
     # Unpack input parameters
@@ -581,70 +581,73 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
     window_type   = STFT_params.get("window_type")
     detrend       = STFT_params.get("detrend")
     cutoff_dB     = STFT_params.get("cutoff_dB")
+    cutoff_freq   = STFT_params.get("cutoff_freq")
 
-    if var_name == 'wallpressure':
-        # Assembles pressure data for the ROI
-        #wall_pressure_ROI = assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_pressure, ROI_params)
-        signal_pressure = var_array
-
-        n_points = signal_pressure.shape[0]
-        n_snapshots = signal_pressure.shape[1] # total number of snapshots
+    signal      = var_array
+    n_points    = signal.shape[0]
+    n_snapshots = signal.shape[1] # total number of snapshots
 
 
-        # If window_length is not defined, divide the signal by 10 by default 
-        if window_length is None: window_length = shift_bit_length(int(n_snapshots / 10))
+    # If window_length is not defined, divide the signal by 10 by default 
+    if window_length is None: window_length = shift_bit_length(int(n_snapshots / 10))
 
 
-        # Note: All the below S arrays have shape (n_freq, n_frames)
+    # Note: All the below S arrays have shape (n_freq, n_frames)
 
-        # Compute FFT for first point. # Pass data as row vectors
-        freqs, bins, Z0 = short_time_fourier(signal_pressure[0][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend)
-        S_sum = np.zeros_like(Z0, dtype=np.float64)
+    # Compute FFT for first point. # Pass data as row vectors
+    freqs, bins, Z0 = short_time_fourier(signal[0][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend)
+    S_sum = np.zeros_like(Z0, dtype=np.float64)
 
-        # Case 1: Single point ROI
-        if n_points == 1:
-            S_point = np.abs(Z0)**2
-            S_avg_dB = 10.0 * np.log10(S_point / np.max(S_point))
+    # Case 1: Single point ROI
+    if n_points == 1:
+        S_point = np.abs(Z0)**2
+        S_avg_dB = 10.0 * np.log10(S_point / np.max(S_point))
 
         
-        # Case 2: Multiple points ROI
-        else:
-            for point in range(n_points):
-                # Pass data as row vectors
-                _, _, Z_point = short_time_fourier(signal_pressure[point][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend)
-                S_point_power = np.abs(Z_point)**2
-                S_sum += S_point_power 
+    # Case 2: Multiple points ROI
+    else:
+        for point in range(n_points):
+            # Pass data as row vectors
+            _, _, Z_point = short_time_fourier(signal[point][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend)
+            S_point_power = np.abs(Z_point)**2
+            S_sum += S_point_power 
             
-            S_avg_power = S_sum / n_points
-            S_ref = (2e-5)**2 #np.mean(S_avg_power) 
-            S_avg_dB = 10.0 * np.log10(S_avg_power / S_ref)
-            S_avg_dB = np.squeeze(S_avg_dB)
+        S_avg_power = S_sum / n_points
 
-        if pad_mode in ['cycle', 'even', 'odd']:
-            bins = bins - bins[0]
+        if var_name == 'wallpressure':
+            S_ref = (2e-5)**2 
+        else:
+            S_ref = np.mean(S_avg_power) 
+            
+        S_avg_dB = 10.0 * np.log10(S_avg_power / S_ref)
+        S_avg_dB = np.squeeze(S_avg_dB)
+
+    if pad_mode in ['cycle', 'even', 'odd']:
+        bins = bins - bins[0]
 
 
-        # Remove last frame to keep edges clean    
-        S_avg_dB = S_avg_dB[:,:-1]
-        bins = bins[:-1]
+    # Remove last frame to keep edges clean    
+    S_avg_dB = S_avg_dB[:,:-1]
+    bins = bins[:-1]
 
-        # Clamp values below a threshold
-        S_avg_dB[S_avg_dB < cutoff_dB] = cutoff_dB
+    # Clamp values below a threshold
+    S_avg_dB[S_avg_dB < cutoff_dB] = cutoff_dB
 
-        # Store all values in spectrogram_data
-        spectrogram_data = {
-            'power_avg_dB': S_avg_dB,
-            'bins': bins,
+    # Cut off any frequencies above a threshold
+    mask = freqs <= cutoff_freq
+    S_avg_dB = S_avg_dB[mask, :]
+    freqs = freqs[mask]
+
+    # Store all values in spectrogram_data
+    spectrogram_data = {
+            'power_avg_dB': S_avg_dB, # (n_freq, n_frames)
+            'bins': bins,             # time values
             'freqs': freqs,
             'sampling_rate': sampling_rate,
             'n_fft': n_fft,
             'window_length': window_length,
             'overlap_frac': overlap_frac,
         }
-
-    elif var_name == 'velocity':
-        # the variable is 'u' but bsl tools calculate the norm of it -> 'umag'
-        print("Spectrogram calculation for velocity is not implemented yet!")
 
     
     return spectrogram_data
@@ -867,8 +870,8 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     # Set different limits based on the case
     if 'PTSeg043' in case_name:
         ax.set_ylim([0, 600])
-    else:
-        ax.set_ylim([0, 1500])
+    #else:
+    #    ax.set_ylim([0, 1500])
     
 
     #----- Adding the colorbar
@@ -978,7 +981,6 @@ def compute_and_save_spectrogram_for_all_ROIs(
         
         #print(f"Loaded {ROI_centers.shape[0]} ROI points from {ROI_center_csv}: \n")
         
-
         # Loop over all center points (or with a stride)
 
         #-----Case 1A: Sweeping method. Generate one spectrogram for a segment chosen based on multiple ROIs
@@ -1001,7 +1003,6 @@ def compute_and_save_spectrogram_for_all_ROIs(
 
                 # Obtain the point ID of all ROIs combined
                 #ROI_point_indices.extend(assemble_wall_pressure_for_one_ROI(output_folder_ROIs, surf_mesh, wall_pressure, ROI_params_multi, return_indices=True))
-                
                 ROI_point_indices.extend(assemble_var_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, spec_quantity, spec_quantity_array, ROI_params_multi, return_indices=True))
 
             # Keep only the unique indices
@@ -1048,10 +1049,12 @@ def compute_and_save_spectrogram_for_all_ROIs(
                 ROI_params["ROI_center_normal"] = normal
 
                 # Assemble pressure data for each ROI
-                wall_pressure_ROI = assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_pressure, ROI_params)
+                #wall_pressure_ROI = assemble_wall_pressure_for_one_ROI(output_folder_ROIs, surf_mesh, spec_quantity_array, ROI_params)
+                spec_quantity_array_ROI = assemble_var_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, spec_quantity, spec_quantity_array, ROI_params)
+
 
                 # Calculate average spectrogram for each ROI
-                spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = wall_pressure_ROI, STFT_params = STFT_params)
+                spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = spec_quantity_array_ROI, STFT_params = STFT_params)
 
                 # Classify spectrogram phases
                 spectrogram_phases = classify_spectrogram_phases(spectrogram_data)
@@ -1076,9 +1079,10 @@ def compute_and_save_spectrogram_for_all_ROIs(
         ROI_params["ROI_center_coord"] = ROI_center_coord
 
         # Assemble pressure data for each ROI
-        wall_pressure_ROI = assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_pressure, ROI_params)
+        #wall_pressure_ROI = assemble_wall_pressure_for_one_ROI(output_folder_ROIs, surf_mesh, spec_quantity_array, ROI_params)
+        spec_quantity_array_ROI = assemble_var_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, spec_quantity, spec_quantity_array, ROI_params)
 
-        spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = wall_pressure_ROI, STFT_params = STFT_params)
+        spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = spec_quantity_array_ROI, STFT_params = STFT_params)
 
         # Classify spectrogram phases
         spectrogram_phases = classify_spectrogram_phases(spectrogram_data) #f_low=100
@@ -1137,6 +1141,7 @@ def parse_args():
     ap.add_argument("--pad_mode",         type=str,   default="cycle",  choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts")
     ap.add_argument("--detrend",          type=str,   default="linear", help="Detrend option for STFT: 'linear', 'constant', or False")
     ap.add_argument("--cutoff_dB",        type=float, default=0.0,      help="Minimum dB floor for visualization")
+    ap.add_argument("--cutoff_freq",      type=float, default=1500,     help="Maximum frequency to filter spectrogram in Hz (default: 1500 Hz)")
 
     
     return ap.parse_args()
@@ -1181,12 +1186,13 @@ def main():
         "window_type": args.window_type,
         "pad_mode": args.pad_mode,
         "detrend": args.detrend,
-        "cutoff_dB": args.cutoff_dB}
+        "cutoff_dB": args.cutoff_dB,
+        "cutoff_freq": args.cutoff_freq}
 
     # Assemble mesh
     mesh_file = list(Path(mesh_folder).glob('*.h5'))[0]
     surf_mesh = assemble_surface_mesh(mesh_file)
-    vol_mesh  = assemble_volume_mesh(mesh_file)
+    vol_mesh, _  = assemble_volume_mesh(mesh_file)
 
     print(f"\n[info] Mesh file:               {mesh_file}")
     print(f"[info] Read CFD results from:   {input_folder}")
@@ -1211,19 +1217,16 @@ def main():
         CFD_h5_files = sorted(input_path.glob('*_curcyc_*up.h5'), key = extract_timestep_from_h5_filename)
 
         # Assemble variable array
-        spec_quantity_array = read_wall_pressure_from_h5_files_parallel(CFD_h5_files, surf_mesh, args.n_process, args.density) 
+        spec_quantity_array = read_wallpressure_from_h5_files_parallel(CFD_h5_files, surf_mesh, args.n_process, args.density) 
         
     elif args.spec_quantity == 'qcriterion':
-        Q_h5_file = input_path / f"{case_name}_Qcriterion.h5"
+        Q_h5_file = input_path / f"{args.case_name}_Qcriterion.h5"
 
-        print(f"Reading Q-criterion file ...")
+        print(f"Reading Qcriterion file ...")
 
         with h5py.File(Q_h5_file, 'r') as h5:
             spec_quantity_array = np.array(h5['Data']['Q']) 
         
-
-
-
 
             
     # Obtain simulation temporal parameters from filename (if not given as input argument)
