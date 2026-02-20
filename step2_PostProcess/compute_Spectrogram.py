@@ -633,16 +633,16 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
     # Clamp values below a threshold
     S_avg_dB[S_avg_dB < cutoff_dB] = cutoff_dB
 
-    # Cut off any frequencies above a threshold
+    # Set the power for any frequencies above a certain threshold to zero
     mask = freqs <= cutoff_freq
-    S_avg_dB = S_avg_dB[mask, :]
-    freqs = freqs[mask]
+    S_avg_dB[freqs > cutoff_freq, :] = 0
+
 
     # Store all values in spectrogram_data
     spectrogram_data = {
             'power_avg_dB': S_avg_dB, # (n_freq, n_frames)
-            'bins': bins,             # time values
-            'freqs': freqs,
+            'bins': bins,             # time values (n_frames,1)
+            'freqs': freqs,           # (n_freqs,1)
             'sampling_rate': sampling_rate,
             'n_fft': n_fft,
             'window_length': window_length,
@@ -820,7 +820,7 @@ def first_phase_transitions(phases, x_axis, x_min, x_max, phase_values=(1, 2, 3)
 
 
 
-def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, plot_title):
+def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, plot_title, flag_plot_phases=True):
     """
     Save spectrogram data (.npz) and a PNG image.
     """
@@ -870,8 +870,8 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     # Set different limits based on the case
     if 'PTSeg043' in case_name:
         ax.set_ylim([0, 600])
-    #else:
-    #    ax.set_ylim([0, 1500])
+    else:
+        ax.set_ylim([0, 1500])
     
 
     #----- Adding the colorbar
@@ -886,23 +886,26 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
 
     
     #---------------- Adding the phases ------------------
-    # Method 1: Add as vertical lines
-    # Find first points of transition
-    phase_transitions = first_phase_transitions(spectrogram_phases, x_axis=bins_Q, x_min=xmin, x_max=xmax)
-    #print(phase_transitions)
+    
+    if flag_plot_phases:
+        # Method 1: Add as vertical lines
+        # Find first points of transition
+        phase_transitions = first_phase_transitions(spectrogram_phases, x_axis=bins_Q, x_min=xmin, x_max=xmax)
+        #print(phase_transitions)
 
-    for phase, idx in phase_transitions.items():
-        if idx is None:
-            continue
-        x = bins_Q[idx]
-        ax.axvline(x, color="white", linestyle="solid", linewidth=3, alpha=0.7)
+        for phase, idx in phase_transitions.items():
+            if idx is None:
+                continue
+            x = bins_Q[idx]
+            print(f'Qin of Phase {phase} = {x} ml/s')
+            ax.axvline(x, color="white", linestyle="solid", linewidth=3, alpha=0.7)
 
-    # Method 2: Add as steps
-    #ax2 = ax.twinx()
-    #ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=4)
-    #ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
-    #ax2.set_yticks([0,1,2,3])
-    #ax2.set_ylim(-0.15, 3.15)
+        # Method 2: Add as steps
+        #ax2 = ax.twinx()
+        #ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=4)
+        #ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
+        #ax2.set_yticks([0,1,2,3])
+        #ax2.set_ylim(-0.15, 3.15)
 
 
     #----- For customizing the colorbar and axis for figures ----
@@ -1093,7 +1096,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
         plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectrogram_title)
     
 
-    print (f'\nFinished computing and saving spetrograms.')
+    print (f'\nFinished computing and saving spectrograms.')
     
    
 
@@ -1133,7 +1136,7 @@ def parse_args():
 
 
 
-    # Short-time Fourier Transform control (all optional)
+    # Spectrogram specific parameters (including Short-time Fourier Transform control)
     ap.add_argument("--window_length",    type=int,   default=None,     help="Length of FFT window in samples (number of snapshots for each window)")
     ap.add_argument("--n_fft",            type=int,   default=None,     help="FFT length (bins)")
     ap.add_argument("--overlap_fraction", type=float, default=0.9,      help="Overlap fraction between consequent windows [0,1] (default: 0.75)")
@@ -1141,7 +1144,7 @@ def parse_args():
     ap.add_argument("--pad_mode",         type=str,   default="cycle",  choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts")
     ap.add_argument("--detrend",          type=str,   default="linear", help="Detrend option for STFT: 'linear', 'constant', or False")
     ap.add_argument("--cutoff_dB",        type=float, default=0.0,      help="Minimum dB floor for visualization")
-    ap.add_argument("--cutoff_freq",      type=float, default=1500,     help="Maximum frequency to filter spectrogram in Hz (default: 1500 Hz)")
+    ap.add_argument("--cutoff_freq",      type=float, default=5500,     help="Maximum frequency to filter spectrogram in Hz (default: 1500 Hz)")
 
     
     return ap.parse_args()

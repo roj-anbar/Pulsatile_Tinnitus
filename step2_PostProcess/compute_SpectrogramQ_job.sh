@@ -59,7 +59,7 @@ python "$SCRIPT" \
     --ROI_height            2 \
     --ROI_stride            2 \
     --ROI_start_center_id   627 \
-    --ROI_end_center_id     664 \
+    --ROI_end_center_id     628 \
     --flag_multi_ROI        \
     --timesteps_per_cyc     10000 \
     --period_seconds        0.915
