@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --partition=compute
+#SBATCH --partition=debug
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=192
-#SBATCH --time=10:59:59
+#SBATCH --time=00:10:59
 #SBATCH --job-name PT_Qcriterion
 #SBATCH --output=PT_Qcriterion_%j.txt
 
@@ -13,8 +13,8 @@ set -euo pipefail
 CASE=PTSeg028_base_0p64
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE
 MESH="$BASE_DIR/step1_CFD/data"
-INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq5"
-OUTPUT="$BASE_DIR/step2_PostProcess/Qcriterion/cy6_saveFreq5"
+INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq307"
+OUTPUT="$BASE_DIR/step2_PostProcess/Qcriterion/" #cy6_saveFreq5/normalized"
 SCRIPT="$SLURM_SUBMIT_DIR/compute_Qcriterion.py"  # ensure to submit from script dir
 
 
@@ -41,18 +41,18 @@ export PYVISTA_USE_PANEL=true
 # ------------------------------ Run Scripts ---------------------------------------------
 
 python "$SCRIPT" \
-    --input_folder  "$INPUT" \
-    --mesh_folder   "$MESH" \
-    --case_name     "$CASE" \
-    --output_folder "$OUTPUT" \
-    --n_process     "${SLURM_TASKS_PER_NODE}"
+    --mesh_folder             "$MESH" \
+    --input_folder            "$INPUT" \
+    --output_folder           "$OUTPUT" \
+    --case_name               "$CASE" \
+    --flag_normalize_velocity 
 
 
 #python compute_Qcriterion.py \
-#    --input_folder  "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/results/PTSeg106_base_0p64_ts10000_cy6_saveFreq5" \
-#    --mesh_folder   "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/data" \
-#    --case_name     "PTSeg106_base_0p64" \
-#    --output_folder "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/post-process/Qcriterion/cy6_saveFreq5/" \
-#    --n_process     192
+#    --mesh_folder   "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data" \
+#    --input_folder  "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq5" \
+#    --output_folder "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/Qcriterion/cy6_saveFreq5/normalized" \
+#    --case_name     "PTSeg028_base_0p64" \
+#    --flag_normalize_velocity 
 
 wait

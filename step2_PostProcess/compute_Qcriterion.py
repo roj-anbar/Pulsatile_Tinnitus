@@ -55,20 +55,20 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 # -------------------------------- Shared-memory Utilities ---------------------------------------------
-###############################################################################################
+
 def create_shared_array(size, dtype = np.float32):
     """Create a ctypes-backed shared array filled with zeros."""
     ctype_array = np.ctypeslib.as_ctypes( np.zeros(size, dtype=dtype) )
     return sharedctypes.Array(ctype_array._type_, ctype_array,  lock=False)
 
-###############################################################################################
+
 def np_shared_array(shared_obj):
     """Get a NumPy view (no copy) onto a shared ctypes array created by create_shared_array."""
     return np.ctypeslib.as_array(shared_obj)
 
 
 # ---------------------------------------- I/O Utilities -----------------------------------------------------
-###############################################################################################
+
 def assemble_volume_mesh(mesh_file):
     """
     Create a PyVista UnstructuredGrid from the volumetric mesh stored in a BSLSolver-style HDF5.
@@ -97,11 +97,12 @@ def assemble_volume_mesh(mesh_file):
 
     return vol_mesh, cells
 
-###############################################################################################
+
 def extract_timestep_from_h5(h5_filename):
         """
         Extract (integer_timestep, physical_time) from filename pattern '*t=<float>_ts=<int>_up.h5'.
         Used to sort snapshot files chronologically.
+        Physical time is usually in units [ms].
         """
         name = str(h5_filename)
 
@@ -113,7 +114,92 @@ def extract_timestep_from_h5(h5_filename):
 
         return (tstep, time)
 
-###############################################################################################
+
+def read_mesh_info(mesh_info_path, key):
+    """
+    Parse the casename.info file for <INLETS> or <OUTLETS> blocks.
+    Retrive the boundary information from the info file.
+
+    Returns:
+        ids        : list[int]      boundary ids
+        idfr       : list[float]    inlet mean flows (mL/s) OR outlet ratios (unitless)
+        ida        : list[float]    areas (mm^2)
+        fcs        : list[str]      waveform tags (for inlets); '_' for outlets
+    """
+    # Extract inflow rate and outflow split ratios
+    # Sample
+    # p162
+    # <INLETS>
+    # 3 ICA_V27:FC_MCA_10 (3.4278309480,13.32740523503,-28.2355071983) (-0.2155297545,0.12005896011,-0.9690886291) 1.7649351905 9.7860492613   A*0.27
+    #
+    # <OUTLETS>
+    # 1  None  (-16.8228963362,-1.42906111694,17.7845745237)  (-0.9847740285,-0.16502447805,-0.0546537689)   0.8568220486   2.3063814691   0.3318956234191912
+    # 2  None    (7.9704219814,-9.22385217254,15.0763376349)   (0.7251682706,-0.49373752256,-0.4799523290)   1.3398999124   5.6402011155   0.6681043765808088
+
+    #info = open(path.splitext(mesh_path)[0]+'.info', 'r').read()
+    info = open(mesh_info_path, 'r').read()
+
+    # Looking for the given key
+    p1 = info.find(key)
+    if p1<0:
+        return [], [], []
+    p1 += len(key)
+    p2 = info.find('<', p1)
+    if p2<0:
+        buf = info[p1:]
+    else:
+        buf = info[p1:p2-1]
+    lines = buf.split('\n')
+
+    ids = []
+    idfr = []
+    ida = []
+    idr = []
+    fcs = []
+    # Reaing at the key values
+    for line in lines:
+        ls = line.split()
+        if len(ls) > 1:
+            # id
+            ids.append(int(ls[0]))# eval(ls[ 0]))
+            # radius
+            idr.append(eval(ls[-3]))
+            # area
+            ida.append(eval(ls[-2]))
+            # flowrate or arearatio
+            s = ls[-1].replace('A[','a[').replace('R[','r[')
+            s = s.replace('A',ls[-2]).replace('R',ls[-3])
+            idfr.append(s)
+            # wave form
+            fcs.append(ls[1])
+    # evaluate all the expressions in the flowrates and outflow ratios
+    for i,expr in enumerate(idfr):
+        for j,k in enumerate(ids):
+             expr = expr.replace( 'r[%d]'%k, str(idr[j])).replace( 'a[%d]'%k, str(ida[j]))
+        idfr[i] = eval(expr)
+
+    # sum of area ratio correction:
+    if key == '<OUTLETS>':
+        idfr[-1] = 1.0 - sum(idfr[:-1])
+
+    return ids, idfr, ida, fcs
+
+
+def calculate_umax_inlet_ramp(time_sec, mesh_info_path, inlet_flow_type = 'ramp'):
+  """Calculate the max velocity at inlet assuming Poiseuille profile."""
+
+  _, _, inlet_area, _ = read_mesh_info(mesh_info_path, '<INLETS>')
+
+  if inlet_flow_type == 'ramp':
+    Q = 2 * time_sec #  Q = [ml/s]
+
+  elif inlet_flow_type == 'womersley':
+    print('Not implemented yet!!')
+
+  uin_max = 2*Q / inlet_area[0]
+
+  return uin_max
+
 def create_h5_output(vol_mesh, topology, n_points: int, n_snapshots: int, output_h5_path: Path):
     """
     Creates one HDF5 file with the mesh (constant) and pre-allocate Time and Q arrays.
@@ -150,7 +236,6 @@ def create_h5_output(vol_mesh, topology, n_points: int, n_snapshots: int, output
     return f
 
 
-###############################################################################################
 def write_xdmf_for_h5(h5_path: Path, xdmf_path: Path, series_name: str = "TimeSeries", attr_name: str = "QCriterion", topo_type: str = "Tetrahedron"):
     """
     Generate an XDMF v3 file:
@@ -230,7 +315,7 @@ def write_xdmf_for_h5(h5_path: Path, xdmf_path: Path, series_name: str = "TimeSe
 # -------------------------------- Compute Qcriterion -----------------------------------------------------
 
 ###############################################################################################
-def compute_Qcriterion_from_h5_files_parallel(file_ids, h5_files, vol_mesh, q_ctype):
+def compute_Qcriterion_from_h5_files_parallel(mesh_info_path, file_ids, h5_files, vol_mesh, q_ctype, flag_normalize_velocity):
     """
     Computes Q for a subset of timesteps from HDF5 files and write results into a shared matrix.
     For each assigned t_index it reads '/Solution/u' from h5 file, compute Q-criterion, and write it into column t_index of the shared Q matrix.
@@ -241,19 +326,27 @@ def compute_Qcriterion_from_h5_files_parallel(file_ids, h5_files, vol_mesh, q_ct
       vol_mesh : pv.UnstructuredGrid
       q_ctype  : shared ctype array to store Q-criterion
     """
-    
+
     # Create a shared (across processes) array of Q-criterion time-series
     q_array = np_shared_array(q_ctype) # (n_points, n_snapshots)
     
     for t_index in file_ids:
 
-        ts, t_val = extract_timestep_from_h5(h5_files[t_index])
+        ts, t_val = extract_timestep_from_h5(h5_files[t_index]) # [index], [ms]
 
         with h5py.File(h5_files[t_index], 'r') as h5:
-            U = np.asarray(h5['Solution']['u']) # shape: (n_points, 3)
+            u = np.asarray(h5['Solution']['u']) # shape: (n_points, 3)
             
+            # Perform normalization if required
+            if flag_normalize_velocity:
+              t_val_sec = t_val/1000 # converting ms to s
+              umax_in = calculate_umax_inlet_ramp(t_val_sec, mesh_info_path)
+            else:
+              # No normalization
+              umax_in = 1
+
             vol_mesh.point_data.clear()
-            vol_mesh.point_data["Velocity"] = U
+            vol_mesh.point_data["Velocity"] = u/umax_in
             vol_mesh.set_active_vectors("Velocity")
 
             q_grid = vol_mesh.compute_derivative(qcriterion=True, progress_bar=False)
@@ -266,9 +359,11 @@ def compute_Qcriterion_from_h5_files_parallel(file_ids, h5_files, vol_mesh, q_ct
 ###############################################################################################
 def hemodynamics(vol_mesh: pv.UnstructuredGrid,
                  mesh_topology: np.array,
+                 mesh_folder: Path,
                  input_folder: Path,
                  output_folder: Path,
                  case_name: str,
+                 flag_normalize_velocity: bool,
                  n_process: int,
                  ):
     """
@@ -283,12 +378,13 @@ def hemodynamics(vol_mesh: pv.UnstructuredGrid,
     """
 
     # 1) Initialize:
-    
+    mesh_info_path  = mesh_folder/ f"{case_name}.info" # Required in Qcriterion calculation
+
     # Gather files: Find & sort snapshot files by timestep 
     snapshot_h5_files = sorted(Path(input_folder).glob('*_curcyc_*up.h5'), key = extract_timestep_from_h5)
     
     n_snapshots = len(snapshot_h5_files) # number of time frames stored 
-    n_points  = len(vol_mesh.points)     # number of nodes in the mesh
+    n_points    = len(vol_mesh.points)     # number of nodes in the mesh
  
     if n_snapshots==0:
         print('No files found in {}!'.format(input_folder))
@@ -304,7 +400,7 @@ def hemodynamics(vol_mesh: pv.UnstructuredGrid,
 
     
     # 2) Compute Qcriterion (parallel):
-    print (f'Computing Qcriterion in parallel for {n_snapshots} snapshots ... \n')
+    print (f'Computing Qcriterion in parallel for {n_snapshots} snapshots, normalize velocity: {flag_normalize_velocity} ... \n')
     
     # Create a shared (across processes) array of Q-criterion time-series
     q_ctype = create_shared_array([n_points, n_snapshots]) # (n_points, n_snapshots)
@@ -319,7 +415,7 @@ def hemodynamics(vol_mesh: pv.UnstructuredGrid,
         proc = mp.Process(
                 target = compute_Qcriterion_from_h5_files_parallel,
                 name = f"Qcriterion{idx}",
-                args=(group, snapshot_h5_files, vol_mesh, q_ctype))
+                args=(mesh_info_path, group, snapshot_h5_files, vol_mesh, q_ctype, flag_normalize_velocity))
         
         processes_list.append(proc)
         proc.start()
@@ -367,11 +463,12 @@ def hemodynamics(vol_mesh: pv.UnstructuredGrid,
 ###############################################################################################
 def parse_args():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input_folder",  required=True,       help="Results folder with CFD .h5 files")
-    ap.add_argument("--mesh_folder",   required=True,       help="Case mesh folder containing HDF5 mesh file")
-    ap.add_argument("--case_name",     required=True,       help="Case name")
-    ap.add_argument("--output_folder", required=True,       help="Output directory to save VTU files")
-    ap.add_argument("--n_process",     type=int,            help="Number of parallel processes", default=max(1, mp.cpu_count() - 1))
+    ap.add_argument("--n_process",     type=int,        help="Number of parallel processes", default=max(1, mp.cpu_count() - 1))
+    ap.add_argument("--mesh_folder",   required=True,   help="Case mesh folder containing HDF5 mesh file")
+    ap.add_argument("--input_folder",  required=True,   help="Results folder with CFD .h5 files")
+    ap.add_argument("--output_folder", required=True,   help="Output directory to save VTU files")
+    ap.add_argument("--case_name",     required=True,   help="Case name")
+    ap.add_argument("--flag_normalize_velocity",        action="store_true", help="Flag to normalize velocity before calculating Qcriterion.")
 
     return ap.parse_args()
 
@@ -385,8 +482,7 @@ def main():
     if not Path(output_folder).exists():
         Path(output_folder).mkdir(parents=True, exist_ok=True)
 
-    mesh_file = list(Path(mesh_folder).glob('*.h5'))[0]
-    #print(f"Loading mesh: {mesh_file}")
+    mesh_file = list(mesh_folder.glob('*.h5'))[0]
     vol_mesh, mesh_topology = assemble_volume_mesh(mesh_file)
 
     print(f"[info] Mesh file:    {mesh_file}")
@@ -397,7 +493,7 @@ def main():
 
 
     #print(f"Performing hemodynamics computation on {args.n_process} processes ...")
-    hemodynamics(vol_mesh, mesh_topology, input_folder, output_folder, case_name = args.case_name, n_process = args.n_process)
+    hemodynamics(vol_mesh, mesh_topology, mesh_folder, input_folder, output_folder, case_name = args.case_name, flag_normalize_velocity = args.flag_normalize_velocity, n_process = args.n_process)
 
 
 
