@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --partition=debug
+#SBATCH --partition=compute
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=192
-#SBATCH --time=00:10:59
+#SBATCH --time=10:59:59
 #SBATCH --job-name PT_Qcriterion
 #SBATCH --output=PT_Qcriterion_%j.txt
 
@@ -10,11 +10,11 @@
 set -euo pipefail
 
 # ---------------------------------- Define Paths ---------------------------------------
-CASE=PTSeg028_base_0p64
+CASE=PTSeg106_base_0p64
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE
 MESH="$BASE_DIR/step1_CFD/data"
-INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq307"
-OUTPUT="$BASE_DIR/step2_PostProcess/Qcriterion/" #cy6_saveFreq5/normalized"
+INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq5"
+OUTPUT="$BASE_DIR/step2_PostProcess/Qcriterion/cy6_saveFreq5"
 SCRIPT="$SLURM_SUBMIT_DIR/compute_Qcriterion.py"  # ensure to submit from script dir
 
 

@@ -479,8 +479,9 @@ def main():
     mesh_folder   = Path(args.mesh_folder)
     output_folder = Path(args.output_folder)
 
-    if not Path(output_folder).exists():
-        Path(output_folder).mkdir(parents=True, exist_ok=True)
+    # Create output folder based on normalization flag
+    output_folder = Path(args.output_folder)/ f'velocityNorm_{args.flag_normalize_velocity}'
+    output_folder.mkdir(parents=True, exist_ok=True)
 
     mesh_file = list(mesh_folder.glob('*.h5'))[0]
     vol_mesh, mesh_topology = assemble_volume_mesh(mesh_file)
