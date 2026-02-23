@@ -51,7 +51,6 @@ python "$SCRIPT" \
     --mesh_folder           "$MESH" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
-    --n_process             "${SLURM_TASKS_PER_NODE}" \
     --spec_quantity         "qcriterion" \
     --window_length         2732 \
     --ROI_type              "cylinder" \
@@ -74,7 +73,6 @@ python "$SCRIPT" \
 #    --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data" \
 #    --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/Qcriterion/cy3_saveFreq5/specs" \
 #    --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data/PTSeg028_base_0p64_centerline_points.csv" \
-#    --n_process             192 \
 #    --spec_quantity         "qcriterion" \
 #    --window_length         2732 \
 #    --ROI_type              "cylinder" \

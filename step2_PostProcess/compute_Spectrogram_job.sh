@@ -57,7 +57,6 @@ python "$SCRIPT" \
     --mesh_folder           "$MESH" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
-    --n_process             "${SLURM_TASKS_PER_NODE}" \
     --spec_quantity         "wallpressure" \
     --window_length         5000 \
     --ROI_type              "cylinder" \
@@ -78,7 +77,6 @@ python "$SCRIPT" \
     --mesh_folder           "$MESH" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
-    --n_process             "${SLURM_TASKS_PER_NODE}" \
     --spec_quantity         "wallpressure" \
     --window_length         5000 \
     --ROI_type              "cylinder" \
@@ -97,7 +95,6 @@ python "$SCRIPT" \
     --mesh_folder           "$MESH" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
-    --n_process             "${SLURM_TASKS_PER_NODE}" \
     --spec_quantity         "wallpressure" \
     --window_length         5000 \
     --ROI_type              "cylinder" \
@@ -116,7 +113,6 @@ python "$SCRIPT" \
     --mesh_folder           "$MESH" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
-    --n_process             "${SLURM_TASKS_PER_NODE}" \
     --spec_quantity         "pressure" \
     --window_length         5000 \
     --ROI_type              "cylinder" \
@@ -135,7 +131,6 @@ python "$SCRIPT" \
     --mesh_folder           "$MESH" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
-    --n_process             "${SLURM_TASKS_PER_NODE}" \
     --spec_quantity         "pressure" \
     --window_length         5000 \
     --ROI_type              "cylinder" \
