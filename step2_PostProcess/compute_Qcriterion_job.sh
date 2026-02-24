@@ -10,7 +10,7 @@
 set -euo pipefail
 
 # ---------------------------------- Define Paths ---------------------------------------
-CASE=PTSeg106_base_0p64
+CASE=PTSeg043_noLabbe_base
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE
 MESH="$BASE_DIR/step1_CFD/data"
 INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq5"

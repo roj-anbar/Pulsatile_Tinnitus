@@ -480,7 +480,7 @@ def main():
     output_folder = Path(args.output_folder)
 
     # Create output folder based on normalization flag
-    output_folder = Path(args.output_folder)/ f'velocityNorm_{args.flag_normalize_velocity}'
+    output_folder = Path(args.output_folder)/ f'velocityNormal_{args.flag_normalize_velocity}'
     output_folder.mkdir(parents=True, exist_ok=True)
 
     mesh_file = list(mesh_folder.glob('*.h5'))[0]

@@ -412,17 +412,19 @@ def calculate_windowed_SPI(signal, STFT_params, freq_cutoff, mean_tag):
     fft_signal_above_zero[ind_freq_zero] = 0
 
     # Filter any amplitude corresponding to frequency lower than cutoff frequecy (f_cutoff=25Hz)
-    fft_signal_below_cutoff = fft_signal.copy()
-    fft_signal_below_cutoff[ind_freq_below_cutoff] = 0
+    fft_signal_above_cutoff = fft_signal.copy()
+    fft_signal_above_cutoff[ind_freq_below_cutoff] = 0
 
     # Compute the absolute value (power)
-    Power_below_cutoff = np.sum ( np.power( np.absolute(fft_signal_below_cutoff),2))
-    Power_above_zero   = np.sum ( np.power( np.absolute(fft_signal_above_zero),2))
+    power_above_cutoff = np.sum ( np.absolute(fft_signal_above_cutoff)**2)
+    power_above_zero   = np.sum ( np.absolute(fft_signal_above_zero)**2)
     
-    if Power_above_zero < 1e-5:
+    if power_above_zero < 1e-5:
         return 0
     
-    return Power_below_cutoff/Power_above_zero
+    SPI = power_above_cutoff/power_above_zero
+
+    return SPI
 
 
 def compute_and_save_SPI(case_name, output_folder, wall_mesh, wall_pressure, period_seconds, timesteps_per_cyc,

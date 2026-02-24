@@ -52,7 +52,7 @@
 #   --window              STFT window type
 #   --pad_mode            Edge padding ('cycle','constant','odd','even','none')
 #   --detrend             STFT detrend ('linear','constant', or False)
-#   --cutoff_dB           Minimum threshold for calculated power in SPL dB (default: 0) --> anything below that will be set to this value
+#   --cutoff_db           Minimum threshold for calculated power in SPL dB (default: 0) --> anything below that will be set to this value
 #   --cutoff_freq         Maximum frequency threshold in Hz for filtering high frequencies (default: 1500 Hz) --> anything above this frequency is cut from the spectrogram
 #   --n_process           Number of worker processes (default: #logical CPUs)
 #
@@ -580,7 +580,7 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
     pad_mode      = STFT_params.get("pad_mode")
     window_type   = STFT_params.get("window_type")
     detrend       = STFT_params.get("detrend")
-    cutoff_dB     = STFT_params.get("cutoff_dB")
+    cutoff_db     = STFT_params.get("cutoff_db")
     cutoff_freq   = STFT_params.get("cutoff_freq")
 
     signal      = var_array
@@ -591,6 +591,11 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
     # If window_length is not defined, divide the signal by 10 by default 
     if window_length is None: window_length = shift_bit_length(int(n_snapshots / 10))
 
+    # Define the reference value for normalizing the power to obtain dB scales
+    if var_name == 'wallpressure':
+        power_ref = (2e-5)**2 
+    else:
+        power_ref = np.mean(S_avg_power) 
 
     # Note: All the below S arrays have shape (n_freq, n_frames)
 
@@ -600,8 +605,8 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
 
     # Case 1: Single point ROI
     if n_points == 1:
-        S_point = np.abs(Z0)**2
-        S_avg_dB = 10.0 * np.log10(S_point / np.max(S_point))
+        power_point  = np.abs(Z0)**2
+        power_avg_db = 10.0 * np.log10(power_point / power_ref)
 
         
     # Case 2: Multiple points ROI
@@ -609,40 +614,37 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
         for point in range(n_points):
             # Pass data as row vectors
             _, _, Z_point = short_time_fourier(signal[point][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend)
-            S_point_power = np.abs(Z_point)**2
-            S_sum += S_point_power 
+            power_point = np.abs(Z_point)**2
+            power_sum += power_point 
             
-        S_avg_power = S_sum / n_points
+        power_avg = power_sum / n_points
 
-        if var_name == 'wallpressure':
-            S_ref = (2e-5)**2 
-        else:
-            S_ref = np.mean(S_avg_power) 
+        
             
-        S_avg_dB = 10.0 * np.log10(S_avg_power / S_ref)
-        S_avg_dB = np.squeeze(S_avg_dB)
+        power_avg_db = 10.0 * np.log10(power_avg / power_ref)
+        power_avg_db = np.squeeze(power_avg_db)
 
     if pad_mode in ['cycle', 'even', 'odd']:
         bins = bins - bins[0]
 
 
     # Remove last frame to keep edges clean    
-    S_avg_dB = S_avg_dB[:,:-1]
+    power_avg_db = power_avg_db[:,:-1]
     bins = bins[:-1]
 
     # Clamp values below a threshold
-    S_avg_dB[S_avg_dB < cutoff_dB] = cutoff_dB
+    power_avg_db[power_avg_db < cutoff_db] = cutoff_db
 
     # Set the power for any frequencies above a certain threshold to zero
     mask = freqs <= cutoff_freq
-    S_avg_dB[freqs > cutoff_freq, :] = 0
+    power_avg_db[freqs > cutoff_freq, :] = 0
 
 
     # Store all values in spectrogram_data
     spectrogram_data = {
-            'power_avg_dB': S_avg_dB, # (n_freq, n_frames)
-            'bins': bins,             # time values (n_frames,1)
-            'freqs': freqs,           # (n_freqs,1)
+            'power_avg_dB': power_avg_db,   # (n_freq, n_frames)
+            'bins': bins,                   # time values (n_frames,1)
+            'freqs': freqs,                 # (n_freqs,1)
             'sampling_rate': sampling_rate,
             'n_fft': n_fft,
             'window_length': window_length,
@@ -844,7 +846,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     bins_Q = 2*bins # Q_in = 2*t
 
     # Clamp values below or above a certain dB threshold
-    # spectrogram_signal[spectrogram_signal < cutoff_dB] = cutoff_dB
+    # spectrogram_signal[spectrogram_signal < cutoff_db] = cutoff_db
     # spectrogram_signal[spectrogram_signal > 100] = 100
 
     # Setting plot properties
@@ -1143,7 +1145,7 @@ def parse_args():
     ap.add_argument("--window_type",      type=str,   default="hann",   choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT")
     ap.add_argument("--pad_mode",         type=str,   default="cycle",  choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts")
     ap.add_argument("--detrend",          type=str,   default="linear", help="Detrend option for STFT: 'linear', 'constant', or False")
-    ap.add_argument("--cutoff_dB",        type=float, default=0.0,      help="Minimum dB floor for visualization")
+    ap.add_argument("--cutoff_db",        type=float, default=0.0,      help="Minimum dB floor for visualization")
     ap.add_argument("--cutoff_freq",      type=float, default=5500,     help="Maximum frequency to filter spectrogram in Hz (default: 1500 Hz)")
 
     
@@ -1189,7 +1191,7 @@ def main():
         "window_type": args.window_type,
         "pad_mode": args.pad_mode,
         "detrend": args.detrend,
-        "cutoff_dB": args.cutoff_dB,
+        "cutoff_db": args.cutoff_db,
         "cutoff_freq": args.cutoff_freq}
 
     # Assemble mesh
