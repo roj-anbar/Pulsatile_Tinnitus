@@ -1,6 +1,6 @@
 #!/bin/bash
 #-----------------------------------------------------------------------------------------------------------------------
-# PT-oasis-case-casename.sh
+# run_oasis_case_casename.sh
 # Case-specific launcher for Oasis CFD jobs on SLURM (Trillium style clusters).
 #
 # __author__ = Rojin Anbarafshan <rojin.anbar@gmail.com>
@@ -15,11 +15,11 @@
 #
 # EXECUTION:
 #   - Run this script from terminal by:
-#     <./PT-oasis-case-casename.sh>
+#     <./run_oasis_case_casename.sh>
 #
-# NOTE:
+# IMPORATNT NOTES:
 #   - This script should be ran from the PT case directory containing the mesh data (under /data folder).
-#   - "PT-oasis-solver.sh" and "PT-oasis-problem.py" should be copied as well to the same directory.
+#   - Paths to "oasis_solver_PT.sh" and "oasis_problem_PT.py" should be modified for each user.
 #
 # Adapted from solver-v2.sh written by 2022 Anna Haley (ahaley@mie.utoronto.ca) and solver.sh written by 2018 Mehdi Najafi (mnuoft@gmail.com). 
 # Copyright (C) 2025 University of Toronto, Biomedical Simulation Lab.
@@ -48,13 +48,27 @@ period=915.0                      # waveform period [ms] (default: 915 ms)
 timesteps_per_cycle=10000         # number of timesteps for each cycle (default: 2000)
 viscosity=0.0035                  # kinematic viscosity [mm^2/ms] (≡ m^2/s in consistent units) (default: 0.0035 mm^2/ms)
 uOrder=1                          # velocity FE order (default: 1)
+save_first_cycle=True             # flag to save first cycle or not (default: False)
 
 save_frequency=5                  # write solution every N steps (default: 5)
 checkpoint=500                    # write restart every N steps
-save_first_cycle=True             # flag to save first cycle or not (default: False)
-#solver_env_name=oasis            # solver environment name (specific to you)
+inlet_BC_type="ramp"              # type of the inlet boundary condition --> options: {'pulsatile', 'ramp', 'custom'} (default: 'pulsatile')
 
 set +a
+
+
+
+# ---------------------------------------- Define solver paths --------------------------------------------
+
+# Directory where shared Oasis scripts are stored
+CFDSOLVER_DIR="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step1_CFD/"
+
+# Core oasis problem definition
+OASIS_PROBLEM="${CFDSOLVER_DIR}/oasis_problem_PT.py"
+
+# SLURM wrapper script
+OASIS_SOLVER="${CFDSOLVER_DIR}/oasis_solver_PT.sh"
+
 
 
 #------------------------------------ Set parameters ----------------------------------------
@@ -78,7 +92,7 @@ mkdir -p ./logs ./hpclog
 
 #------------------------------------------- Submit the job ----------------------------------------------------
 # All config is exported via environment (sbatch --export=ALL).
-# oasis-solver.sh should read these variables (e.g., $cycles, $save_frequency, …).
+# oasis_solver_PT.sh should read these variables (e.g., $cycles, $save_frequency, …).
 
 # Submit the job with defined parameters
 sbatch --export=ALL \
@@ -88,9 +102,9 @@ sbatch --export=ALL \
        --nodes=1 \
        --ntasks-per-node=$num_cores \
        --partition=$partition \
-       ./PT-oasis-solver.sh "$@"
+       "$OASIS_SOLVER" "$@"
 
-# Note: <./oasis-solver.sh "$@">
-# "$@" just includes any additional keyword arguments passed when you run this script.
-# eg. the command "./in_default.sh hello" would pass the variable hello to this script,
-# and it would be then passed to solver.sh file subsequently, and could be accessed with $1.
+# Note:
+# in <"$OASIS_SOLVER" "$@"> "$@" just includes any additional keyword arguments passed when you run this script.
+# eg. the command "in_default.sh hello" would pass the variable hello to this script,
+# and it would be then passed to oasis_solver.sh file subsequently, and could be accessed with $1.

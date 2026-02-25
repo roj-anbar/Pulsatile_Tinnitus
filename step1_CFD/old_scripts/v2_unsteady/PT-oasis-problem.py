@@ -365,7 +365,7 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
             #save_tsteps_list    = get_cmdarg(commandline_kwargs, 'save_exact_tsteps', False), 
             checkpoint          = get_cmdarg(commandline_kwargs, 'checkpoint', 500),          # write restart every N steps
             killtime            = get_cmdarg(commandline_kwargs, 'maxwtime', max_wtime_before_kill),
-            dump_stats          = 1000,
+            dump_stats          = 500,
             compute_flux        = 5,
             save_step           = get_cmdarg(commandline_kwargs, 'save_step', 100000), #Mehdi doesn't use the oasis output
             #print_WSS          = get_cmdarg(commandline_kwargs, 'print_WSS', True),
@@ -818,7 +818,7 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
         flux_in[id] = assemble(dot(u_, normals)*dS[id])
         Q_ins[id] = abs(flux_in[id])
     Q_ins_sum = sum(Q_ins.values())
-    if mpi_rank == 0: print (f"Q_ins: {Q_ins_sum:.4f}, {Q_ins:.4f} \n")
+    if mpi_rank == 0: print (f"Q_ins: {Q_ins_sum}, {Q_ins} \n")
 
     # Out-Going Flux
     flux_out = {}
