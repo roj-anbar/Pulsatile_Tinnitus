@@ -1,4 +1,26 @@
 #!/bin/bash
+#-----------------------------------------------------------------------------------------------------------------------
+# compute_Spectrogram_job.sh
+# SLURM wrapper to run compute_Spectrogram.py for a specific case on Trillium style clusters.
+#
+# __author__ = Rojin Anbarafshan <rojin.anbar@gmail.com>
+# __date__   = 2025-11
+#
+# PURPOSE:
+#   - Define all case parameters for performing post-processing on CFD results.
+#   - Optional flags let you override key settings without editing the file.
+#
+# REQUIREMENTS:
+#   - compute_Spectrogram.py (in the same directory as this bash file)
+#   - A virtual environment including pyvista
+#
+# EXECUTION:
+#   - Run this script from terminal by:
+#     <sbatch compute_Spectrogram_job.sh>
+#
+# Copyright (C) 2025 University of Toronto, Biomedical Simulation Lab.
+#-----------------------------------------------------------------------------------------------------------------------
+
 #SBATCH --partition=debug
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=192
@@ -145,7 +167,8 @@ python "$SCRIPT" \
 
 
 
-#--------- For running directly from commandline use below
+#---------------------- For running directly from commandline use below ---------------------------
+# Note: You HAVE to comment this part if submitting this file through sbatch
 python compute_Spectrogram.py \
     --case_name             "PTSeg028_base_0p64" \
     --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq1/" \

@@ -1,8 +1,30 @@
 #!/bin/bash
+#-----------------------------------------------------------------------------------------------------------------------
+# compute_Qcriterion_job.sh
+# SLURM wrapper to run compute_Qcriterion.py for a specific case on Trillium style clusters.
+#
+# __author__ = Rojin Anbarafshan <rojin.anbar@gmail.com>
+# __date__   = 2025-10
+#
+# PURPOSE:
+#   - Define all case parameters for performing post-processing on CFD results.
+#   - Optional flags let you override key settings without editing the file.
+#
+# REQUIREMENTS:
+#   - compute_Qcriterion.py (in the same directory as this bash file)
+#   - A virtual environment including pyvista
+#
+# EXECUTION:
+#   - Run this script from terminal by:
+#     <sbatch compute_Qcriterion_job.sh>
+#
+# Copyright (C) 2025 University of Toronto, Biomedical Simulation Lab.
+#-----------------------------------------------------------------------------------------------------------------------
+
 #SBATCH --partition=compute
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=192
-#SBATCH --time=10:59:59
+#SBATCH --time=08:59:59
 #SBATCH --job-name PT_Qcriterion
 #SBATCH --output=PT_Qcriterion_%j.txt
 
@@ -10,7 +32,7 @@
 set -euo pipefail
 
 # ---------------------------------- Define Paths ---------------------------------------
-CASE=PTSeg043_noLabbe_base
+CASE=PTSeg028_base
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE
 MESH="$BASE_DIR/step1_CFD/data"
 INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq5"
@@ -45,14 +67,15 @@ python "$SCRIPT" \
     --input_folder            "$INPUT" \
     --output_folder           "$OUTPUT" \
     --case_name               "$CASE" \
-    --flag_normalize_velocity 
+#    --flag_normalize_velocity 
 
 
 #python compute_Qcriterion.py \
-#    --mesh_folder   "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data" \
-#    --input_folder  "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq5" \
-#    --output_folder "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/Qcriterion/cy6_saveFreq5/normalized" \
-#    --case_name     "PTSeg028_base_0p64" \
+#    --case_name     "PTSeg028_base" \
+#    --mesh_folder   "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base/step1_CFD/data" \
+#    --input_folder  "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base/step1_CFD/results/PTSeg028_base_ts10000_cy6_saveFreq5" \
+#    --output_folder "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base/step2_PostProcess/Qcriterion/cy6_saveFreq5" \
+    
 #    --flag_normalize_velocity 
 
 wait
