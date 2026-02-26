@@ -104,6 +104,7 @@ echo "Log File:                       ${log_file}"
 echo "Number of cores:                ${NP}"
 echo "Number of cycles:               ${cycles}"
 echo "Timesteps per cycle:            ${timesteps_per_cycle}"
+echo "Inlet BC type:                  ${inlet_BC_type}"
 echo "Save frequency:                 ${save_frequency}"
 echo "Save first cycle:               ${save_first_cycle}"
 echo "--------------------------------------------------------------------------------"
@@ -127,13 +128,15 @@ apptainer exec \
   --env HYDRA_LAUNCHER=fork \
   $BIND_OPTS ~/containers/fenics-legacy/fenics-oasis.sif \
   mpirun -n $NP oasis NSfracStep problem=oasis_problem_PT \
-  uOrder=$uOrder \
-  timesteps=$timesteps_per_cycle \
+  mesh_name=$casename \
+  cycles=$cycles \
   period=$period \
-  cycles=$cycles\
+  timesteps=$timesteps_per_cycle \
+  viscosity=$viscosity \
+  uOrder=$uOrder \
+  inlet_BC_type=$inlet_BC_type \
   save_frequency=$save_frequency \
   save_first_cycle=$save_first_cycle \
-  mesh_name=$casename \
   checkpoint=$checkpoint \
   &>> $log_file
 

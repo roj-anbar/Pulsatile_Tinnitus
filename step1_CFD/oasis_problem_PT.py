@@ -324,11 +324,12 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
 
     else:
 
-        case_name    = get_cmdarg(commandline_kwargs, 'mesh_name') 
-        period       = get_cmdarg(commandline_kwargs, 'period', 915.0)   # [ms]
-        timesteps    = get_cmdarg(commandline_kwargs, 'timesteps', 2000)
-        no_of_cycles = get_cmdarg(commandline_kwargs, 'cycles', 2)
-  
+        case_name       = get_cmdarg(commandline_kwargs, 'mesh_name')
+        period          = get_cmdarg(commandline_kwargs, 'period', 915.0)   # [ms]
+        timesteps       = get_cmdarg(commandline_kwargs, 'timesteps', 2000)
+        no_of_cycles    = get_cmdarg(commandline_kwargs, 'cycles', 2)
+        save_freq       = get_cmdarg(commandline_kwargs, 'save_frequency', 5)
+            
         if mpi_rank == 0: print('Found out period = %s (ms)'%str(period))
 
 
@@ -340,12 +341,13 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
 
         #case_fullname = ("art_" + mesh_name + txt + "_Newt370" + "_ts" + str(timesteps) + "_cy" + str(cycles) + "_uO" + str(uOrder))
         case_fullname = (mesh_name + "_ts" + str(timesteps) + "_cy" + str(no_of_cycles))
+        results_folder = f"./results/{case_fullname}_saveFreq{save_freq}"
 
         # Note: Parameters should be in [mm] and [ms]!
         NS_parameters.update(
             case_name           = case_name,
             case_fullname       = case_fullname,
-            results_folder      = "./results/" + case_fullname,
+            results_folder      = results_folder,
             mesh_path           = mesh_path, 
             id_in               = id_in,
             id_out              = id_out,
@@ -362,15 +364,16 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
             save_freq           = get_cmdarg(commandline_kwargs, 'save_frequency', 5),                  # save every N steps 
             save_first_cycle    = get_cmdarg(commandline_kwargs, 'save_first_cycle', False),            # flag to save first cycle or not
             save_exact_tsteps   = get_cmdarg(commandline_kwargs, 'save_exact_tsteps', False),           # save exact timesteps
-            #save_tsteps_list    = get_cmdarg(commandline_kwargs, 'save_exact_tsteps', False), 
+            #save_tsteps_list   = get_cmdarg(commandline_kwargs, 'save_exact_tsteps', False), 
             checkpoint          = get_cmdarg(commandline_kwargs, 'checkpoint', 500),                    # write restart every N steps
             killtime            = get_cmdarg(commandline_kwargs, 'maxwtime', max_wtime_before_kill),
             dump_stats          = 1000,
             compute_flux        = 5,
             save_step           = get_cmdarg(commandline_kwargs, 'save_step', 100000),                  # Mehdi doesn't use the oasis output
+            print_intermediate_info = 1000,                                                              # Controls the frequency of printing summary of timings to log file
             #print_WSS          = get_cmdarg(commandline_kwargs, 'print_WSS', True),
             #plot_interval      = 10e10,
-            #print_intermediate_info = 100,
+
 
             inlet_BC_type               = get_cmdarg(commandline_kwargs, 'inlet_BC_type', 'pulsatile'), # choose from 'ramp', 'pulsatile', 'custom'
             not_zero_pressure_outlets   = not get_cmdarg(commandline_kwargs, 'zero_pressure_outlets', False),
@@ -622,15 +625,15 @@ def create_bcs(u_, p_, p_1, t, NS_expressions, V, Q, area_ratio, mesh, subdomain
 
     # Extract inflow rate and outflow split ratios
     mesh_info_path = path.join('./data', NS_namespace["mesh_name"]+'.info')
-    id_in, Q_means, inlet_area, fcs = read_mesh_info(mesh_info_path, '<INLETS>')
-    id_out, area_ratio, outlet_area, _ = read_mesh_info(mesh_info_path, '<OUTLETS>')
+    id_in, Q_means, inlet_area, fcs     = read_mesh_info(mesh_info_path, '<INLETS>')
+    id_out, area_ratio, outlet_area, _  = read_mesh_info(mesh_info_path, '<OUTLETS>')
 
 
     # 1. Inlet BCs
     # Womersley boundary condition at inlet
     id_in_count = len(id_in)
     if mpi_rank == 0:
-        print (f'Inlet BC type is {NS_parameters['inlet_BC_type']}')
+        print ('Inlet BC type is:', NS_parameters['inlet_BC_type'])
         print('Inlet', 'BCs' if id_in_count > 1 else 'BC', 'on boundaries:' if id_in_count > 1 else 'on boundary', id_in)
         firststr = '    %8s    %-12s    %10s    %15s    %6s'%('inlet_id','wave_form','period(ms)','flowrate(mL/s)','cells')
         secondstr = 'Inlets & Outlets Information\n'+'  id   %-45s  %-45s   %-12s   %-12s'%('center','normal','radius','area')
@@ -818,7 +821,7 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
         flux_in[id] = assemble(dot(u_, normals)*dS[id])
         Q_ins[id] = abs(flux_in[id])
     Q_ins_sum = sum(Q_ins.values())
-    if mpi_rank == 0: print (f"Q_ins: {Q_ins_sum:.4f}, {Q_ins:.4f} \n")
+    if mpi_rank == 0: print(f'Q_ins: {Q_ins_sum:.4f} \n') #print('Q_ins:', Q_ins_sum, Q_ins, '\n')
 
     # Out-Going Flux
     flux_out = {}
