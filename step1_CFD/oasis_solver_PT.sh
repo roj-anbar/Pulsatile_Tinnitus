@@ -18,6 +18,9 @@
 #   - This script is called by the case-specific bash script launcher (e.g., "run_oasis_case_casename.sh").
 #   - Note: This script cannot be submitted to SLURM directly.
 #
+# IMPORATANT NOTE:
+#   - Change the paths and directories below according to your file system.
+#
 # Adapted from solver-v2.sh written by 2022 Anna Haley (ahaley@mie.utoronto.ca). 
 # Copyright (C) 2025 University of Toronto, Biomedical Simulation Lab.
 #-----------------------------------------------------------------------------------------------------------------------
@@ -62,34 +65,45 @@ results_folder="./results/$casename_full"
 log_file="./logs/${casename_full}_${SLURM_JOB_ID}"
 
 
-#---------------------------------------- Paths/Environments ----------------------------------------
+#---------------------------------------- Define Paths ----------------------------------------
 
-# Bind what you need for the container; add more binds if your data/code live elsewhere
-BIND_OPTS="--bind /scratch:/scratch --bind $SLURM_SUBMIT_DIR:$SLURM_SUBMIT_DIR --pwd $SLURM_SUBMIT_DIR"
+# This is the location to all case-specific mesh data (contains ./data) --> should be the same as where you submit sbatch 'run_oasis_case.sh' from
+CASE_DIR="$SLURM_SUBMIT_DIR"
 
-# Setup cache directory
-PATH_JIT_CACHE="/scratch/$scinet_user/PT/PT_Ramp/.cache"
-mkdir -p "$PATH_JIT_CACHE"
+# This is location of CFD Oasis scripts (oasis_problem.py and oasis_solver.sh) in your directory
+PATH_OASIS_SOLVER="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step1_CFD"
 
 # This is the location of the BSLSolver in your directory
-BSLSOLVER_HOME="/home/$scinet_user/BSLSolver"       # path to your BSLSolver
-
+PATH_BSLSOLVER="/home/$scinet_user/BSLSolver"       # path to your BSLSolver
 
 # This is the location of fenics-oasis container image file in your directory
 PATH_CONTAINER="/home/$scinet_user/containers/fenics-legacy/fenics-oasis.sif"  
 
 # This is the location of shim file for aliasing ufl-legacy as ufl (only required for fenics-legacy)
-# See here for more info
 PATH_UFL_SHIM="/scratch/$scinet_user/pyshims"                                                     
 
 
-# Create and export paths for the container
-PATH_BSLSOLVER="$BSLSOLVER_HOME"
-PATH_PYTHON="${PATH_UFL_SHIM}:${PATH_BSLSOLVER}"
+# Setup JIT cache directory
+PATH_JIT_CACHE="/scratch/$scinet_user/.cache"
+mkdir -p "$PATH_JIT_CACHE"
+
+
+#------------------------------------- Create Binds and python paths --------------------------------------
+
+# Create and export python paths for the container: BSLSolver + shim + oasis solver directory
+PATH_PYTHON="${PATH_UFL_SHIM}:${PATH_BSLSOLVER}:${PATH_OASIS_SOLVER}"
+
 
 export APPTAINERENV_PYTHONPATH="$PATH_PYTHON${PYTHONPATH:+:$PYTHONPATH}"
 export APPTAINERENV_DIJITSO_CACHE_DIR="$PATH_JIT_CACHE"
 
+
+# Bind what you need for the container; add more binds if your data/code live elsewhere
+BIND_OPTS="--bind /scratch:/scratch \
+--bind ${CASE_DIR}:${CASE_DIR} \
+--bind ${PATH_OASIS_SOLVER}:${PATH_OASIS_SOLVER} \
+--bind ${PATH_JIT_CACHE}:${PATH_JIT_CACHE} \
+--pwd ${CASE_DIR}"
 
 
 
