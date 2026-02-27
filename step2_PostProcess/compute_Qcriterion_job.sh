@@ -32,11 +32,11 @@
 set -euo pipefail
 
 # ---------------------------------- Define Paths ---------------------------------------
-CASE=PTSeg028_base
+CASE=PTSeg106_base
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE
-MESH="$BASE_DIR/step1_CFD/data"
-INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq5"
-OUTPUT="$BASE_DIR/step2_PostProcess/Qcriterion/cy6_saveFreq5"
+MESH_DIR="$BASE_DIR/step1_CFD/data"
+INPUT_DIR="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq5"
+OUTPUT_DIR="$BASE_DIR/step2_PostProcess/Qcriterion/cy6_saveFreq5"
 SCRIPT="$SLURM_SUBMIT_DIR/compute_Qcriterion.py"  # ensure to submit from script dir
 
 
@@ -63,10 +63,10 @@ export PYVISTA_USE_PANEL=true
 # ------------------------------ Run Scripts ---------------------------------------------
 
 python "$SCRIPT" \
-    --mesh_folder             "$MESH" \
-    --input_folder            "$INPUT" \
-    --output_folder           "$OUTPUT" \
     --case_name               "$CASE" \
+    --mesh_folder             "$MESH_DIR" \
+    --input_folder            "$INPUT_DIR" \
+    --output_folder           "$OUTPUT_DIR" \
 #    --flag_normalize_velocity 
 
 

@@ -591,24 +591,17 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
     # If window_length is not defined, divide the signal by 10 by default 
     if window_length is None: window_length = shift_bit_length(int(n_snapshots / 10))
 
-    # Define the reference value for normalizing the power to obtain dB scales
-    if var_name == 'wallpressure':
-        power_ref = (2e-5)**2 
-    else:
-        power_ref = np.mean(S_avg_power) 
 
     # Note: All the below S arrays have shape (n_freq, n_frames)
 
     # Compute FFT for first point. # Pass data as row vectors
     freqs, bins, Z0 = short_time_fourier(signal[0][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend)
-    S_sum = np.zeros_like(Z0, dtype=np.float64)
+    power_sum = np.zeros_like(Z0, dtype=np.float64)
 
     # Case 1: Single point ROI
     if n_points == 1:
-        power_point  = np.abs(Z0)**2
-        power_avg_db = 10.0 * np.log10(power_point / power_ref)
+        power_avg  = np.abs(Z0)**2
 
-        
     # Case 2: Multiple points ROI
     else:
         for point in range(n_points):
@@ -620,9 +613,17 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
         power_avg = power_sum / n_points
 
         
-            
-        power_avg_db = 10.0 * np.log10(power_avg / power_ref)
-        power_avg_db = np.squeeze(power_avg_db)
+    # Define the reference value for normalizing the power to obtain dB scales
+    if var_name == 'wallpressure':
+        power_ref = (2e-5)**2 
+    else:
+        power_ref = np.mean(power_avg) 
+
+    # Convert power to dB scale
+    power_avg_db = 10.0 * np.log10(power_avg / power_ref)
+    power_avg_db = np.squeeze(power_avg_db)
+
+
 
     if pad_mode in ['cycle', 'even', 'odd']:
         bins = bins - bins[0]
@@ -899,7 +900,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
             if idx is None:
                 continue
             x = bins_Q[idx]
-            print(f'Qin of Phase {phase} = {x} ml/s')
+            print(f'Qin of Phase {phase} = {x:.2f} ml/s')
             ax.axvline(x, color="white", linestyle="solid", linewidth=3, alpha=0.7)
 
         # Method 2: Add as steps
@@ -1157,7 +1158,7 @@ def main():
     args          = parse_args()
     input_folder  = Path(args.input_folder)
     mesh_folder   = Path(args.mesh_folder)
-    output_folder = Path(args.output_folder)
+    output_folder = Path(f'{args.output_folder}/Spectrogram_{args.spec_quantity}')
     
     # Create paths
     if not Path(output_folder).exists():

@@ -32,12 +32,12 @@
 set -euo pipefail
 
 # ---------------------------------- Define Paths -------------------------------------------------------------------------------
-CASE=PTSeg028_base_0p64                                             # Case name
+CASE=PTSeg106_base                                             # Case name
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE                            # Parent directory of the case
 MESH="$BASE_DIR/step1_CFD/data"                                     # Path to mesh data folder containing the h5 mesh
 CENTERLINE="$MESH/${CASE}_centerline_points.csv"                    # Path to centerline csv file used to construct ROIs
 INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq1"   # Path to CFD results folder containing timeseries HDF5 files
-OUTPUT="$BASE_DIR/step2_PostProcess/Spectrogram_WallPressure"      # Path to saving spectrogram files
+OUTPUT="$BASE_DIR/step2_PostProcess"                                # Path to saving spectrogram files
 
 SCRIPT="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/compute_Spectrogram.py"
 
@@ -80,11 +80,11 @@ python "$SCRIPT" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
     --spec_quantity         "wallpressure" \
-    --window_length         5000 \
+    --window_length         2732 \
     --ROI_type              "cylinder" \
     --ROI_radius            8 \
-    --ROI_start_center_id   732 \
-    --ROI_end_center_id     816 \
+    --ROI_start_center_id   1280 \
+    --ROI_end_center_id     1360 \
     --ROI_stride            4 \
     --flag_multi_ROI        
 #   --flag_save_ROI
@@ -100,12 +100,12 @@ python "$SCRIPT" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
     --spec_quantity         "wallpressure" \
-    --window_length         5000 \
+    --window_length         2732 \
     --ROI_type              "cylinder" \
     --ROI_radius            8 \
-    --ROI_start_center_id   627 \
-    --ROI_end_center_id     664 \
-    --ROI_stride            2 \
+    --ROI_start_center_id   1200 \
+    --ROI_end_center_id     1240 \
+    --ROI_stride            4 \
     --flag_multi_ROI        
 #    --flag_save_ROI
 
@@ -118,11 +118,11 @@ python "$SCRIPT" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
     --spec_quantity         "wallpressure" \
-    --window_length         5000 \
+    --window_length         2732 \
     --ROI_type              "cylinder" \
     --ROI_radius            10 \
-    --ROI_start_center_id   532 \
-    --ROI_end_center_id     610 \
+    --ROI_start_center_id   1100 \
+    --ROI_end_center_id     1183 \
     --ROI_stride            2 \
     --flag_multi_ROI        
 #    --flag_save_ROI
@@ -135,13 +135,13 @@ python "$SCRIPT" \
     --mesh_folder           "$MESH" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
-    --spec_quantity         "pressure" \
-    --window_length         5000 \
+    --spec_quantity         "wallpressure" \
+    --window_length         2732 \
     --ROI_type              "cylinder" \
-    --ROI_radius            10 \
-    --ROI_start_center_id   425 \
-    --ROI_end_center_id     520 \
-    --ROI_stride            2 \
+    --ROI_radius            8 \
+    --ROI_start_center_id   990 \
+    --ROI_end_center_id     1090 \
+    --ROI_stride            4 \
     --flag_multi_ROI        
 #    --flag_save_ROI
 
@@ -153,15 +153,15 @@ python "$SCRIPT" \
     --mesh_folder           "$MESH" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
-    --spec_quantity         "pressure" \
-    --window_length         5000 \
+    --spec_quantity         "wallpressure" \
+    --window_length         2732 \
     --ROI_type              "cylinder" \
-    --ROI_radius            10 \
-    --ROI_start_center_id   365 \
-    --ROI_end_center_id     410 \
+    --ROI_radius            12 \
+    --ROI_start_center_id   825 \
+    --ROI_end_center_id     890 \
     --ROI_stride            2 \
     --flag_multi_ROI        \
-    --flag_save_ROI
+
 
 
 
@@ -169,21 +169,21 @@ python "$SCRIPT" \
 
 #---------------------- For running directly from commandline use below ---------------------------
 # Note: You HAVE to comment this part if submitting this file through sbatch
-python compute_Spectrogram.py \
-    --case_name             "PTSeg028_base_0p64" \
-    --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq1/" \
-    --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data" \
-    --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/Spectrogram" \
-    --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data/PTSeg028_base_0p64_centerline_points.csv" \
-    --spec_quantity         "wallpressure" \
-    --window_length         2732 \
-    --ROI_type              "cylinder" \
-    --ROI_radius            10 \
-    --ROI_height            2 \
-    --ROI_start_center_id   532 \
-    --ROI_end_center_id     610 \
-    --ROI_stride            2 \
-    --flag_multi_ROI        
+#python compute_Spectrogram.py \
+#    --case_name             "PTSeg028_base" \
+#    --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base/step1_CFD/results/PTSeg028_base_ts10000_cy6_saveFreq1/" \
+#    --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base/step1_CFD/data" \
+#    --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base/step2_PostProcess/Spectrogram" \
+#    --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base/step1_CFD/data/PTSeg028_base_centerline_points.csv" \
+#    --spec_quantity         "wallpressure" \
+#    --window_length         2732 \
+#    --ROI_type              "cylinder" \
+#    --ROI_radius            10 \
+#    --ROI_height            2 \
+#    --ROI_start_center_id   532 \
+#    --ROI_end_center_id     610 \
+#    --ROI_stride            4 \
+#    --flag_multi_ROI        
     #--flag_save_ROI
 
 
