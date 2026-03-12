@@ -730,19 +730,19 @@ def classify_spectrogram_phase_per_column(metrics_col):
 
     # Define phases
     # --- Phase 0: Quiet (nothing above noise) ---
-    if (mean_power_lowFreq <= 60): 
+    if (mean_power_lowFreq <= 50): 
         return 0
 
     # --- Phase 1: Laminar (onset of activity) ---
-    elif  (mean_power_midFreq <= 40): # and mean_power_lowFreq > 60
+    elif  (mean_power_midFreq <= 50): # and mean_power_lowFreq > 60
         return 1
 
     # --- Phase 2: Transitional (harmonics, weak high-frequency) ---
-    elif (mean_power_highFreq <= 50): # and mean_power_lowFreq > 60 and mean_power_midFreq > 40 #and flatness_highFreq < 0.3
+    elif (mean_power_highFreq <= 50): #and flatness_highFreq < 0.3
         return 2
 
     # --- Phase 3: Turbulent (strong broadband) ---
-    elif (mean_power_highFreq > 50): # and mean_power_lowFreq > 60 and mean_power_midFreq > 40 #or flatness_highFreq > 0.5): #frac_above_80dB > 0.1
+    elif (mean_power_highFreq > 50): #or flatness_highFreq > 0.5): #frac_above_80dB > 0.1
         return 3
 
     else:
