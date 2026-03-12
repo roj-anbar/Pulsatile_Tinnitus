@@ -666,92 +666,96 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_high, f
     spec_col_dB: 1D array (n_freq,) in dB.
     f_low:       low frequency threshold in Hz (default = 100 Hz).
     f_high:      high frequency threshold in Hz (default = 1000 Hz).
-    f_max:       max frequency threshold in Hz (default = 1500 Hz).
+    f_max:       max frequency threshold in Hz (default = 5000 Hz).
     
-    Returns a dictionary of metrics for each column:
+    Returns a dictionary of metrics for each column based on the 3 frequency bands (lowFreq_band: 0-f_low / midFreq_band: f_low-f_high / highFreq_band: f_high-f_max)
     - mean_power_below_f_low: Average acoustic power below low frequency f_low.
     - mean_power_above_f_low: Average acoustic power above low frequency f_low.
     - mean_power_above_f_high: Average acoustic power above high frequency f_high and below max frequency f_max.
-    - 
+    - flatness_highFreq:
     """
     
-    # Filter the low frequencies
-    mask_below_f_low = freqs <= f_low
-    mask_above_f_low = (freqs > f_low) & (freqs < f_max)
+    # Create a mask for each frequency band
+    mask_lowFreq  = freqs <= f_low
+    mask_midFreq  = (freqs > f_low) & (freqs <= f_high)
+    mask_highFreq = (freqs > f_high) & (freqs <= f_max)
+    
+    # Filter the spectrogram for each frequency band
+    spec_lowFreq  = spec_col_dB[mask_lowFreq]
+    spec_midFreq  = spec_col_dB[mask_midFreq]
+    spec_highFreq = spec_col_dB[mask_highFreq]
 
-    spec_below_f_low = spec_col_dB[mask_below_f_low]
-    spec_above_f_low = spec_col_dB[mask_above_f_low]
 
-    # Filter the high frequencies
-    mask_above_f_high = (freqs >= f_high) & (freqs < f_max)
-    spec_above_f_high = spec_col_dB[mask_above_f_high]
+  
+    # Compute the basic spectral metrics
 
-
-    # Basic level metrics
-    # Perform the averaging in linear space and convert to dB again
-    mean_power_below_f_low = np.mean(spec_below_f_low)    #10 * np.log10(np.mean(10**(spec_below_f_low/10)))
-    mean_power_above_f_low = np.mean(spec_above_f_low)
-    mean_power_above_f_high = np.mean(spec_above_f_high)
-    frac_above_80dB  = np.mean(spec_above_f_high > 80)  #fraction of frequencies with power > 80dB
+    # Average powers in each frequency band --> should perform averaging in linear space and convert to dB again
+    mean_power_lowFreq  = np.mean(spec_lowFreq)    #10 * np.log10(np.mean(10**(spec_below_f_low/10)))
+    mean_power_midFreq  = np.mean(spec_midFreq)
+    mean_power_highFreq = np.mean(spec_highFreq)
+    
+    # Fraction of frequencies with power > 80dB
+    #frac_above_80dB  = np.mean(spec_above_f_high > 80)  
 
     # Spectral flatness (0 = very peaky, 1 = white noise)
-    linear_power = 10.0**(spec_above_f_high/10.0)
+    linear_power_highFreq = 10.0**(spec_highFreq/10.0)
     eps = 1e-12
-    geometric_mean = np.exp(np.mean(np.log(linear_power + eps)))
-    arithmetic_mean = np.mean(linear_power + eps)
+    geometric_mean    = np.exp(np.mean(np.log(linear_power_highFreq + eps)))
+    arithmetic_mean   = np.mean(linear_power_highFreq + eps)
     flatness_highFreq = geometric_mean / arithmetic_mean
 
     # Number of prominent peaks (harmonic-like structure)
-    peaks, _ = find_peaks(spec_above_f_low, height= 80.0, distance=10)
-    n_peaks = len(peaks)
+    #peaks, _ = find_peaks(spec_midFreq, height= 80.0, distance=10)
+    #n_peaks = len(peaks)
 
-    spec_col_metrics = dict(mean_power_below_f_low = mean_power_below_f_low,
-                            mean_power_above_f_low = mean_power_above_f_low,
-                            mean_power_above_f_high = mean_power_above_f_high,
-                            frac_above_80dB  = frac_above_80dB,
-                            flatness_highFreq = flatness_highFreq)
-                            #n_peaks=n_peaks)
+    spec_col_metrics = dict(mean_power_lowFreq  = mean_power_lowFreq,
+                            mean_power_midFreq  = mean_power_midFreq,
+                            mean_power_highFreq = mean_power_highFreq,
+                            flatness_highFreq   = flatness_highFreq)
+                            #frac_above_80dB    = frac_above_80dB
+                            #n_peaks=n_peaks
 
     #print(f"above_flow, f_high: {mean_power_above_f_low:.2f}, {mean_power_above_f_high:.2f}\n")  
     return spec_col_metrics
 
 
 def classify_spectrogram_phase_per_column(metrics_col):
-    mean_power_below_f_low   = metrics_col["mean_power_below_f_low"]
-    mean_power_above_f_low   = metrics_col["mean_power_above_f_low"]
-    mean_power_above_f_high  = metrics_col["mean_power_above_f_high"]
-    frac_above_80dB         = metrics_col["frac_above_80dB"]
-    flatness_highFreq       = metrics_col["flatness_highFreq"]
+    mean_power_lowFreq   = metrics_col["mean_power_lowFreq"]
+    mean_power_midFreq   = metrics_col["mean_power_midFreq"]
+    mean_power_highFreq  = metrics_col["mean_power_highFreq"]
+    flatness_highFreq    = metrics_col["flatness_highFreq"]
+    
+    #frac_above_80dB         = metrics_col["frac_above_80dB"]
     #n_peaks  = metrics_col["n_peaks"]
 
     # Define phases
     # --- Phase 0: Quiet (nothing above noise) ---
-    if (mean_power_below_f_low <= 60): 
+    if (mean_power_lowFreq <= 60): 
         return 0
 
     # --- Phase 1: Laminar (onset of activity) ---
-    elif (mean_power_below_f_low > 60 and mean_power_above_f_low <= 40):
+    elif  (mean_power_midFreq <= 40): # and mean_power_lowFreq > 60
         return 1
 
     # --- Phase 2: Transitional (harmonics, weak high-frequency) ---
-    elif (mean_power_above_f_low > 40 and mean_power_above_f_high <= 60): #and flatness_highFreq < 0.3):
+    elif (mean_power_highFreq <= 50): # and mean_power_lowFreq > 60 and mean_power_midFreq > 40 #and flatness_highFreq < 0.3
         return 2
 
     # --- Phase 3: Turbulent (strong broadband) ---
-    elif (mean_power_above_f_high > 60 or flatness_highFreq > 0.5): #frac_above_80dB > 0.1
+    elif (mean_power_highFreq > 50): # and mean_power_lowFreq > 60 and mean_power_midFreq > 40 #or flatness_highFreq > 0.5): #frac_above_80dB > 0.1
         return 3
 
     else:
         return 0
 
 
-def classify_spectrogram_phases(spectrogram_data, f_low=100, f_high=1000, f_max=1500):
+def classify_spectrogram_phases(spectrogram_data, f_low=100, f_high=1000, f_max=5000):
     """
     Map metrics dict -> phase {0,1,2,3}.
     
     f_low:       low frequency threshold in Hz (default = 100 Hz).
     f_high:      high frequency threshold in Hz (default = 1000 Hz).
-    f_max:       max frequency threshold in Hz (default = 1500 Hz).
+    f_max:       max frequency threshold in Hz (default = 5000 Hz) --> 5000 is the Nyquist limit.
 
     Intended meaning:
       0: quiet / nothing
@@ -823,7 +827,7 @@ def first_phase_transitions(phases, x_axis, x_min, x_max, phase_values=(1, 2, 3)
 
 
 
-def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, plot_title, flag_plot_phases=True):
+def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, plot_title, f_max=5000, flag_plot_phases=True):
     """
     Save spectrogram data (.npz) and a PNG image.
     """
@@ -866,26 +870,26 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     #----- Set properties
     ax.set_title(plot_title)
     #ax.set_xlabel('Time (s)', fontweight='bold', labelpad=0)
-    ax.set_xlabel('Q_inlet (ml/s)', fontweight='bold', labelpad=0)
-    ax.set_ylabel('Frequency (Hz)', fontweight='bold', labelpad=0)
+    ax.set_xlabel('Q_inlet (ml/s)', fontweight='bold', labelpad=10)
+    ax.set_ylabel('Frequency (Hz)', fontweight='bold', labelpad=10)
     ax.set_xlim([xmin, xmax]) 
 
     # Set different limits based on the case
     if 'PTSeg043' in case_name:
-        ax.set_ylim([0, 600])
+        ax.set_ylim([0, 1000])
     else:
-        ax.set_ylim([0, 1500])
+        ax.set_ylim([0, f_max])
     
 
     #----- Adding the colorbar
     cbar = fig.colorbar(spectrogram, ax=ax, orientation='vertical') #pad=0.5
     cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
 
-    # Set different limits based on the case
+    # Set different limits for power colormap based on the case
     if 'PTSeg043' in case_name:
         spectrogram.set_clim(40, 100)
     else:
-        spectrogram.set_clim(60, 120)
+        spectrogram.set_clim(20, 120)
 
     
     #---------------- Adding the phases ------------------
@@ -894,21 +898,20 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
         # Method 1: Add as vertical lines
         # Find first points of transition
         phase_transitions = first_phase_transitions(spectrogram_phases, x_axis=bins_Q, x_min=xmin, x_max=xmax)
-        #print(phase_transitions)
 
-        for phase, idx in phase_transitions.items():
-            if idx is None:
-                continue
-            x = bins_Q[idx]
-            print(f'Qin of Phase {phase} = {x:.2f} ml/s')
-            ax.axvline(x, color="white", linestyle="solid", linewidth=3, alpha=0.7)
+        #for phase, idx in phase_transitions.items():
+        #    if idx is None:
+        #        continue
+        #    x = bins_Q[idx]
+        #    print(f'Qin of Phase {phase} = {x:.2f} ml/s')
+        #    ax.axvline(x, color="white", linestyle="solid", linewidth=3, alpha=0.7)
 
         # Method 2: Add as steps
-        #ax2 = ax.twinx()
-        #ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=4)
-        #ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
-        #ax2.set_yticks([0,1,2,3])
-        #ax2.set_ylim(-0.15, 3.15)
+        ax2 = ax.twinx()
+        ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=4)
+        ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
+        ax2.set_yticks([0,1,2,3])
+        ax2.set_ylim(-0.15, 3.15)
 
 
     #----- For customizing the colorbar and axis for figures ----
