@@ -685,26 +685,25 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_high, f
     spec_midFreq  = spec_col_dB[mask_midFreq]
     spec_highFreq = spec_col_dB[mask_highFreq]
 
+    # Compute the basic spectral metrics:
 
-  
-    # Compute the basic spectral metrics
-
-    # Average powers in each frequency band --> should perform averaging in linear space and convert to dB again
-    mean_power_lowFreq  = np.mean(spec_lowFreq)    #10 * np.log10(np.mean(10**(spec_below_f_low/10)))
+    # Compute average power for each frequency band
+    # Note: it is better to perform averaging in linear space and convert back to dB but this doesn't give good results for my cases
+    mean_power_lowFreq  = np.mean(spec_lowFreq)   #10 * np.log10(np.mean(10**(spec_lowFreq/10))) 
     mean_power_midFreq  = np.mean(spec_midFreq)
     mean_power_highFreq = np.mean(spec_highFreq)
     
-    # Fraction of frequencies with power > 80dB
+    # Compute fraction of frequencies with power > 80dB
     #frac_above_80dB  = np.mean(spec_above_f_high > 80)  
 
-    # Spectral flatness (0 = very peaky, 1 = white noise)
+    # Compute spectral flatness (0 = very peaky, 1 = white noise)
     linear_power_highFreq = 10.0**(spec_highFreq/10.0)
     eps = 1e-12
     geometric_mean    = np.exp(np.mean(np.log(linear_power_highFreq + eps)))
     arithmetic_mean   = np.mean(linear_power_highFreq + eps)
     flatness_highFreq = geometric_mean / arithmetic_mean
 
-    # Number of prominent peaks (harmonic-like structure)
+    # Compute number of prominent peaks (harmonic-like structure)
     #peaks, _ = find_peaks(spec_midFreq, height= 80.0, distance=10)
     #n_peaks = len(peaks)
 
@@ -885,11 +884,8 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     cbar = fig.colorbar(spectrogram, ax=ax, orientation='vertical') #pad=0.5
     cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
 
-    # Set different limits for power colormap based on the case
-    if 'PTSeg043' in case_name:
-        spectrogram.set_clim(40, 100)
-    else:
-        spectrogram.set_clim(20, 120)
+    # Set the limit for power colormap
+    spectrogram.set_clim(20, 120)
 
     
     #---------------- Adding the phases ------------------
@@ -969,9 +965,9 @@ def compute_and_save_spectrogram_for_all_ROIs(
     ROI_end_center_id    = ROI_params.get("ROI_end_center_id")
     ROI_stride           = ROI_params.get("ROI_stride")
 
-    window_length    = STFT_params.get("window_length")
-    overlap_frac     = STFT_params.get("overlap_frac")
-    n_fft            = STFT_params.get("n_fft")
+    window_length        = STFT_params.get("window_length")
+    overlap_frac         = STFT_params.get("overlap_frac")
+    n_fft                = STFT_params.get("n_fft")
 
 
     # Compute sampling rate and add to STFT_params
@@ -1020,14 +1016,6 @@ def compute_and_save_spectrogram_for_all_ROIs(
 
             print(f"Found {len(ROI_point_indices)} unique mesh points in total in the specified region. \n")
 
-            # For plotting the wall pressure signal at a single node
-            #fig, ax = plt.subplots(1,1, figsize=(16,8))
-            #ax.plot(wall_pressure[10,:])
-            #ax.set_xlabel('time (s)', fontweight='bold', fontsize=16, labelpad=0)
-            #ax.set_ylabel('wall pressure (Pa)', fontweight='bold', fontsize=16, labelpad=0)
-            #plt.tight_layout()
-            #plt.savefig(f"wall_pressure_signal.png") 
-
             # Calculate average spectrogram for all the ROIs combined
             spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = spec_quantity_array_ROI_multi, STFT_params = STFT_params)
 
@@ -1042,6 +1030,14 @@ def compute_and_save_spectrogram_for_all_ROIs(
                 spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_ROI{ROI_start_center_id}to{ROI_end_center_id}_r{ROI_radius}_h{ROI_height}' 
                 
             plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectrogram_title)
+
+            # -------- For plotting the wall pressure signal at a single node -------------
+            #fig, ax = plt.subplots(1,1, figsize=(16,8))
+            #ax.plot(wall_pressure[10,:])
+            #ax.set_xlabel('time (s)', fontweight='bold', fontsize=16, labelpad=0)
+            #ax.set_ylabel('wall pressure (Pa)', fontweight='bold', fontsize=16, labelpad=0)
+            #plt.tight_layout()
+            #plt.savefig(f"wall_pressure_signal.png") 
 
         
         #-----Case 1B: Generate one spectrogram per ROI
