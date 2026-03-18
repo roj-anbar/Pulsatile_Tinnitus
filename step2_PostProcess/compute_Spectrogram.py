@@ -402,86 +402,7 @@ def read_ROI_points_from_csv(csv_path: str, ROI_type) -> np.ndarray:
     return coords, normals
 
 
-def assemble_wall_pressure_for_one_ROI(output_folder_ROIs, wall_mesh, wall_pressure, ROI_params, return_indices=False):
-    """
-    Select wall points inside a ROI with defined shape (ROI_type) and return the wall-pressure time series for those points.
-    Note: Units of the radius should be the same as units of the mesh.
-    """
-
-    # Unpack input parameters
-    ROI_id            = ROI_params.get("ROI_id")
-    ROI_type          = ROI_params.get("ROI_type")
-    ROI_center_coord  = ROI_params.get("ROI_center_coord")
-    ROI_center_normal = ROI_params.get("ROI_center_normal")
-    ROI_radius        = ROI_params.get("ROI_radius")
-    ROI_height        = ROI_params.get("ROI_height")
-    flag_save_ROI     = ROI_params.get("flag_save_ROI")
-
-
-    # Find coordinate of ROI center
-
-    # Case 1: Obtain spectrograms in a spherical ROI (using pyvista)
-    if ROI_type == 'sphere':
-        
-        # Creates a surface sphere centered at desired point
-        ROI_sphere = pv.Sphere(radius = ROI_radius, center = ROI_center_coord)
-        
-        # Selects mesh points inside the surface, with a certain tolerance (using pyvista)
-        ROI_mesh = wall_mesh.select_enclosed_points(ROI_sphere, tolerance=0.01)
-        
-        # Get indices of the points that falls in the ROI
-        points_in_ROI = ROI_mesh.point_data['SelectedPoints'].astype(bool)
-        ROI_pids = np.where(points_in_ROI)[0]
-
-        # Save the sphere to a .vtp file (for visualization in paraview later)
-        if flag_save_ROI:
-            ROI_sphere.save(f'{output_folder_ROIs}/{ROI_id}_{ROI_type}_c{ROI_center_coord}_r{ROI_radius}.vtp') 
-
-    
-    # Case 2: Obtain spectrograms in a cylindrical ROI (using pyvista)
-    elif ROI_type == 'cylinder':
-
-        # Note: needed to add clean() to the surface to make it compatible with vtk 'select_enclosed_points'
-        ROI_cylinder = pv.Cylinder(center = ROI_center_coord, direction = ROI_center_normal, radius = ROI_radius, height = ROI_height).clean()
-
-        # Selects mesh points inside the surface, with a certain tolerance (using pyvista)
-        ROI_mesh = wall_mesh.select_enclosed_points(ROI_cylinder, tolerance=0.01)
-        
-        # Get indices of the points that falls in the ROI
-        points_in_ROI = ROI_mesh.point_data['SelectedPoints'].astype(bool)
-        ROI_pids = np.where(points_in_ROI)[0]
-
-        # Save the cylinder to a .vtp file (for visualization in paraview later)
-        if flag_save_ROI:
-            ROI_cylinder.save(f'{output_folder_ROIs}/{ROI_id}_{ROI_type}_c{ROI_center_coord}_r{ROI_radius}_h{ROI_height}.vtp') 
-
-
-    # Case 3: Obtain spectrograms at a single point
-    elif ROI_type == 'point':
-        ROI_pids = ROI_center_coord
-
-    # For any other types    
-    else:
-        raise ValueError("--ROI_type is not supported, choose from ['point', 'sphere', 'cylinder'].")
-
-
-    # --- Sanity check: ensure ROI is not empty ---
-    if ROI_pids.size == 0:
-        raise ValueError("No wall points found in ROI. Try increasing --ROI_radius (check mesh units: mm vs m) "
-                        "or choose a different --ROI_center_coord. ")
-    else:
-        print(f"Found {ROI_pids.size} wall points in {ROI_id} with center coordinate {ROI_center_coord} ...")
-
-    # Assemble wall pressure for ROI points
-    wall_pressure_ROI = wall_pressure[ROI_pids,:]
-
-    # Return the point ids if requested
-    if return_indices:
-        return ROI_pids
-
-    return wall_pressure_ROI
-
-def assemble_var_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, var_name, var_array, ROI_params, return_indices=False):
+def assemble_quantity_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, var_name, var_array, ROI_params, return_indices=False):
     """
     Select mesh points inside a ROI with defined shape (ROI_type) and return the time series of variable of interest for those points.
     Note: Units of the radius should be the same as units of the mesh.
@@ -871,7 +792,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     #ax.set_xlabel('Time (s)', fontweight='bold', labelpad=0)
     ax.set_xlabel('Q_inlet (ml/s)', fontweight='bold', labelpad=10)
     ax.set_ylabel('Frequency (Hz)', fontweight='bold', labelpad=10)
-    ax.set_xlim([xmin, xmax]) 
+    #ax.set_xlim([xmin, xmax]) 
 
     # Set different limits based on the case
     if 'PTSeg043' in case_name:
@@ -889,7 +810,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
 
     
     #---------------- Adding the phases ------------------
-    
+    """
     if flag_plot_phases:
         # Method 1: Add as vertical lines
         # Find first points of transition
@@ -908,7 +829,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
         ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
         ax2.set_yticks([0,1,2,3])
         ax2.set_ylim(-0.15, 3.15)
-
+    """
 
     #----- For customizing the colorbar and axis for figures ----
     
@@ -988,7 +909,8 @@ def compute_and_save_spectrogram_for_all_ROIs(
         
         # Loop over all center points (or with a stride)
 
-        #-----Case 1A: Sweeping method. Generate one spectrogram for a segment chosen based on multiple ROIs
+        #-----Case 1A: Sweeping method (flag_multi_ROI = True).
+        # Generates a single spectrogram for a segment chosen based on multiple ROIs
         # Here we assemble the pressure data for multiple ROIs first and then extract the average spectrogram
         if ROI_params["flag_multi_ROI"]:
 
@@ -1008,7 +930,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
 
                 # Obtain the point ID of all ROIs combined
                 #ROI_point_indices.extend(assemble_wall_pressure_for_one_ROI(output_folder_ROIs, surf_mesh, wall_pressure, ROI_params_multi, return_indices=True))
-                ROI_point_indices.extend(assemble_var_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, spec_quantity, spec_quantity_array, ROI_params_multi, return_indices=True))
+                ROI_point_indices.extend(assemble_quantity_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, spec_quantity, spec_quantity_array, ROI_params_multi, return_indices=True))
 
             # Keep only the unique indices
             ROI_point_indices = np.unique(ROI_point_indices)
@@ -1031,13 +953,16 @@ def compute_and_save_spectrogram_for_all_ROIs(
                 
             plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectrogram_title)
 
-            # -------- For plotting the wall pressure signal at a single node -------------
-            #fig, ax = plt.subplots(1,1, figsize=(16,8))
-            #ax.plot(wall_pressure[10,:])
-            #ax.set_xlabel('time (s)', fontweight='bold', fontsize=16, labelpad=0)
-            #ax.set_ylabel('wall pressure (Pa)', fontweight='bold', fontsize=16, labelpad=0)
-            #plt.tight_layout()
-            #plt.savefig(f"wall_pressure_signal.png") 
+
+            # -------- For plotting the wall pressure signal for individual nodes -------------
+            # Generate figs for a couple of points
+            for id in range(1,1000,100):
+                fig, ax = plt.subplots(1,1, figsize=(16,8))
+                ax.plot(spec_quantity_array_ROI_multi[id,:])
+                ax.set_xlabel('time (s)', fontweight='bold', fontsize=16, labelpad=0)
+                ax.set_ylabel('wall pressure (Pa)', fontweight='bold', fontsize=16, labelpad=0)
+                plt.tight_layout()
+                plt.savefig(Path(output_folder_imgs) / f"signal_wallPressure_node{id}.png") 
 
         
         #-----Case 1B: Generate one spectrogram per ROI
@@ -1054,8 +979,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
                 ROI_params["ROI_center_normal"] = normal
 
                 # Assemble pressure data for each ROI
-                #wall_pressure_ROI = assemble_wall_pressure_for_one_ROI(output_folder_ROIs, surf_mesh, spec_quantity_array, ROI_params)
-                spec_quantity_array_ROI = assemble_var_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, spec_quantity, spec_quantity_array, ROI_params)
+                spec_quantity_array_ROI = assemble_quantity_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, spec_quantity, spec_quantity_array, ROI_params)
 
 
                 # Calculate average spectrogram for each ROI
@@ -1084,8 +1008,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
         ROI_params["ROI_center_coord"] = ROI_center_coord
 
         # Assemble pressure data for each ROI
-        #wall_pressure_ROI = assemble_wall_pressure_for_one_ROI(output_folder_ROIs, surf_mesh, spec_quantity_array, ROI_params)
-        spec_quantity_array_ROI = assemble_var_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, spec_quantity, spec_quantity_array, ROI_params)
+        spec_quantity_array_ROI = assemble_quantity_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, spec_quantity, spec_quantity_array, ROI_params)
 
         spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = spec_quantity_array_ROI, STFT_params = STFT_params)
 

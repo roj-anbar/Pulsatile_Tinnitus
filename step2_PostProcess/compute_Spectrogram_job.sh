@@ -167,20 +167,20 @@ python "$SCRIPT" \
 
 #---------------------- For running directly from commandline use below ---------------------------
 # Note: You HAVE to comment this part if submitting this file through sbatch
-#python compute_Spectrogram.py \
-#    --case_name             "PTSeg106_base_0p64" \
-#    --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/results/PTSeg106_base_0p64_ts10000_cy6_saveFreq1/" \
-#    --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data" \
-#    --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess" \
-#    --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data/PTSeg106_base_0p64_centerline_points.csv" \
-#    --spec_quantity         "wallpressure" \
-#    --window_length         2732 \
-#    --ROI_type              "cylinder" \
-#    --flag_multi_ROI        \
-#    --ROI_radius            8 \
-#    --ROI_stride            4 \
-#    --ROI_start_center_id   1200 \
-#    --ROI_end_center_id     1240
+python compute_Spectrogram.py \
+    --case_name             "PTSeg028_base_0p64" \
+    --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq1/" \
+    --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data" \
+    --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess" \
+    --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data/PTSeg028_base_0p64_centerline_points.csv" \
+    --spec_quantity         "wallpressure" \
+    --window_length         2732 \
+    --flag_multi_ROI        \
+    --ROI_type              "cylinder" \
+    --ROI_radius            8 \
+    --ROI_stride            4 \
+    --ROI_start_center_id   627 \
+    --ROI_end_center_id     640
     #--flag_save_ROI
 
 
