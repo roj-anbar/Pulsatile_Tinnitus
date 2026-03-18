@@ -175,12 +175,12 @@ python compute_Spectrogram.py \
     --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data/PTSeg028_base_0p64_centerline_points.csv" \
     --spec_quantity         "wallpressure" \
     --window_length         2732 \
-    --flag_multi_ROI        \
     --ROI_type              "cylinder" \
     --ROI_radius            8 \
     --ROI_stride            4 \
-    --ROI_start_center_id   627 \
-    --ROI_end_center_id     640
+    --ROI_start_center_id   644 \
+    --ROI_end_center_id     645
+    #--flag_multi_ROI        \
     #--flag_save_ROI
 
 

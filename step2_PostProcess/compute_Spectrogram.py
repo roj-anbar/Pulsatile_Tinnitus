@@ -775,7 +775,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     # spectrogram_signal[spectrogram_signal > 100] = 100
 
     # Setting plot properties
-    font_size = 12
+    font_size = 16
     plt.rc('axes', titlesize=16)         # fontsize of the title
     plt.rc('font', size=font_size)       # controls default text size
     plt.rc('xtick', labelsize=font_size) # fontsize of the x tick labels
@@ -792,7 +792,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     #ax.set_xlabel('Time (s)', fontweight='bold', labelpad=0)
     ax.set_xlabel('Q_inlet (ml/s)', fontweight='bold', labelpad=10)
     ax.set_ylabel('Frequency (Hz)', fontweight='bold', labelpad=10)
-    #ax.set_xlim([xmin, xmax]) 
+    ax.set_xlim([xmin, xmax]) 
 
     # Set different limits based on the case
     if 'PTSeg043' in case_name:
@@ -956,13 +956,22 @@ def compute_and_save_spectrogram_for_all_ROIs(
 
             # -------- For plotting the wall pressure signal for individual nodes -------------
             # Generate figs for a couple of points
-            for id in range(1,1000,100):
-                fig, ax = plt.subplots(1,1, figsize=(16,8))
-                ax.plot(spec_quantity_array_ROI_multi[id,:])
-                ax.set_xlabel('time (s)', fontweight='bold', fontsize=16, labelpad=0)
-                ax.set_ylabel('wall pressure (Pa)', fontweight='bold', fontsize=16, labelpad=0)
-                plt.tight_layout()
-                plt.savefig(Path(output_folder_imgs) / f"signal_wallPressure_node{id}.png") 
+            #print('Generating figures of wall-pressure signals at some nodes ...')
+            # Create time array
+            # create index array
+            #array_timesteps = np.arange(len(spec_quantity_array_ROI_multi[1,:]))
+            #array_Qin = 2 * (array_timesteps * period_seconds/timesteps_per_cyc)
+
+            #for id in range(0,1000,100):
+
+            #    fig, ax = plt.subplots(1,1, figsize=(16,8))
+            #    ax.plot(array_Qin, spec_quantity_array_ROI_multi[id,:])
+            #    ax.set_xlabel('time (s)', fontweight='bold', fontsize=16, labelpad=0)
+            #    ax.set_ylabel('wall pressure (Pa)', fontweight='bold', fontsize=16, labelpad=0)
+            #    ax.set_xlim([2 10])
+            #    ax.set_ylim([-1000 2000])
+            #    plt.tight_layout()
+            #    plt.savefig(Path(output_folder_imgs) / f"signal_wallPressure_node{id}.png") 
 
         
         #-----Case 1B: Generate one spectrogram per ROI
@@ -996,6 +1005,24 @@ def compute_and_save_spectrogram_for_all_ROIs(
                     spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_{ROI_id}_{ROI_type}_r{ROI_radius}_h{ROI_height}' 
                 
                 plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectrogram_title)
+
+                # -------- For plotting the wall pressure signal for individual nodes -------------
+                # Generate figs for a couple of points
+                print('Generating figures of wall-pressure signals at some nodes ...')
+                # Create time array
+                array_timesteps = np.arange(len(spec_quantity_array_ROI[1,:]))
+                array_Qin = 2 * (array_timesteps * period_seconds/timesteps_per_cyc)
+
+                for id in range(0,1000,200):
+                    fig, ax = plt.subplots(1,1, figsize=(16,8))
+                    ax.plot(array_Qin, spec_quantity_array_ROI[id,:])
+                    ax.set_xlabel('Q_inlet (ml/s)', fontweight='bold', fontsize=16, labelpad=0)
+                    ax.set_ylabel('wall pressure (Pa)', fontweight='bold', fontsize=16, labelpad=0)
+                    ax.set_xlim([2 10])
+                    ax.set_ylim([-1000 2000])
+                    plt.tight_layout()
+                    plt.savefig(Path(output_folder_imgs) / f"signal_wallPressure_node{id}.png") 
+
 
 
     #------- Case 2: Coords mode
