@@ -255,7 +255,7 @@ def read_mesh_info(mesh_info_path, key):
 
     # print the summary
     for i,s in enumerate(idfr):
-        if mpi_rank == 0 and key == '<INLETS>': print ('Inlet  id:', ids[i], ' flowrate:', s, ' mL/s')
+        if mpi_rank == 0 and key == '<INLETS>': print ('Inlet  id:', ids[i], ' flowrate (mL/s):', s)
         if mpi_rank == 0 and key == '<OUTLETS>': print ('Outlet id:', ids[i], ' flowrate ratio:', s)
 
 
@@ -330,7 +330,7 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
         no_of_cycles    = get_cmdarg(commandline_kwargs, 'cycles', 2)
         save_freq       = get_cmdarg(commandline_kwargs, 'save_frequency', 5)
             
-        if mpi_rank == 0: print('Found out period = %s (ms)'%str(period))
+        if mpi_rank == 0: print('Found out period [ms] = %s '%str(period))
 
 
         # Build a descriptive case_fullname
@@ -402,9 +402,9 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
         # Check if the kinematic viscosity (nu) is within correct range
         nu = NS_parameters['nu']
         if not (0.003 <= nu <= 0.004):
-            raise ValueError("Error: Kinematic viscosity (nu) is out of expected range (0.003-0.004 mm^2/ms)! CHECK THE UNTIS! \n")
+            raise ValueError("Error: Kinematic viscosity (nu) is out of expected range (0.003-0.004 [mm^2/ms])! CHECK THE UNTIS! \n")
         else:
-            print("Blood kinematic viscosity (nu) is within expected range = {nu:.4f} mm^2/ms \n")
+            print(f"\nBlood kinematic viscosity (nu) is within expected range: nu (mm^2/ms)= {nu:.4f} \n")
 
         # Print all NS_parameters to log
         info_gray(str(NS_parameters))
@@ -598,7 +598,7 @@ def make_poiseuille_bcs(mesh, ds_inlet, Q_inflow, **NS_namespace):
         print (f"Inlet properties: \n"
             f"R [mm]        =   {R:.4f} \n"
             f"Area [mm2]    =   {area:.4f} \n"
-            f"Q [ml/s]      =   {Q_inflow:.4f} \n"
+            f"Q [mL/s]      =   {Q_inflow:.4f} \n"
             f"umax [m/s]    =   {u_max:.4f} \n"
             f"Reynolds      =   {Reynolds:.1f} \n"
             f"centroid [mm] =   [{center[0]:.4f}, {center[1]:.4f}, {center[2]:.4f}] \n"
