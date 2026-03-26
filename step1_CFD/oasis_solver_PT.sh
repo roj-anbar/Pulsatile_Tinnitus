@@ -146,7 +146,8 @@ apptainer exec \
   cycles=$cycles \
   period=$period \
   timesteps=$timesteps_per_cycle \
-  viscosity=$viscosity \
+  viscosity_mu_Pas=$viscosity_mu_Pas \
+  density_kgm3=$density_kgm3 \
   uOrder=$uOrder \
   inlet_BC_type=$inlet_BC_type \
   save_frequency=$save_frequency \

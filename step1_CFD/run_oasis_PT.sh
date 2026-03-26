@@ -1,25 +1,27 @@
 #!/bin/bash
 #-----------------------------------------------------------------------------------------------------------------------
-# run_oasis_case_casename.sh
+# run_oasis_PT.sh
 # Case-specific launcher for Oasis CFD jobs on SLURM (Trillium style clusters).
 #
 # __author__ = Rojin Anbarafshan <rojin.anbar@gmail.com>
 # __date__   = 2025-09
 #
 # PURPOSE:
-#   - Define all case parameters for CFD in one place and submit oasis-solver.sh via sbatch.
+#   - Define all case parameters for CFD in one place and submit oasis_solver_PT.sh via sbatch.
 #   - Optional flags let you override key settings without editing the file.
 #
 # REQUIREMENTS:
-#   - oasis-solver.sh (the job script this wrapper submits)
+#   - oasis_solver_PT.sh (the job script this wrapper submits)
+#   - oasis_problem_PT.py (required in oasis_solver_PT.sh)
 #
 # EXECUTION:
 #   - Run this script from terminal by:
-#     <./run_oasis_case_casename.sh>
+#     <./run_oasis_PT.sh>
 #
 # IMPORATNT NOTES:
-#   - This script should be ran from the PT case directory containing the mesh data (under /data folder).
+#   - This script should be ran from the PT case-specific directory containing the mesh data (under /data folder).
 #   - "PATH_OASIS_SOLVER" which is the path to "oasis_solver_PT.sh" should be modified for each user.
+#   - No need to copy oasis_solver_PT.sh and oasis_problem_PT.py for each case (just have these 2 scripts in one directory and call it using "PATH_OASIS_SOLVER" variable).
 #
 # Adapted from solver-v2.sh written by 2022 Anna Haley (ahaley@mie.utoronto.ca) and solver.sh written by 2018 Mehdi Najafi (mnuoft@gmail.com). 
 # Copyright (C) 2025 University of Toronto, Biomedical Simulation Lab.

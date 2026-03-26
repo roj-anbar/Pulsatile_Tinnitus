@@ -292,7 +292,7 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
     Also prepares HDF5 naming template for BSLSolver IO.
     Note: Parameters are in mm and ms!!
     """
-
+    
     mesh_name       = get_cmdarg(commandline_kwargs, "mesh_name")
     mesh_path       = path.join("./data", mesh_name + ".xml.gz")
     mesh_info_path  = path.join("./data", mesh_name + ".info")
@@ -343,7 +343,14 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
         case_fullname = (mesh_name + "_ts" + str(timesteps) + "_cy" + str(no_of_cycles))
         results_folder = f"./results/{case_fullname}_saveFreq{save_freq}"
 
-        # Note: Parameters should be in [mm] and [ms]!
+        #####--------- IMPORTANT: OASIS expects all parameters in [mm] and [ms]! -------------####
+        
+        # Calculate kinematic viscosity nu (all in SI units) -->
+        mu_Pas   = get_cmdarg(commandline_kwargs, 'viscosity_mu_Pas', 0.0037)
+        rho_kgm3 = get_cmdarg(commandline_kwargs, 'density_kgm3', 1057)
+        nu_m2s   = mu_Pas/rho_kgm3
+        nu_mm2ms = nu_m2s*1000 #convert from SI to units that oasis expects
+
         NS_parameters.update(
             case_name           = case_name,
             case_fullname       = case_fullname,
@@ -358,7 +365,7 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
             T                   = period * no_of_cycles,                                                # total simulation time [ms]
             dt                  = period / timesteps,                                                   # timestep size [ms]
             time_steps          = timesteps,
-            nu                  = get_cmdarg(commandline_kwargs, 'viscosity', 0.0035),                  # kinematic viscosity [mm^2/ms]
+            nu                  = nu_mm2ms, #get_cmdarg(commandline_kwargs, 'viscosity', 0.0035),       # kinematic viscosity [mm^2/ms]
             velocity_degree     = get_cmdarg(commandline_kwargs, 'uOrder', 1),                          # FE degree of velocity
 
             save_freq           = get_cmdarg(commandline_kwargs, 'save_frequency', 5),                  # save every N steps 
@@ -391,8 +398,18 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
             )
 
     # Write parameters to log
-    if mpi_rank == 0: info_gray(str(NS_parameters))
+    if mpi_rank == 0:
+        # Check if the kinematic viscosity (nu) is within correct range
+        nu = NS_parameters['nu']
+        if not (0.003 <= nu <= 0.004):
+            raise ValueError("Error: Kinematic viscosity (nu) is out of expected range (0.003-0.004 mm^2/ms)! CHECK THE UNTIS! \n")
+        else:
+            print("Blood kinematic viscosity (nu) is within expected range = {nu:.4f} mm^2/ms \n")
 
+        # Print all NS_parameters to log
+        info_gray(str(NS_parameters))
+
+    
     # Initialize BSLSolver HDF5 pattern
     f = int(np.log10(NS_parameters['T']))+2
     g = len(str(int(NS_parameters['time_steps']*NS_parameters['no_of_cycles'])))+1
