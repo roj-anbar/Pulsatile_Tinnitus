@@ -19,13 +19,25 @@
 #
 # IMPORATNT NOTES:
 #   - This script should be ran from the PT case directory containing the mesh data (under /data folder).
-#   - Paths to "oasis_solver_PT.sh" and "oasis_problem_PT.py" should be modified for each user.
+#   - "PATH_OASIS_SOLVER" which is the path to "oasis_solver_PT.sh" should be modified for each user.
 #
 # Adapted from solver-v2.sh written by 2022 Anna Haley (ahaley@mie.utoronto.ca) and solver.sh written by 2018 Mehdi Najafi (mnuoft@gmail.com). 
 # Copyright (C) 2025 University of Toronto, Biomedical Simulation Lab.
 #-----------------------------------------------------------------------------------------------------------------------
 
 set -euo pipefail
+
+
+# Define path to your CFD Oasis solver (change accordingly)
+PATH_OASIS_SOLVER="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step1_CFD/oasis_solver_PT.sh"
+
+
+# Safety check for if file exists
+if [[ ! -f "$PATH_OASIS_SOLVER" ]]; then
+    echo "ERROR: Oasis slurm job script 'oasis_solver_PT.sh' not found:"
+    echo "       $OASIS_SLURM"
+    exit 1
+fi
 
 
 #--------------------------------------- Input parameters -------------------------------------------------
@@ -37,12 +49,12 @@ set -a
 
 scinet_user=ranbar                # your cluster username (need to specify this or this won't work at all)
 group_name=def-steinman           # group allocation to run the job under
-debug=on                          # job partition -> choose between 'on'/'off' (Whether or not you are using debug node)
+debug=off                          # job partition -> choose between 'on'/'off' (Whether or not you are using debug node)
 num_cores=100                     # number of cores to use per node (everything runs on a single node) 
-required_time="00:10:59"          # amount of time cluster will need to run the case (max 24 hours)
+required_time="11:59:59"          # amount of time cluster will need to run the case (max 24 hours)
 post_processing_time_minutes=180  # amount of time needed to post-process the case (this is run on a single proc)
 
-casename="PTSeg028_base_0p64"     # What your case will be called in the output files & on cluster -- should be the same name as this script without the sh
+casename="PTSeg106_base"          # What your case will be called in the output files & on cluster -- should be the same name as this script without the sh
 cycles=6                          # number of cycles to run, determines total simulation time (default: 2)
 period=915.0                      # waveform period [ms] (default: 915 ms)
 timesteps_per_cycle=10000         # number of timesteps for each cycle (default: 2000)
@@ -56,19 +68,6 @@ save_frequency=1                  # write solution every N steps (default: 5)
 checkpoint=500                    # write restart every N steps
 
 set +a
-
-
-
-# ---------------------------------------- Define solver paths --------------------------------------------
-
-# Directory where shared Oasis scripts are stored
-CFDSOLVER_DIR="/scratch/ranbar/My_Projects/Study1_PTRamp/cases/$casename/step1_CFD/"
-
-# Core oasis problem definition
-OASIS_PROBLEM="${CFDSOLVER_DIR}/oasis_problem_PT.py"
-
-# SLURM wrapper script
-OASIS_SOLVER="${CFDSOLVER_DIR}/oasis_solver_PT.sh"
 
 
 
@@ -103,7 +102,7 @@ sbatch --export=ALL \
        --nodes=1 \
        --ntasks-per-node=$num_cores \
        --partition=$partition \
-       "./oasis_solver_PT.sh" "$@"
+       "$PATH_OASIS_SOLVER" "$@"
 
 # Note:
 # in <"$OASIS_SOLVER" "$@"> "$@" just includes any additional keyword arguments passed when you run this script.
