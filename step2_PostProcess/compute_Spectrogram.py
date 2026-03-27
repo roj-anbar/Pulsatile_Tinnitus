@@ -810,26 +810,26 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
 
     
     #---------------- Adding the phases ------------------
-    """
+    
     if flag_plot_phases:
         # Method 1: Add as vertical lines
         # Find first points of transition
         phase_transitions = first_phase_transitions(spectrogram_phases, x_axis=bins_Q, x_min=xmin, x_max=xmax)
 
-        #for phase, idx in phase_transitions.items():
-        #    if idx is None:
-        #        continue
-        #    x = bins_Q[idx]
-        #    print(f'Qin of Phase {phase} = {x:.2f} ml/s')
-        #    ax.axvline(x, color="white", linestyle="solid", linewidth=3, alpha=0.7)
+        for phase, idx in phase_transitions.items():
+            if idx is None:
+                continue
+            x = bins_Q[idx]
+            print(f'Qin of Phase {phase} = {x:.2f} ml/s')
+            ax.axvline(x, color="white", linestyle="solid", linewidth=3, alpha=0.7)
 
         # Method 2: Add as steps
-        ax2 = ax.twinx()
-        ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=4)
-        ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
-        ax2.set_yticks([0,1,2,3])
-        ax2.set_ylim(-0.15, 3.15)
-    """
+        #ax2 = ax.twinx()
+        #ax2.step(bins_Q, spectrogram_phases, where="mid", color="cyan", linewidth=4)
+        #ax2.set_ylabel("Phase", fontweight='bold', rotation=270)
+        #ax2.set_yticks([0,1,2,3])
+        #ax2.set_ylim(-0.15, 3.15)
+    
 
     #----- For customizing the colorbar and axis for figures ----
     
@@ -968,8 +968,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
             #    ax.plot(array_Qin, spec_quantity_array_ROI_multi[id,:])
             #    ax.set_xlabel('time (s)', fontweight='bold', fontsize=16, labelpad=0)
             #    ax.set_ylabel('wall pressure (Pa)', fontweight='bold', fontsize=16, labelpad=0)
-            #    ax.set_xlim([2 10])
-            #    ax.set_ylim([-1000 2000])
+            #    ax.set_xlim([2,10])
             #    plt.tight_layout()
             #    plt.savefig(Path(output_folder_imgs) / f"signal_wallPressure_node{id}.png") 
 
@@ -1018,8 +1017,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
                     ax.plot(array_Qin, spec_quantity_array_ROI[id,:])
                     ax.set_xlabel('Q_inlet (ml/s)', fontweight='bold', fontsize=16, labelpad=0)
                     ax.set_ylabel('wall pressure (Pa)', fontweight='bold', fontsize=16, labelpad=0)
-                    ax.set_xlim([2 10])
-                    ax.set_ylim([-1000 2000])
+                    ax.set_xlim([2,10])
                     plt.tight_layout()
                     plt.savefig(Path(output_folder_imgs) / f"signal_wallPressure_node{id}.png") 
 
