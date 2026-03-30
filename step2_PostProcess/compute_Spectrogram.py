@@ -564,7 +564,8 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
 
     # Store all values in spectrogram_data
     spectrogram_data = {
-            'power_avg_dB': power_avg_db,   # (n_freq, n_frames)
+            'power_avg_linear': power_avg,  # (n_freq, n_frames)    — linear scale (|Z|^2), before dB conversion
+            'power_avg_dB': power_avg_db,   # (n_freq, n_frames)    — dB scale, clamped/filtered
             'bins': bins,                   # time values (n_frames,1)
             'freqs': freqs,                 # (n_freqs,1)
             'sampling_rate': sampling_rate,
@@ -578,28 +579,28 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
 
 
 # ======================================================================================================
-# CLASSIFICATION FUNCTIONS
+# SPECTROGRAM ANALYSIS: QUANTIFICATION AND CLASSIFICATION FUNCTIONS
 # ======================================================================================================
 
-def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_high, f_max):
+def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_mid, f_high):
     """
     Compute simple metrics for one spectrogram column (one time).
     spec_col_dB: 1D array (n_freq,) in dB.
     f_low:       low frequency threshold in Hz (default = 100 Hz).
-    f_high:      high frequency threshold in Hz (default = 1000 Hz).
-    f_max:       max frequency threshold in Hz (default = 5000 Hz).
+    f_mid:       mid frequency threshold in Hz (default = 1000 Hz).
+    f_high:       max frequency threshold in Hz (default = 5000 Hz).
     
-    Returns a dictionary of metrics for each column based on the 3 frequency bands (lowFreq_band: 0-f_low / midFreq_band: f_low-f_high / highFreq_band: f_high-f_max)
+    Returns a dictionary of metrics for each column based on the 3 frequency bands (lowFreq_band: 0-f_low / midFreq_band: f_low-f_mid / highFreq_band: f_mid-f_high)
     - mean_power_below_f_low: Average acoustic power below low frequency f_low.
     - mean_power_above_f_low: Average acoustic power above low frequency f_low.
-    - mean_power_above_f_high: Average acoustic power above high frequency f_high and below max frequency f_max.
+    - mean_power_above_f_mid: Average acoustic power above mid frequency f_mid and below high frequency f_high.
     - flatness_highFreq:
     """
     
     # Create a mask for each frequency band
     mask_lowFreq  = freqs <= f_low
-    mask_midFreq  = (freqs > f_low) & (freqs <= f_high)
-    mask_highFreq = (freqs > f_high) & (freqs <= f_max)
+    mask_midFreq  = (freqs > f_low) & (freqs <= f_mid)
+    mask_highFreq = (freqs > f_mid) & (freqs <= f_high)
     
     # Filter the spectrogram for each frequency band
     spec_lowFreq  = spec_col_dB[mask_lowFreq]
@@ -615,7 +616,7 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_high, f
     mean_power_highFreq = np.mean(spec_highFreq)
     
     # Compute fraction of frequencies with power > 80dB
-    #frac_above_80dB  = np.mean(spec_above_f_high > 80)  
+    #frac_above_80dB  = np.mean(spec_above_f_mid > 80)  
 
     # Compute spectral flatness (0 = very peaky, 1 = white noise)
     linear_power_highFreq = 10.0**(spec_highFreq/10.0)
@@ -635,7 +636,7 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_high, f
                             #frac_above_80dB    = frac_above_80dB
                             #n_peaks=n_peaks
 
-    #print(f"above_flow, f_high: {mean_power_above_f_low:.2f}, {mean_power_above_f_high:.2f}\n")  
+    #print(f"above_flow, f_high: {mean_power_above_f_low:.2f}, {mean_power_above_f_mid:.2f}\n")  
     return spec_col_metrics
 
 
@@ -669,13 +670,13 @@ def classify_spectrogram_phase_per_column(metrics_col):
         return 0
 
 
-def classify_spectrogram_phases(spectrogram_data, f_low=100, f_high=1000, f_max=5000):
+def classify_spectrogram_phases(spectrogram_data, f_low=100, f_mid=1000, f_high=5000):
     """
     Map metrics dict -> phase {0,1,2,3}.
     
     f_low:       low frequency threshold in Hz (default = 100 Hz).
-    f_high:      high frequency threshold in Hz (default = 1000 Hz).
-    f_max:       max frequency threshold in Hz (default = 5000 Hz) --> 5000 is the Nyquist limit.
+    f_mid:       mid frequency threshold in Hz (default = 1000 Hz).
+    f_high:       max frequency threshold in Hz (default = 5000 Hz) --> 5000 is the Nyquist limit.
 
     Intended meaning:
       0: quiet / nothing
@@ -696,7 +697,7 @@ def classify_spectrogram_phases(spectrogram_data, f_low=100, f_high=1000, f_max=
 
     # Loop over each frame and calculate the metrics for it
     for col in range(n_cols):
-        metrics_column = extract_metrics_from_spectrogram_column(freqs, spec_dB[:, col], f_low, f_high, f_max)
+        metrics_column = extract_metrics_from_spectrogram_column(freqs, spec_dB[:, col], f_low, f_mid, f_high)
         metrics_list.append(metrics_column)
         phases[col] = classify_spectrogram_phase_per_column(metrics_column)
 
@@ -747,7 +748,7 @@ def first_phase_transitions(phases, x_axis, x_min, x_max, phase_values=(1, 2, 3)
 
 
 
-def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, plot_title, f_max=5000, flag_plot_phases=True):
+def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, plot_title, f_high=5000, flag_plot_phases=True):
     """
     Save spectrogram data (.npz) and a PNG image.
     """
@@ -798,7 +799,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     if 'PTSeg043' in case_name:
         ax.set_ylim([0, 1000])
     else:
-        ax.set_ylim([0, f_max])
+        ax.set_ylim([0, f_high])
     
 
     #----- Adding the colorbar
