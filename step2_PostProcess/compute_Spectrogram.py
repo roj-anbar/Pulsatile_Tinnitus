@@ -78,7 +78,7 @@ import argparse
 from pathlib import Path
 import multiprocessing as mp
 from multiprocessing import sharedctypes
-
+from collections import defaultdict
 
 import vtk
 import numpy as np
@@ -637,13 +637,22 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_mid, f_
         peak_freq = freqs[mask_analysis].max()
     else:
         peak_freq = np.nan
+    
+    # Compute spectral centroid (center of mass of spectrum)
+    spec_col_linear = 10.0**(spec_col_dB/10.0)
+    # Optionally restrict to analysis band
+    mask_analysis = freqs < f_high
+    f_analysis = freqs[mask_analysis]
+    S_analysis = spec_col_linear[mask_analysis]
+    centroid_freq = np.sum(f_analysis * S_analysis) / np.sum(S_analysis)
 
 
     spec_col_metrics = dict(mean_power_lowFreq  = mean_power_lowFreq,
                             mean_power_midFreq  = mean_power_midFreq,
                             mean_power_highFreq = mean_power_highFreq,
                             flatness_highFreq   = flatness_highFreq,
-                            peak_freq           = peak_freq)
+                            peak_freq           = peak_freq,
+                            centroid_freq   = centroid_freq)
                             #frac_above_80dB    = frac_above_80dB
                             #n_peaks=n_peaks
 
@@ -706,14 +715,22 @@ def classify_spectrogram_phases(spectrogram_data, f_low=100, f_mid=1000, f_high=
     # Initialize arrays
     phases   = np.zeros(n_cols, dtype=int)
     peakFreq = np.zeros(n_cols, dtype=float)
-    metrics_list = []
+    spectral_metrics = defaultdict(list)
 
     # Loop over each frame and calculate the metrics for it
     for col in range(n_cols):
         metrics_column = extract_metrics_from_spectrogram_column(freqs, spec_dB[:, col], f_low, f_mid, f_high)
-        metrics_list.append(metrics_column)
-        peakFreq[col] = metrics_column["peak_freq"]
+        
+        # Append the metrics for each column to the overall metrics array
+        for key, value in metrics_column.items():
+            spectral_metrics[key].append(value)
+
         phases[col] = classify_spectrogram_phase_per_column(metrics_column)
+        
+    #Convert the metrics to numpy array
+    spectral_metrics = {k: np.array(v) for k, v in spectral_metrics.items()}
+
+        
 
     # Optional: enforce non-decreasing phases along Q_inlet
     #for col in range(1, n_cols):
@@ -723,7 +740,7 @@ def classify_spectrogram_phases(spectrogram_data, f_low=100, f_mid=1000, f_high=
     #print(metrics_list[110], '\n')
     #print(metrics_list[-12:-10], '\n')
 
-    return phases, peakFreq
+    return phases, spectral_metrics
 
 
 
@@ -880,20 +897,37 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     plt.rc('axes', labelsize=16)         # fontsize of the x and y labels
 
 
-    peakFreq = spectral_metrics
-    fig2, ax2 = plt.subplots(1,1, figsize=(16,8))
-    ax2.plot(bins_Q, peakFreq)
+    fig2, ax2 = plt.subplots(1,3, figsize=(20,8))
+
+    ax2[0].plot(bins_Q, spectral_metrics['mean_power_lowFreq'],  label='low-freq',  linewidth = 3, color='Cyan')
+    ax2[0].plot(bins_Q, spectral_metrics['mean_power_midFreq'],  label='mid-freq',  linewidth = 3, color='DeepSkyBlue')
+    ax2[0].plot(bins_Q, spectral_metrics['mean_power_highFreq'], label='high-freq', linewidth = 3, color='Blue')
+    ax2[0].set_ylabel('Mean SPL power (dB)', fontweight='bold', labelpad=10)
+    ax2[0].set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
+    ax2[0].set_ylim([-1, 120]) 
+    ax2[0].set_xlim([xmin, xmax]) 
+    ax2[0].legend(fontsize=10)
+
+    ax2[1].plot(bins_Q, spectral_metrics['peak_freq'], label='Peak frequency', linewidth = 3, color='black')
+    ax2[1].set_ylabel('Peak Frequency (Hz)', fontweight='bold', labelpad=10)
+    ax2[1].set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
+    ax2[1].set_ylim([-1, f_high+1]) 
+    ax2[1].set_xlim([xmin, xmax]) 
+
+    ax2[2].plot(bins_Q, spectral_metrics['centroid_freq'], linewidth = 3, color='tab:orange')
+    ax2[2].set_ylabel('Centroid Frequency (Hz)', fontweight='bold', labelpad=10)
+    ax2[2].set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
+    ax2[2].set_ylim([-1, 1000]) 
+    ax2[2].set_xlim([xmin, xmax]) 
+
 
 
     #----- Set properties
-    ax2.set_title(plot_title)
-    ax2.set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
-    ax2.set_ylabel('Peak Frequency (Hz)', fontweight='bold', labelpad=10)
-    ax2.set_xlim([xmin, xmax]) 
+    fig2.suptitle(plot_title)
 
-
+  
     plt.tight_layout()
-    plt.savefig(Path(output_folder_imgs) / f"peakFreq_{plot_title}.png")#, transparent=True)
+    plt.savefig(Path(output_folder_imgs) / f"specMetrics_{plot_title}.png")
     plt.close(fig2)
 
 

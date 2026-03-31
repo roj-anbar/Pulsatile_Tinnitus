@@ -32,7 +32,7 @@
 set -euo pipefail
 
 # ---------------------------------- Define Paths -------------------------------------------------------------------------------
-CASE=PTSeg106_base_0p64                                             # Case name
+CASE=PTSeg028_base_0p64                                             # Case name
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE             # Parent directory of the case
 MESH="$BASE_DIR/step1_CFD/data"                                     # Path to mesh data folder containing the h5 mesh
 CENTERLINE="$MESH/${CASE}_centerline_points.csv"                    # Path to centerline csv file used to construct ROIs
@@ -71,8 +71,7 @@ export PYVISTA_OFF_SCREEN=true                              #tells pyvista to us
 # https://utoronto-my.sharepoint.com/:x:/g/personal/rojin_anbarafshan_mail_utoronto_ca/IQAE4WxcfxZtTa3r6agUO6xUAUsh_3MP7hhnwm9_BzdpsV0?e=WVALzt
 
 
-
-# Region 1: Transverse Sinus
+# Region 1: Superior Sagittal Sinus
 python "$SCRIPT" \
     --case_name             "$CASE" \
     --input_folder          "$INPUT" \
@@ -80,19 +79,16 @@ python "$SCRIPT" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
     --spec_quantity         "wallpressure" \
-    --window_length         1092 \
+    --window_length         2732 \
     --ROI_type              "cylinder" \
     --flag_multi_ROI        \
     --ROI_radius            8 \
     --ROI_stride            4 \
-    --ROI_start_center_id   1280 \
-    --ROI_end_center_id     1360 \
-#    --flag_save_ROI
-#    --timesteps_per_cyc 10000 
+    --ROI_start_center_id   1030 \
+    --ROI_end_center_id     1200 \
+    --flag_save_ROI
 
-
-
-# Region 2: Stenosis/fenestration
+# Region 2: Transverse Sinus
 python "$SCRIPT" \
     --case_name             "$CASE" \
     --input_folder          "$INPUT" \
@@ -100,17 +96,37 @@ python "$SCRIPT" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
     --spec_quantity         "wallpressure" \
-    --window_length         1092 \
+    --window_length         2732 \
+    --ROI_type              "cylinder" \
+    --flag_multi_ROI        \
+    --ROI_radius            8 \
+    --ROI_stride            4 \
+    --ROI_start_center_id   772 \
+    --ROI_end_center_id     900 \
+    --flag_save_ROI
+#    --timesteps_per_cyc 10000 
+
+
+
+# Region 3: Stenosis/fenestration
+python "$SCRIPT" \
+    --case_name             "$CASE" \
+    --input_folder          "$INPUT" \
+    --mesh_folder           "$MESH" \
+    --output_folder         "$OUTPUT" \
+    --ROI_center_csv        "$CENTERLINE" \
+    --spec_quantity         "wallpressure" \
+    --window_length         2732 \
     --ROI_type              "cylinder" \
     --flag_multi_ROI        \
     --ROI_radius            8 \
     --ROI_stride            4 \
     --ROI_start_center_id   1200 \
-    --ROI_end_center_id     1240
+    --ROI_end_center_id     1240 \
+    --flag_save_ROI
 
 
-
-# Region 3: Post-stenotic Dilatation
+# Region 4: Post-stenotic Dilatation
 python "$SCRIPT" \
     --case_name             "$CASE" \
     --input_folder          "$INPUT" \
@@ -118,16 +134,16 @@ python "$SCRIPT" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
     --spec_quantity         "wallpressure" \
-    --window_length         1092 \
+    --window_length         2732 \
     --ROI_type              "cylinder" \
     --flag_multi_ROI        \
     --ROI_radius            10 \
     --ROI_stride            2 \
     --ROI_start_center_id   1100 \
-    --ROI_end_center_id     1183
+    --ROI_end_center_id     1183 \
+    --flag_save_ROI
 
-
-# Region 4: Sigmoid Sinus
+# Region 5: Sigmoid Sinus
 python "$SCRIPT" \
     --case_name             "$CASE" \
     --input_folder          "$INPUT" \
@@ -135,17 +151,18 @@ python "$SCRIPT" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
     --spec_quantity         "wallpressure" \
-    --window_length         1092 \
+    --window_length         2732 \
     --ROI_type              "cylinder" \
     --flag_multi_ROI        \
     --ROI_radius            8 \
     --ROI_stride            4 \
     --ROI_start_center_id   990 \
-    --ROI_end_center_id     1090
+    --ROI_end_center_id     1090 \
+    --flag_save_ROI
 
 
 
-# Jugular Bulb
+# Region 6: Jugular Bulb
 python "$SCRIPT" \
     --case_name             "$CASE" \
     --input_folder          "$INPUT" \
@@ -153,14 +170,14 @@ python "$SCRIPT" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
     --spec_quantity         "wallpressure" \
-    --window_length         1092 \
+    --window_length         2732 \
     --ROI_type              "cylinder" \
     --flag_multi_ROI        \
     --ROI_radius            12 \
     --ROI_stride            2 \
     --ROI_start_center_id   825 \
-    --ROI_end_center_id     890
-
+    --ROI_end_center_id     890 \
+    --flag_save_ROI
 
 
 
@@ -169,21 +186,21 @@ python "$SCRIPT" \
 # Note1: You HAVE to load the modules first from terminal then run below
 # Note2: You HAVE to comment this part if submitting this file through sbatch
 
-#python compute_Spectrogram.py \
-#    --case_name             "PTSeg028_base_0p64" \
-#    --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq1/" \
-#    --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data" \
-#    --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess" \
-#    --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data/PTSeg028_base_0p64_centerline_points.csv" \
-#    --spec_quantity         "wallpressure" \
-#    --window_length         2732 \
-#    --ROI_type              "cylinder" \
-#    --ROI_start_center_id   532 \
-#    --ROI_end_center_id     610 \
-#    --ROI_radius            10 \
-#    --ROI_stride            2 \
-#    --flag_multi_ROI        
-    #--flag_save_ROI
+python compute_Spectrogram.py \
+    --case_name             "PTSeg028_base_0p64" \
+    --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq1/" \
+    --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data" \
+    --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess" \
+    --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data/PTSeg028_base_0p64_centerline_points.csv" \
+    --spec_quantity         "wallpressure" \
+    --window_length         2732 \
+    --ROI_type              "cylinder" \
+    --ROI_start_center_id   1030 \
+    --ROI_end_center_id     1200 \
+    --ROI_radius            8 \
+    --ROI_stride            4 \
+    --flag_multi_ROI        \
+    --flag_save_ROI
 
 
 wait
