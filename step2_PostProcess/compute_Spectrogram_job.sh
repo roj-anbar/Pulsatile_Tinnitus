@@ -32,7 +32,7 @@
 set -euo pipefail
 
 # ---------------------------------- Define Paths -------------------------------------------------------------------------------
-CASE=PTSeg106_base                                             # Case name
+CASE=PTSeg106_base_0p64                                             # Case name
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE             # Parent directory of the case
 MESH="$BASE_DIR/step1_CFD/data"                                     # Path to mesh data folder containing the h5 mesh
 CENTERLINE="$MESH/${CASE}_centerline_points.csv"                    # Path to centerline csv file used to construct ROIs
@@ -170,16 +170,16 @@ python "$SCRIPT" \
 # Note2: You HAVE to comment this part if submitting this file through sbatch
 
 #python compute_Spectrogram.py \
-#    --case_name             "PTSeg028_base" \
-#    --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base/step1_CFD/results/PTSeg028_base_ts10000_cy6_saveFreq1/" \
-#    --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base/step1_CFD/data" \
-#    --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base/step2_PostProcess" \
-#    --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base/step1_CFD/data/PTSeg028_base_centerline_points.csv" \
+#    --case_name             "PTSeg028_base_0p64" \
+#    --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq1/" \
+#    --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data" \
+#    --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess" \
+#    --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data/PTSeg028_base_0p64_centerline_points.csv" \
 #    --spec_quantity         "wallpressure" \
 #    --window_length         2732 \
 #    --ROI_type              "cylinder" \
-#    --ROI_start_center_id   365 \
-#    --ROI_end_center_id     410 \
+#    --ROI_start_center_id   532 \
+#    --ROI_end_center_id     610 \
 #    --ROI_radius            10 \
 #    --ROI_stride            2 \
 #    --flag_multi_ROI        

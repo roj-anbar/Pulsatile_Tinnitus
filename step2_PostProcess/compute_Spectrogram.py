@@ -598,9 +598,9 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_mid, f_
     """
     
     # Create a mask for each frequency band
-    mask_lowFreq  = freqs <= f_low
-    mask_midFreq  = (freqs > f_low) & (freqs <= f_mid)
-    mask_highFreq = (freqs > f_mid) & (freqs <= f_high)
+    mask_lowFreq  = freqs < f_low
+    mask_midFreq  = (freqs >= f_low) & (freqs < f_mid)
+    mask_highFreq = (freqs >= f_mid) & (freqs < f_high)
     
     # Filter the spectrogram for each frequency band
     spec_lowFreq  = spec_col_dB[mask_lowFreq]
@@ -629,15 +629,27 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_mid, f_
     #peaks, _ = find_peaks(spec_midFreq, height= 80.0, distance=10)
     #n_peaks = len(peaks)
 
+
+
+    # Compute peak (dominant) frequency
+    mask_analysis = (freqs < f_high)  & (spec_col_dB > 50)   # Only use frequencies up to f_high to stay within analysis band
+    if np.any(mask_analysis):
+        peak_freq = freqs[mask_analysis].max()
+    else:
+        peak_freq = np.nan
+
+
     spec_col_metrics = dict(mean_power_lowFreq  = mean_power_lowFreq,
                             mean_power_midFreq  = mean_power_midFreq,
                             mean_power_highFreq = mean_power_highFreq,
-                            flatness_highFreq   = flatness_highFreq)
+                            flatness_highFreq   = flatness_highFreq,
+                            peak_freq           = peak_freq)
                             #frac_above_80dB    = frac_above_80dB
                             #n_peaks=n_peaks
 
     #print(f"above_flow, f_high: {mean_power_above_f_low:.2f}, {mean_power_above_f_mid:.2f}\n")  
     return spec_col_metrics
+
 
 
 def classify_spectrogram_phase_per_column(metrics_col):
@@ -692,13 +704,15 @@ def classify_spectrogram_phases(spectrogram_data, f_low=100, f_mid=1000, f_high=
     n_cols = spec_dB.shape[1] 
 
     # Initialize arrays
-    phases = np.zeros(n_cols, dtype=int)
+    phases   = np.zeros(n_cols, dtype=int)
+    peakFreq = np.zeros(n_cols, dtype=float)
     metrics_list = []
 
     # Loop over each frame and calculate the metrics for it
     for col in range(n_cols):
         metrics_column = extract_metrics_from_spectrogram_column(freqs, spec_dB[:, col], f_low, f_mid, f_high)
         metrics_list.append(metrics_column)
+        peakFreq[col] = metrics_column["peak_freq"]
         phases[col] = classify_spectrogram_phase_per_column(metrics_column)
 
     # Optional: enforce non-decreasing phases along Q_inlet
@@ -709,7 +723,7 @@ def classify_spectrogram_phases(spectrogram_data, f_low=100, f_mid=1000, f_high=
     #print(metrics_list[110], '\n')
     #print(metrics_list[-12:-10], '\n')
 
-    return phases
+    return phases, peakFreq
 
 
 
@@ -748,7 +762,7 @@ def first_phase_transitions(phases, x_axis, x_min, x_max, phase_values=(1, 2, 3)
 
 
 
-def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, plot_title, f_high=5000, flag_plot_phases=True):
+def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectral_metrics, plot_title, f_high=5000, flag_plot_phases=True):
     """
     Save spectrogram data (.npz) and a PNG image.
     """
@@ -776,7 +790,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     # spectrogram_signal[spectrogram_signal > 100] = 100
 
     # Setting plot properties
-    font_size = 16
+    font_size = 20
     plt.rc('axes', titlesize=16)         # fontsize of the title
     plt.rc('font', size=font_size)       # controls default text size
     plt.rc('xtick', labelsize=font_size) # fontsize of the x tick labels
@@ -791,7 +805,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     #----- Set properties
     ax.set_title(plot_title)
     #ax.set_xlabel('Time (s)', fontweight='bold', labelpad=0)
-    ax.set_xlabel('Q_inlet (ml/s)', fontweight='bold', labelpad=10)
+    ax.set_xlabel('Q_inlet (mL/s)', fontweight='bold', labelpad=10)
     ax.set_ylabel('Frequency (Hz)', fontweight='bold', labelpad=10)
     ax.set_xlim([xmin, xmax]) 
 
@@ -853,6 +867,39 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     plt.tight_layout()
     plt.savefig(Path(output_folder_imgs) / f"{plot_title}.png")#, transparent=True)
     plt.close(fig)
+
+
+    #---------- Plotting the continuous metrics
+
+    # Setting plot properties
+    font_size = 16
+    plt.rc('axes', titlesize=16)         # fontsize of the title
+    plt.rc('font', size=font_size)       # controls default text size
+    plt.rc('xtick', labelsize=font_size) # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=font_size) # fontsize of the y tick labels
+    plt.rc('axes', labelsize=16)         # fontsize of the x and y labels
+
+
+    peakFreq = spectral_metrics
+    fig2, ax2 = plt.subplots(1,1, figsize=(16,8))
+    ax2.plot(bins_Q, peakFreq)
+
+
+    #----- Set properties
+    ax2.set_title(plot_title)
+    ax2.set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
+    ax2.set_ylabel('Peak Frequency (Hz)', fontweight='bold', labelpad=10)
+    ax2.set_xlim([xmin, xmax]) 
+
+
+    plt.tight_layout()
+    plt.savefig(Path(output_folder_imgs) / f"peakFreq_{plot_title}.png")#, transparent=True)
+    plt.close(fig2)
+
+
+    
+
+
 
 
 def compute_and_save_spectrogram_for_all_ROIs(
@@ -943,7 +990,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
             spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = spec_quantity_array_ROI_multi, STFT_params = STFT_params)
 
             # Classify spectrogram phases
-            spectrogram_phases = classify_spectrogram_phases(spectrogram_data)
+            spectrogram_phases, spectral_metrics = classify_spectrogram_phases(spectrogram_data)
 
             # Save spectrogram plot
             if ROI_type == "sphere":
@@ -952,7 +999,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
             elif ROI_type == "cylinder":
                 spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_ROI{ROI_start_center_id}to{ROI_end_center_id}_r{ROI_radius}_h{ROI_height}' 
                 
-            plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectrogram_title)
+            plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectral_metrics, spectrogram_title)
 
 
             # -------- For plotting the wall pressure signal for individual nodes -------------
@@ -995,7 +1042,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
                 spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = spec_quantity_array_ROI, STFT_params = STFT_params)
 
                 # Classify spectrogram phases
-                spectrogram_phases = classify_spectrogram_phases(spectrogram_data)
+                spectrogram_phases, spectral_metrics = classify_spectrogram_phases(spectrogram_data)
 
                 # Save spectrogram plot
                 if ROI_type == "sphere":
@@ -1004,7 +1051,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
                 elif ROI_type == "cylinder":
                     spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_{ROI_id}_{ROI_type}_r{ROI_radius}_h{ROI_height}' 
                 
-                plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectrogram_title)
+                plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectral_metrics, spectrogram_title)
 
                 # -------- For plotting the wall pressure signal for individual nodes -------------
                 # Generate figs for a couple of points
@@ -1039,12 +1086,12 @@ def compute_and_save_spectrogram_for_all_ROIs(
         spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = spec_quantity_array_ROI, STFT_params = STFT_params)
 
         # Classify spectrogram phases
-        spectrogram_phases = classify_spectrogram_phases(spectrogram_data) #f_low=100
+        spectrogram_phases, spectral_metrics = classify_spectrogram_phases(spectrogram_data) #f_low=100
 
         # Save spectrogram
         spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac}_r{ROI_radius}_h{ROI_height}' 
         
-        plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectrogram_title)
+        plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectral_metrics, spectrogram_title)
     
 
     print (f'\nFinished computing and saving spectrograms.')
