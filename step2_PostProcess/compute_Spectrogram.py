@@ -117,9 +117,8 @@ def extract_timestep_from_h5_filename(h5_file: Path) -> int:
     """
     match = re.search(r'_ts=(\d+)', h5_file.stem)
     if match is None:
-        raise ValueError(
-            f"Filename '{h5_file.name}' does not contain expected '_ts=<int>' pattern."
-        )
+        raise ValueError(f"Filename '{h5_file.name}' does not contain expected '_ts=<int>' pattern.")
+
     return int(match.group(1))
 
 
@@ -143,7 +142,7 @@ def extract_sim_params_from_h5_filename(h5_file: Path) -> tuple[float, int]:
             f"Filename '{h5_file.name}' has no '_Per<ms>' pattern. "
             "Supply --period_seconds on the CLI instead."
         )
-        
+
     period_seconds    = int(match_period_ms.group(1)) / 1000.0  # ms → s
 
 
@@ -161,16 +160,16 @@ def extract_sim_params_from_h5_filename(h5_file: Path) -> tuple[float, int]:
 
 # ---------------------------------------- Mesh Utilities -----------------------------------------------------
 
-def assemble_surface_mesh(mesh_file):
+def assemble_surface_mesh(mesh_file:Path) -> pv.PolyData:
     """
     Create a Pyvista PolyData surface from the wall mesh stored in a BSLSolver-style HDF5.
 
     Expects datasets:
       Mesh/Wall/coordinates : (Npoints, 3) float
-      Mesh/Wall/topology    : (Ncells, 3 or 4) int (triangles expected)
-      Mesh/Wall/pointIds    : (Npoints,) int  (mapping back to volume point numbering)
+      Mesh/Wall/topology    : (Ncells, 3 or 4) int - triangles expected
+      Mesh/Wall/pointIds    : (Npoints,) int       - mapping back to volume point numbering
     """
-    
+
     with h5py.File(mesh_file, 'r') as h5:
         wall_coords = np.array(h5['Mesh/Wall/coordinates'])  # coords of wall points (n_points, 3)
         wall_cells  = np.array(h5['Mesh/Wall/topology'])     # connectivity of wall points (n_cells, 3) -> triangles
@@ -180,7 +179,7 @@ def assemble_surface_mesh(mesh_file):
     n_cells        = wall_cells.shape[0]
     node_per_cell  = 3      # the surface cells are triangles with size of 3 (3 nodes per elem)
     cell_size      = np.full((n_cells, 1), node_per_cell, dtype=np.int64) # array of size (n_cells, 1) filled with 3 
-    cells_vtk      = np.hstack([cell_size, wall_cells]).ravel() # horrizontal stacking of arrays / ravel: flattens the array into a 1d array
+    cells_vtk      = np.hstack([cell_size, wall_cells]).ravel() # horizontal stacking of arrays / ravel: flattens the array into a 1d array
         
     # Build surface and attach point ID
     surf = pv.PolyData(wall_coords, cells_vtk)
@@ -188,24 +187,23 @@ def assemble_surface_mesh(mesh_file):
 
     return surf
 
-def assemble_volume_mesh(mesh_file):
+def assemble_volume_mesh(mesh_file: Path) -> pv.UnstructuredGrid:
     """
     Create a PyVista UnstructuredGrid from the volumetric mesh stored in a BSLSolver-style HDF5.
 
     Expects datasets:
       Mesh/coordinates : (Npoints, 3) float
-      Mesh/topology    : (Ncells,  4) int (tetrahedra expected)
+      Mesh/topology    : (Ncells,  4) int  - tetrahedra expected
     """
     
     with h5py.File(mesh_file, 'r') as h5:
         coords = np.array(h5['Mesh/coordinates'])  # coords of volumetric points (n_points, 3)
         cells  = np.array(h5['Mesh/topology'])     # connectivity of volumetric points (n_cells, 4) -> tetrahedrons
-
         
     # Create connectivity array compatible with VTK --> requires a size prefix per cell (here '4' for tetrahedrons)
     # VTK cell array layout = [nverts, v0, v1, v2, v3, nverts, ...]
     n_cells        = cells.shape[0]
-    node_per_cell  = 4  # the volumetric cells are tets with size of 4 (4 nodes per elem)
+    node_per_cell  = 4      # the volumetric cells are tets with size of 4 (4 nodes per elem)
     cell_types     = np.full(n_cells, pv.CellType.TETRA, dtype=np.uint8)
     cell_size      = np.full((n_cells, 1), node_per_cell, dtype = np.int64)  # array of size (n_cells, 1) filled with 4 
     cells_vtk      = np.hstack([cell_size, cells]).ravel() # horizontal stacking of array / ravel: flattens the array into a 1d array
@@ -219,71 +217,73 @@ def assemble_volume_mesh(mesh_file):
 # --------------------------------- Parallel File Reader -----------------------------------------------
 
 
-def read_wallpressure_from_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype, density=1060):
+def read_wallpressure_from_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype, density):
     """
     Reads a *chunk* of time-snapshot HDF5 files, extracts wall pressures, and writes into the shared array.
 
     Arguments:
-      file_ids   : list of snapshot indices to read
-      wall_pids  : wall point indices (to slice pressure field)
-      h5_files : list of Path objects to HDF5 snapshots
-      shared_pressure_ctype  : shared ctypes array; viewed as press_[n_points, n_times]
-
-    Note: Multiply all pressures by density (since oasis return p/rho)
+      file_ids               : list of snapshot indices assigned to this worker
+      wall_pids              : wall point indices used to slice the full pressure field
+      h5_files               : list of Path objects to HDF5 snapshots (all timesteps)
+      shared_pressure_ctype  : shared ctypes array; viewed as (n_points, n_times)
+      density                : blood density [kg/m³] — multiplied because Oasis stores p/rho
     """
 
-    # Create a shared (across processes) array of wall-pressure time-series
+    # Create a numpy view of shared (across processes) array of wall-pressure time-series
     shared_pressure = view_shared_array(shared_pressure_ctype)
     
     for t_index in file_ids:
         with h5py.File(h5_files[t_index], 'r') as h5:
-            pressure = np.array(h5['Solution']['p']) * density
-            pressure_wall = pressure[wall_pids].flatten() # shape: (n_points,)
-            
-        shared_pressure[:, t_index] = pressure_wall 
+            #pressure = np.array(h5['Solution']['p']) * density
+            #pressure_wall = pressure[wall_pids].flatten() # shape: (n_points,)
+            pressure_wall = np.array(h5['Solution']['p'])[wall_pids].flatten() * density
+        shared_pressure[:, t_index] = pressure_wall
 
 def read_wallpressure_from_h5_files_parallel(CFD_h5_files, wall_mesh, n_process, density):
+    """
+    Read all wall-pressure snapshots in parallel and return a (n_points, n_times) array.
+
+    Spawns n_process workers, each reading a contiguous chunk of HDF5 files into a shared-memory array.
+    Workers write directly into shared memory.
+    """
+    
+    n_snapshots = len(CFD_h5_files)                      # total number of saved frames    
+    wall_pids = wall_mesh.point_data['vtkOriginalPtIds'] # wall point IDs and sizes
+    n_points  = len(wall_mesh.points)
+
+
+    # Create and allocate shared arrays
+    # Array to hold pressures (n_points, n_times) - written by worker processes
+    shared_pressure_ctype = create_shared_array([n_points, n_snapshots])
+
+    print(f"Reading {n_snapshots} CFD results HDF5 files in parallel into 1 array of shape [{n_points}, {n_snapshots}] ... \n")
         
-        # Total number of saved frames
-        n_snapshots = len(CFD_h5_files)
-
-        # Wall point IDs and sizes
-        wall_pids = wall_mesh.point_data['vtkOriginalPtIds']
-        n_points  = len(wall_mesh.points)
-
-
-        # 2) Create shared arrays
-        # Array to hold pressures (n_points, n_times)
-        shared_pressure_ctype = create_shared_array([n_points, n_snapshots])
-
-
-        # 3) Parallel reading
-        print (f"Reading in parallel {n_snapshots} CFD results HDF5 files into 1 array of shape [{n_points}, {n_snapshots}] ... \n")
+    # Divide all snapshot files into chunks and spread across workers
+    time_indices    = list(range(n_snapshots))
+    time_chunk_size = max(n_snapshots // n_process, 1)
+    time_groups     = [time_indices[i : i + time_chunk_size] for i in range(0, n_snapshots, time_chunk_size)]
         
+    processes_list = []
+    for idx, group in enumerate(time_groups):
+        proc = mp.Process(
+            target = read_wallpressure_from_h5_files,
+            name = f"Reader{idx}",
+            args = (group, wall_pids, CFD_h5_files, shared_pressure_ctype, density))
+        processes_list.append(proc)
 
-        # divide all snapshot files into groups and spread across processes
-        time_indices    = list(range(n_snapshots))
-        time_chunk_size = max(n_snapshots // n_process, 1)
-        time_groups     = [time_indices[i : i + time_chunk_size] for i in range(0, n_snapshots, time_chunk_size)]
-        
-        processes_list=[]
-        for idx, group in enumerate(time_groups):
-            proc = mp.Process(target = read_wallpressure_from_h5_files, name=f"Reader{idx}", args=(group, wall_pids, CFD_h5_files, shared_pressure_ctype, density))
-            processes_list.append(proc)
+    # Start all readers
+    for proc in processes_list:
+        proc.start()
 
-        # Start all readers
-        for proc in processes_list:
-            proc.start()
+    # Wait for all readers to finish
+    for proc in processes_list:
+        proc.join()
 
-        # Wait for all readers to finish
-        for proc in processes_list:
-            proc.join()
+    wall_pressure = view_shared_array(shared_pressure_ctype) # (n_points, n_times)
+    
+    #gc.collect() # Free up memory
 
-        wall_pressure = view_shared_array(shared_pressure_ctype) # (n_points, n_times)
-        # Free up memory
-        gc.collect()
-
-        return wall_pressure
+    return wall_pressure
 
 
 
@@ -1152,8 +1152,8 @@ def parse_args():
     ap.add_argument("--case_name",      required=True,       help="Case name")
     ap.add_argument("--n_process",      type=int,            help="Number of parallel processes", default=max(1, mp.cpu_count() - 1))
 
-    ap.add_argument("--density",           type=float,  default=1060,   help="Blood density [kg/m3] (default: 1050)")
-    ap.add_argument("--period_seconds",    type=float,  default=0.915,  help="Period in seconds (default: 0.915)")
+    ap.add_argument("--density",           type=float,  default=1057,   help="Blood density [kg/m3] (default: 1057)")
+    ap.add_argument("--period_seconds",    type=float,                  help="Period in seconds")
     ap.add_argument("--timesteps_per_cyc", type=int,                    help="Number of timesteps per cycle")
     ap.add_argument("--spec_quantity",     type=str,    required=True,  choices=["wallpressure","velocity","qcriterion"], help="Quantity of interest used for spectrogram")
     
@@ -1258,8 +1258,12 @@ def main():
         CFD_h5_files = sorted(input_path.glob('*_curcyc_*up.h5'), key = extract_timestep_from_h5_filename)
 
         # Assemble variable array
-        spec_quantity_array = read_wallpressure_from_h5_files_parallel(CFD_h5_files, surf_mesh, args.n_process, args.density) 
-        
+        if args.spec_quantity == 'wallpressure':
+            spec_quantity_array = read_wallpressure_from_h5_files_parallel(CFD_h5_files, surf_mesh, args.n_process, args.density) 
+        elif args.spec_quantity == 'velocity':
+            raise ValueError(f'Not implemented yet for velocity spectrograms!')
+
+
     elif args.spec_quantity == 'qcriterion':
         Q_h5_file = input_path / f"{args.case_name}_Qcriterion.h5"
 
@@ -1272,7 +1276,7 @@ def main():
             
     # Obtain simulation temporal parameters from filename (if not given as input argument)
     timesteps_per_cyc = args.timesteps_per_cyc
-    period_seconds = args.period_seconds
+    period_seconds    = args.period_seconds
 
     if timesteps_per_cyc is None:
         _, timesteps_per_cyc = extract_sim_params_from_h5_filename(CFD_h5_files[0])
