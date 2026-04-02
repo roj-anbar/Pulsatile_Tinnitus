@@ -295,12 +295,13 @@ def shift_bit_length(x: int) -> int:
 
 def short_time_fourier(data,
                         sampling_rate: float,
-                        window_type:   str = 'hann',
-                        window_length: int | None = None,
-                        overlap_frac:  float | None = None,
-                        n_fft:         int | None = None,
-                        pad_mode:      str | None = 'cycle',
-                        detrend:       str | bool = 'linear'):
+                        window_type:   str,
+                        window_length: int,
+                        overlap_frac:  float,
+                        n_fft:         int,
+                        pad_mode:      str,
+                        detrend:       str,
+                        ):
 
     """
     Compute the windowed FFT for a timeseries data.
@@ -313,7 +314,7 @@ def short_time_fourier(data,
         sampling_rate: Number of samples per second [Hz]
         window_type : Window type for stft
         window_length (nperseg): Number of time samples in each window 
-        overlap_frac: Fraction (0-1) of overlap between segments (default = 0.9)
+        overlap_frac: Fraction (0-1) of overlap between segments
         n_fft: Number of FFT bins in each segment (>= window_length) -> if a zero padded FFT is desired, if None, is equal to window_length (nperseg) 
         pad_mode : Optional padding strategy to reduce edge artifacts {'cycle','constant','odd','even',None}
         detrend : {'linear','constant', False}
@@ -625,11 +626,6 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_mid, f_
     arithmetic_mean   = np.mean(linear_power_highFreq + eps)
     flatness_highFreq = geometric_mean / arithmetic_mean
 
-    # Compute number of prominent peaks (harmonic-like structure)
-    #peaks, _ = find_peaks(spec_midFreq, height= 80.0, distance=10)
-    #n_peaks = len(peaks)
-
-
 
     # Compute peak (dominant) frequency
     mask_analysis = (freqs < f_high)  & (spec_col_dB > 50)   # Only use frequencies up to f_high to stay within analysis band
@@ -640,12 +636,11 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_mid, f_
     
     # Compute spectral centroid (center of mass of spectrum)
     spec_col_linear = 10.0**(spec_col_dB/10.0)
-    # Optionally restrict to analysis band
-    mask_analysis = freqs < f_high
+    mask_analysis = freqs < f_high      #restrict to analysis band
     f_analysis = freqs[mask_analysis]
     S_analysis = spec_col_linear[mask_analysis]
-    centroid_freq = np.sum(f_analysis * S_analysis) / np.sum(S_analysis)
-
+    centroid_freq  = np.sum(f_analysis * S_analysis) / np.sum(S_analysis)
+    
 
     spec_col_metrics = dict(mean_power_lowFreq  = mean_power_lowFreq,
                             mean_power_midFreq  = mean_power_midFreq,
@@ -654,11 +649,10 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_mid, f_
                             peak_freq           = peak_freq,
                             centroid_freq   = centroid_freq)
                             #frac_above_80dB    = frac_above_80dB
-                            #n_peaks=n_peaks
+
 
     #print(f"above_flow, f_high: {mean_power_above_f_low:.2f}, {mean_power_above_f_mid:.2f}\n")  
     return spec_col_metrics
-
 
 
 def classify_spectrogram_phase_per_column(metrics_col):
@@ -727,29 +721,21 @@ def classify_spectrogram_phases(spectrogram_data, f_low=100, f_mid=1000, f_high=
 
         phases[col] = classify_spectrogram_phase_per_column(metrics_column)
         
-    #Convert the metrics to numpy array
+    # Convert the metrics to numpy array
     spectral_metrics = {k: np.array(v) for k, v in spectral_metrics.items()}
 
-        
 
-    # Optional: enforce non-decreasing phases along Q_inlet
-    #for col in range(1, n_cols):
-    #    if phases[col] < phases[col-1]:
-    #        phases[col] = phases[col-1]
+    centroid_slope = np.gradient(spectral_metrics['centroid_freq'])
 
-    #print(metrics_list[110], '\n')
-    #print(metrics_list[-12:-10], '\n')
 
     return phases, spectral_metrics
-
 
 
 def first_phase_transitions(phases, x_axis, x_min, x_max, phase_values=(1, 2, 3)):
     """
     Find first occurrence of each phase within a restricted x-range.
 
-    Parameters
-    ----------
+    Parameters:
     phases : np.ndarray
         Phase array (shape: n_cols), values in {0,1,2,3}
     x_axis : np.ndarray
@@ -759,8 +745,7 @@ def first_phase_transitions(phases, x_axis, x_min, x_max, phase_values=(1, 2, 3)
     phase_values : iterable
         Phases to search for (default = (1,2,3))
 
-    Returns
-    -------
+    Returns:
     transitions : dict
         {phase: index or None}
     """
@@ -776,7 +761,6 @@ def first_phase_transitions(phases, x_axis, x_min, x_max, phase_values=(1, 2, 3)
         transitions[p] = int(idx[0]) if idx.size > 0 else None
         
     return transitions
-
 
 
 def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectral_metrics, plot_title, f_high=5000, flag_plot_phases=True):
@@ -921,19 +905,16 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     ax2[2].set_xlim([xmin, xmax])
     ax2[2].tick_params(labelbottom=False)
 
-    centroid_slope = np.gradient(spectral_metrics['centroid_freq'], bins_Q)
+    centroid_slope = np.gradient(spectral_metrics['centroid_freq'])
     ax2[3].plot(bins_Q, centroid_slope, linewidth = 4, color='tab:red')
-    ax2[3].axhline(0, color='gray', linewidth=1.5, linestyle='--')
-    ax2[3].set_ylabel('d(Centroid)/dQ (Hz·s/mL)', fontweight='bold', labelpad=10)
-    ax2[3].set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
+    ax2[3].set_ylabel('d(Centroid)/dQ ')
+    ax2[3].set_xlabel('Flow rate (mL/s)')
     ax2[3].set_xlim([xmin, xmax]) 
-
 
   
     plt.tight_layout()
     plt.savefig(Path(output_folder_imgs) / f"specMetrics_{plot_title}.png")
     plt.close(fig2)
-
 
 
 def compute_and_save_spectrogram_for_all_ROIs(
@@ -1122,8 +1103,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
     
 
     print (f'\nFinished computing and saving spectrograms.')
-    
-   
+     
 
 # ======================================================================================================
 # MAIN
@@ -1162,18 +1142,17 @@ def parse_args():
 
 
     # Spectrogram specific parameters (including Short-time Fourier Transform control)
-    ap.add_argument("--window_length",    type=int,   help="Length of FFT window in samples (number of snapshots for each window)")
-    ap.add_argument("--n_fft",            type=int,   help="FFT length (bins)")
-    ap.add_argument("--overlap_fraction", type=float, default=0.9, help="Overlap fraction between consequent windows [0,1] (default: 0.9)")
-    ap.add_argument("--window_type",      type=str,   choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT (default: hann)")
-    ap.add_argument("--pad_mode",         type=str,   choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts (default: cycle)")
-    ap.add_argument("--detrend",          type=str,   help="Detrend option for STFT: 'linear', 'constant', or False (default: linear)")
+    ap.add_argument("--window_length",    type=int,   default=None,     help="Length of FFT window in samples (number of snapshots for each window)")
+    ap.add_argument("--n_fft",            type=int,   default=None,     help="FFT length (bins)")
+    ap.add_argument("--overlap_fraction", type=float, default=0.9,      help="Overlap fraction between consequent windows [0,1] (default: 0.9)")
+    ap.add_argument("--window_type",      type=str,   default='hann',   choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT (default: hann)")
+    ap.add_argument("--pad_mode",         type=str,   default='cycle',  choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts (default: cycle)")
+    ap.add_argument("--detrend",          type=str,   default='linear', help="Detrend option for STFT: 'linear', 'constant', or False (default: linear)")
     ap.add_argument("--cutoff_db",        type=float, default=0.0,      help="Minimum dB floor for visualization")
     ap.add_argument("--cutoff_freq",      type=float, default=5500,     help="Maximum frequency to filter spectrogram in Hz (default: 1500 Hz)")
 
     
     return ap.parse_args()
-
 
 
 def main():
