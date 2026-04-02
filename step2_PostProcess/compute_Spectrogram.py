@@ -216,7 +216,6 @@ def assemble_volume_mesh(mesh_file: Path) -> pv.UnstructuredGrid:
 
 # --------------------------------- Parallel File Reader -----------------------------------------------
 
-
 def read_wallpressure_from_h5_files(file_ids, wall_pids, h5_files, shared_pressure_ctype, density):
     """
     Reads a *chunk* of time-snapshot HDF5 files, extracts wall pressures, and writes into the shared array.
@@ -286,25 +285,22 @@ def read_wallpressure_from_h5_files_parallel(CFD_h5_files, wall_mesh, n_process,
     return wall_pressure
 
 
-
 # ---------------------------------- Fourier Transform Utilities -------------------------------------------
 # Used to determine STFT params if not given
-def shift_bit_length(x):
+def shift_bit_length(x: int) -> int:
     """ Round up to nearest power of 2.
-
-    Notes: See https://stackoverflow.com/questions/14267555/  
-    find-the-smallest-power-of-2-greater-than-n-in-python  
+    Notes: See https://stackoverflow.com/questions/14267555/find-the-smallest-power-of-2-greater-than-n-in-python
     """
     return 1<<(x-1).bit_length()
 
 def short_time_fourier(data,
                         sampling_rate: float,
-                        window_type: str = 'hann',
+                        window_type:   str = 'hann',
                         window_length: int | None = None,
-                        overlap_frac: float = 0.75,
-                        n_fft: int | None = None,
-                        pad_mode: str | None = 'cycle',
-                        detrend: str | bool = 'linear'):
+                        overlap_frac:  float | None = None,
+                        n_fft:         int | None = None,
+                        pad_mode:      str | None = 'cycle',
+                        detrend:       str | bool = 'linear'):
 
     """
     Compute the windowed FFT for a timeseries data.
@@ -317,26 +313,22 @@ def short_time_fourier(data,
         sampling_rate: Number of samples per second [Hz]
         window_type : Window type for stft
         window_length (nperseg): Number of time samples in each window 
-        overlap_frca: Fraction (0-1) of overlap between segments (default = 0.75)
+        overlap_frac: Fraction (0-1) of overlap between segments (default = 0.9)
         n_fft: Number of FFT bins in each segment (>= window_length) -> if a zero padded FFT is desired, if None, is equal to window_length (nperseg) 
         pad_mode : Optional padding strategy to reduce edge artifacts {'cycle','constant','odd','even',None}
         detrend : {'linear','constant', False}
     
     Returns:
-        array: Average spectrogram of data.
-        S_db : Average power spectrogram in dB -> shape (n_freqs, n_frames)
-        bins : Time vector in seconds -> shape (n_frames,)
         freqs: Frequency vector in [Hz] -> shape (n_freqs,)
-        
+        bins : Time vector in [seconds] -> shape (n_frames,)
+        Z    : Complex STFT output      -> shape (n_freqs, n_frames)
     """
-
 
     n_frames = data.shape[1]
 
     # Define defaults
     if window_length is None: window_length = shift_bit_length(int(n_frames / 10))
     if n_fft is None: n_fft = window_length
-    if overlap_frac is None: overlap_frac = 0.75
 
     if pad_mode == 'cycle':
         pad_size = window_length // 2
@@ -355,8 +347,6 @@ def short_time_fourier(data,
     elif pad_mode in ['odd', 'even', 'none', None]:
         boundary = pad_mode
     
-    else:
-        print('Warning: Problem with pad_mode!')
 
     stft_params = {
         'fs' : sampling_rate,
@@ -379,7 +369,7 @@ def short_time_fourier(data,
 
 
 # ---------------------------------- ROI Utilities -------------------------------------------
-def read_ROI_points_from_csv(csv_path: str, ROI_type) -> np.ndarray:
+def read_ROI_points_from_csv(csv_path: str, ROI_type: str) -> np.ndarray:
     """
     Read a CSV of ROI points with columns:
     - Points:0, Points:1, Points:2
@@ -404,6 +394,9 @@ def read_ROI_points_from_csv(csv_path: str, ROI_type) -> np.ndarray:
 
     elif ROI_type == "sphere":
         normx, normy, normz = np.zeros_like(x), np.zeros_like(y), np.zeros_like(z) 
+
+    else:
+        raiseValueError(f'ROI type {ROI_type} not recognized! Choose from <cylinder> or <sphere>.')
 
     coords = np.vstack([x,y,z]).T
     normals = np.vstack([normx,normy,normz]).T
@@ -482,7 +475,6 @@ def assemble_quantity_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh,
 
 
         
-
 # ======================================================================================================
 # HEMODYNAMICS FUNCTIONS
 # ======================================================================================================
@@ -491,7 +483,6 @@ def assemble_quantity_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh,
 # ---------------------------------------- Compute Spectrograms -----------------------------------------------------
 
 def calculate_mean_spectrogram(var_name, var_array, STFT_params):
-
     """
     Compute an average spectrogram (in dB) based on the given array for the variable of interest with configurable STFT parameters.
 
@@ -944,10 +935,6 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     plt.close(fig2)
 
 
-    
-
-
-
 
 def compute_and_save_spectrogram_for_all_ROIs(
                     case_name: str,
@@ -1175,12 +1162,12 @@ def parse_args():
 
 
     # Spectrogram specific parameters (including Short-time Fourier Transform control)
-    ap.add_argument("--window_length",    type=int,   default=None,     help="Length of FFT window in samples (number of snapshots for each window)")
-    ap.add_argument("--n_fft",            type=int,   default=None,     help="FFT length (bins)")
-    ap.add_argument("--overlap_fraction", type=float, default=0.9,      help="Overlap fraction between consequent windows [0,1] (default: 0.75)")
-    ap.add_argument("--window_type",      type=str,   default="hann",   choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT")
-    ap.add_argument("--pad_mode",         type=str,   default="cycle",  choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts")
-    ap.add_argument("--detrend",          type=str,   default="linear", help="Detrend option for STFT: 'linear', 'constant', or False")
+    ap.add_argument("--window_length",    type=int,   help="Length of FFT window in samples (number of snapshots for each window)")
+    ap.add_argument("--n_fft",            type=int,   help="FFT length (bins)")
+    ap.add_argument("--overlap_fraction", type=float, default=0.9, help="Overlap fraction between consequent windows [0,1] (default: 0.9)")
+    ap.add_argument("--window_type",      type=str,   choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT (default: hann)")
+    ap.add_argument("--pad_mode",         type=str,   choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts (default: cycle)")
+    ap.add_argument("--detrend",          type=str,   help="Detrend option for STFT: 'linear', 'constant', or False (default: linear)")
     ap.add_argument("--cutoff_db",        type=float, default=0.0,      help="Minimum dB floor for visualization")
     ap.add_argument("--cutoff_freq",      type=float, default=5500,     help="Maximum frequency to filter spectrogram in Hz (default: 1500 Hz)")
 
