@@ -80,6 +80,8 @@ import multiprocessing as mp
 from multiprocessing import sharedctypes
 from collections import defaultdict
 
+import re   # for text manupulation
+
 import vtk
 import numpy as np
 from scipy.signal import stft, find_peaks
@@ -107,47 +109,54 @@ def view_shared_array(shared_obj):
 
 # ---------------------------------------- Helper Utilities -----------------------------------------------------
 
-def extract_timestep_from_h5_filename(h5_file):
-        """
-        Extract integer timestep values of the current file from filename pattern '*_ts=<int>_...'.
-        Used to sort snapshot files chronologically.
-        """
-        stem = h5_file.stem
+def extract_timestep_from_h5_filename(h5_file: Path) -> int:
+    """Extract integer timestep values of the current file from filename pattern '*_ts=<int>_...'.
 
-        if "_ts=" in stem:
-            return int(stem.split("_ts=")[1].split("_")[0])
-        else:
-            raise ValueError(f"Filename '{h5_file}' does not contain expected '_ts=' pattern.")
-
-def extract_period_from_h5_filename(h5_file):
-        """
-        Extract period_seconds values from filename pattern '_Per<float>'.
-        """
-        stem = h5_file.stem
-
-        # Extract period (ms) if not provided
-        if "_Per" in stem:
-            period_ms = int(stem.split("_Per")[1].split("_")[0]) #period in milliseconds
-            period_seconds = period_ms/1000 #[s]
-        else:
-            raise ValueError(f"Filename '{h5_file}' does not contain expected '_Per' pattern.\nDefine --period_seconds in the CLI.")
+    Used as a sort key to order HDF5 snapshots chronologically.
+    Example: 'result_curcyc_ts=0042_up.h5' → 42
+    """
+    match = re.search(r'_ts=(\d+)', h5_file.stem)
+    if match is None:
+        raise ValueError(
+            f"Filename '{h5_file.name}' does not contain expected '_ts=<int>' pattern."
+        )
+    return int(match.group(1))
 
 
-        return period_seconds
+def extract_sim_params_from_h5_filename(h5_file: Path) -> tuple[float, int]:
+    """Parse cardiac period and timesteps-per-cycle from a snapshot filename.
 
-def extract_timesteps_per_cyc_from_h5_filename(h5_file):
-        """
-        Extract timesteps_per_cyc value from filename pattern '_ts<int>'.
-        """
-        stem = h5_file.stem
+    Expected patterns:
+      '_Per<int>'  — cardiac period in milliseconds  (e.g. '_Per915_')
+      '_ts<int>'   — timesteps per cycle             (e.g. '_ts500_')
 
-        # Extract timestep per cycle
-        if "_ts" in stem:
-            timesteps_per_cyc = int(stem.split("_ts")[1].split("_")[0])
-        else:
-            raise ValueError(f"Filename '{h5_file}' does not contain expected '_ts' pattern.\nDefine --timestep_per_cyc in the CLI.")
+    Returns
+    -------
+    period_seconds : float
+    timesteps_per_cyc : int
+    """
+    stem = h5_file.stem
 
-        return timesteps_per_cyc
+    match_period_ms = re.search(r'_Per(\d+)', stem) # this is in [ms]
+    if match_period_ms is None:
+        raise ValueError(
+            f"Filename '{h5_file.name}' has no '_Per<ms>' pattern. "
+            "Supply --period_seconds on the CLI instead."
+        )
+        
+    period_seconds    = int(match_period_ms.group(1)) / 1000.0  # ms → s
+
+
+    match_ts = re.search(r'_ts(\d+)', stem)
+    if match_ts is None:
+        raise ValueError(
+            f"Filename '{h5_file.name}' has no '_ts<int>' pattern. "
+            "Supply --timesteps_per_cyc on the CLI instead."
+        )
+
+    timesteps_per_cyc = int(match_ts.group(1))
+
+    return period_seconds, timesteps_per_cyc
 
 
 # ---------------------------------------- Mesh Utilities -----------------------------------------------------
@@ -807,22 +816,22 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     # spectrogram_signal[spectrogram_signal > 100] = 100
 
     # Setting plot properties
-    font_size = 20
-    plt.rc('axes', titlesize=16)         # fontsize of the title
-    plt.rc('font', size=font_size)       # controls default text size
-    plt.rc('xtick', labelsize=font_size) # fontsize of the x tick labels
-    plt.rc('ytick', labelsize=font_size) # fontsize of the y tick labels
-    plt.rc('legend', fontsize=font_size) # fontsize of the legend
-    plt.rc('axes', labelsize=16)         # fontsize of the x and y labels
+    font_size = 16
+    plt.rc('axes', titlesize=font_size)     # fontsize of the title
+    plt.rc('font', size=font_size)          # controls default text size
+    plt.rc('xtick', labelsize=font_size)    # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=font_size)    # fontsize of the y tick labels
+    plt.rc('legend', fontsize=font_size)    # fontsize of the legend
+    plt.rc('axes', labelsize=18)     # fontsize of the x and y labels
 
 
-    fig, ax = plt.subplots(1,1, figsize=(16,8))
+    fig, ax = plt.subplots(1,1, figsize=(10,7))
     spectrogram = ax.pcolormesh(bins_Q, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
     
     #----- Set properties
-    ax.set_title(plot_title)
+    ax.set_title(plot_title, fontweight='bold', pad=20)
     #ax.set_xlabel('Time (s)', fontweight='bold', labelpad=0)
-    ax.set_xlabel('Q_inlet (mL/s)', fontweight='bold', labelpad=10)
+    ax.set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
     ax.set_ylabel('Frequency (Hz)', fontweight='bold', labelpad=10)
     ax.set_xlim([xmin, xmax]) 
 
@@ -838,7 +847,7 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
 
     # Set the limit for power colormap
-    spectrogram.set_clim(20, 120)
+    spectrogram.set_clim(40, 120)
 
     
     #---------------- Adding the phases ------------------
@@ -889,41 +898,45 @@ def plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, c
     #---------- Plotting the continuous metrics
 
     # Setting plot properties
-    font_size = 16
-    plt.rc('axes', titlesize=16)         # fontsize of the title
-    plt.rc('font', size=font_size)       # controls default text size
-    plt.rc('xtick', labelsize=font_size) # fontsize of the x tick labels
-    plt.rc('ytick', labelsize=font_size) # fontsize of the y tick labels
-    plt.rc('axes', labelsize=16)         # fontsize of the x and y labels
+    #font_size = 16
+    plt.rc('axes', titlesize=font_size)     # fontsize of the title
+    plt.rc('font', size=font_size)          # controls default text size
+    plt.rc('xtick', labelsize=font_size)    # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=font_size)    # fontsize of the y tick labels
+    plt.rc('axes', labelsize=18)     # fontsize of the x and y labels
 
 
-    fig2, ax2 = plt.subplots(1,3, figsize=(20,8))
+    fig2, ax2 = plt.subplots(1,4, figsize=(20,10)) #plt.subplots(4,1, figsize=(10,24), sharex=True)
+    #fig2.suptitle(plot_title, fontweight='bold', y=0.99) # y adds distance to the title's location
 
-    ax2[0].plot(bins_Q, spectral_metrics['mean_power_lowFreq'],  label='low-freq',  linewidth = 3, color='Cyan')
-    ax2[0].plot(bins_Q, spectral_metrics['mean_power_midFreq'],  label='mid-freq',  linewidth = 3, color='DeepSkyBlue')
-    ax2[0].plot(bins_Q, spectral_metrics['mean_power_highFreq'], label='high-freq', linewidth = 3, color='Blue')
+    ax2[0].plot(bins_Q, spectral_metrics['mean_power_lowFreq'],  label='low-freq',  linewidth = 4, color='paleturquoise')
+    ax2[0].plot(bins_Q, spectral_metrics['mean_power_midFreq'],  label='mid-freq',  linewidth = 4, color='deepskyblue')
+    ax2[0].plot(bins_Q, spectral_metrics['mean_power_highFreq'], label='high-freq', linewidth = 4, color='mediumblue')
     ax2[0].set_ylabel('Mean SPL power (dB)', fontweight='bold', labelpad=10)
-    ax2[0].set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
-    ax2[0].set_ylim([-1, 120]) 
-    ax2[0].set_xlim([xmin, xmax]) 
-    ax2[0].legend(fontsize=10)
+    ax2[0].set_ylim([-1, 120])
+    ax2[0].set_xlim([xmin, xmax])
+    ax2[0].tick_params(labelbottom=False)
+    ax2[0].legend(loc = 'upper left', fontsize=font_size)
 
-    ax2[1].plot(bins_Q, spectral_metrics['peak_freq'], label='Peak frequency', linewidth = 3, color='black')
+    ax2[1].plot(bins_Q, spectral_metrics['peak_freq'], label='Peak frequency', linewidth = 4, color='black')
     ax2[1].set_ylabel('Peak Frequency (Hz)', fontweight='bold', labelpad=10)
-    ax2[1].set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
-    ax2[1].set_ylim([-1, f_high+1]) 
-    ax2[1].set_xlim([xmin, xmax]) 
+    ax2[1].set_ylim([0, f_high+50])
+    ax2[1].set_xlim([xmin, xmax])
+    ax2[1].tick_params(labelbottom=False)
 
-    ax2[2].plot(bins_Q, spectral_metrics['centroid_freq'], linewidth = 3, color='tab:orange')
-    ax2[2].set_ylabel('Centroid Frequency (Hz)', fontweight='bold', labelpad=10)
-    ax2[2].set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
-    ax2[2].set_ylim([-1, 1000]) 
-    ax2[2].set_xlim([xmin, xmax]) 
+    ax2[2].plot(bins_Q, spectral_metrics['centroid_freq'], linewidth = 4, color='tab:orange')
+    ax2[2].set_ylabel('Spectral Centroid (Hz)', fontweight='bold', labelpad=10)
+    ax2[2].set_ylim([-1, 600])
+    ax2[2].set_xlim([xmin, xmax])
+    ax2[2].tick_params(labelbottom=False)
 
+    centroid_slope = np.gradient(spectral_metrics['centroid_freq'], bins_Q)
+    ax2[3].plot(bins_Q, centroid_slope, linewidth = 4, color='tab:red')
+    ax2[3].axhline(0, color='gray', linewidth=1.5, linestyle='--')
+    ax2[3].set_ylabel('d(Centroid)/dQ (Hz·s/mL)', fontweight='bold', labelpad=10)
+    ax2[3].set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
+    ax2[3].set_xlim([xmin, xmax]) 
 
-
-    #----- Set properties
-    fig2.suptitle(plot_title)
 
   
     plt.tight_layout()
@@ -1027,12 +1040,9 @@ def compute_and_save_spectrogram_for_all_ROIs(
             spectrogram_phases, spectral_metrics = classify_spectrogram_phases(spectrogram_data)
 
             # Save spectrogram plot
-            if ROI_type == "sphere":
-                spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_ROI{ROI_start_center_id}to{ROI_end_center_id}_r{ROI_radius}' 
-                
-            elif ROI_type == "cylinder":
-                spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_ROI{ROI_start_center_id}to{ROI_end_center_id}_r{ROI_radius}_h{ROI_height}' 
-                
+            
+            spectrogram_title = f'{case_name}_win{window_length}_ROI{ROI_start_center_id}to{ROI_end_center_id}' 
+            
             plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectral_metrics, spectrogram_title)
 
 
@@ -1079,11 +1089,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
                 spectrogram_phases, spectral_metrics = classify_spectrogram_phases(spectrogram_data)
 
                 # Save spectrogram plot
-                if ROI_type == "sphere":
-                    spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_{ROI_id}_{ROI_type}_r{ROI_radius}' 
-                
-                elif ROI_type == "cylinder":
-                    spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac:.2f}_{ROI_id}_{ROI_type}_r{ROI_radius}_h{ROI_height}' 
+                spectrogram_title = f'{case_name}_win{window_length}_{ROI_id}' 
                 
                 plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectral_metrics, spectrogram_title)
 
@@ -1123,7 +1129,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
         spectrogram_phases, spectral_metrics = classify_spectrogram_phases(spectrogram_data) #f_low=100
 
         # Save spectrogram
-        spectrogram_title = f'{case_name}_specP_win{window_length}_overlap{overlap_frac}_r{ROI_radius}_h{ROI_height}' 
+        spectrogram_title = f'{case_name}_specP_win{window_length}' 
         
         plot_and_save_spectrogram_for_ROI(output_folder_files, output_folder_imgs, case_name, spectrogram_data, spectrogram_phases, spectral_metrics, spectrogram_title)
     
@@ -1269,12 +1275,12 @@ def main():
     period_seconds = args.period_seconds
 
     if timesteps_per_cyc is None:
-        timesteps_per_cyc = extract_timesteps_per_cyc_from_h5_filename(CFD_h5_files[0])
-        print (f"Found timesteps_per_cycle = {timesteps_per_cyc} from CFD results HDF5 file names. \n")
+        _, timesteps_per_cyc = extract_sim_params_from_h5_filename(CFD_h5_files[0])
+        print(f"Found timesteps_per_cycle = {timesteps_per_cyc} from CFD results HDF5 file names. \n")
 
     if period_seconds is None:
-        period_seconds = extract_period_from_h5_filename(CFD_h5_files[0])
-        print (f"Found period (s) = {period_seconds} from CFD results HDF5 file names. \n")
+        period_seconds, _ = extract_sim_params_from_h5_filename(CFD_h5_files[0])
+        print(f"Found period (s) = {period_seconds} from CFD results HDF5 file names. \n")
 
 
     # Run post-processing of assembled CFD results
