@@ -1,0 +1,15 @@
+
+The following have been reloaded with a version change:
+  1) python/3.12.4 => python/3.11.5
+
+
+[info] Mesh file:                         /scratch/ranbar/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data/PTSeg106_base_0p64.h5
+[info] Read CFD results from:             /scratch/ranbar/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/results/PTSeg106_base_0p64_ts10000_cy6_saveFreq1
+[info] Write spectrograms to:             /scratch/ranbar/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess/Spectrogram_wallpressure
+[info] Read spectrogram regions from:   /scratch/ranbar/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess/PTSeg106_base_0p64_spectrogram_regions.csv
+
+[info] Read ROI centers from:  /scratch/ranbar/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data/PTSeg106_base_0p64_centerline_points.csv 
+
+
+ Reading 59998 CFD results HDF5 files in parallel into 1 array of shape [95218, 59998] ... 
+

@@ -403,7 +403,8 @@ def read_spec_regions_from_csv(csv_path: str) -> list:
     int_keys   = {"ROI_start_center_id", "ROI_end_center_id", "ROI_stride"}
     float_keys = {"ROI_radius", "ROI_height"}
     bool_keys  = {"flag_multi_ROI", "flag_save_ROI"}
-    known_keys = int_keys | float_keys | bool_keys
+    str_keys   = {"region_name"}
+    known_keys = int_keys | float_keys | bool_keys | str_keys
 
     data = np.genfromtxt(csv_path, delimiter=",", names=True, dtype=None, encoding="utf-8")
     if data.ndim == 0:
@@ -422,6 +423,8 @@ def read_spec_regions_from_csv(csv_path: str) -> list:
                 region[key] = float(val)
             elif key in bool_keys:
                 region[key] = bool(int(val)) if str(val).strip().lstrip('-').isdigit() else str(val).strip().lower() in ("true", "yes")
+            elif key in str_keys:
+                region[key] = str(val).strip()
         spec_regions.append(region)
 
     return spec_regions
@@ -770,17 +773,17 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
 
     #------------ Define each phase --------------------
 
-    Q_phases = np.full(3, np.nan) # Initialize Qphases as NaNs
+    Q_phases = np.full(4, np.nan) # Initialize Qphases as NaNs
 
     # PHASE 1: First rise in midFreq power
-    idx_nonzero_midFreq_power = np.where(spectral_metrics['mean_power_midFreq'] > 2)[0] # array of indices of positive midFreq powers
+    idx_nonzero_midFreq_power = np.where(spectral_metrics['mean_power_midFreq'] > 10)[0] # array of indices of positive midFreq powers
 
     if len(idx_nonzero_midFreq_power) > 0:
         Q_phases[0] = bins_Q[idx_nonzero_midFreq_power[0]] # first rise in power
 
 
     # PHASE 2: First rise in highFreq power
-    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 2)[0] # array of indices of positive highFreq powers
+    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 10)[0] # array of indices of positive highFreq powers
 
     if len(idx_nonzero_highFreq_power) > 0:
         Q_phases[1] = bins_Q[idx_nonzero_highFreq_power[0]] # first rise in power
@@ -811,7 +814,15 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
     if highFreq_jump_ratio >= 0.25:
         Q_phases[2] = bins_Q[idx_max_highFreq_jump]
 
-    print(f'max jump: {highFreq_jump_ratio:.2f}')
+    # Obtain all the locations where spectral centroid becomes higher that f_low
+    idx_centroid_above_freq_low = np.where(spectral_metrics['centroid_freq'] > 2*f_low)[0]
+
+    if len(idx_centroid_above_freq_low) > 0:
+        # First index
+        idx_phase2 = idx_centroid_above_freq_low[0] 
+        Q_phases[3] = bins_Q[idx_phase2]
+
+
     return Q_phases, spectral_metrics
 
 
@@ -867,10 +878,13 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     #---------------- Adding the phases ------------------
     
     if flag_plot_phases:
-        for (phase, q) in enumerate(Q_phases, start=1):
-            if not np.isnan(q):
-                print(f'Inlet flowrate of Phase {phase} = {q:.2f} mL/s')
-                ax.axvline(q, color="white", linestyle="solid", linewidth=2, alpha=0.7)
+        for (phase, Qphase) in enumerate(Q_phases, start=1):
+            if not np.isnan(Qphase):
+                print(f'Inlet flowrate of Phase {phase} = {Qphase:.2f} mL/s')
+                ax.axvline(Qphase, color="white", linestyle="solid", linewidth=2, alpha=0.7)
+
+                if phase == 4:
+                    ax.axvline(Qphase, color="yellow", linestyle="solid", linewidth=2, alpha=0.7)
 
 
     #----- For customizing the colorbar and axis for figures ----
@@ -977,7 +991,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
     sampling_rate = timesteps_per_cyc/period_seconds # Hz
     STFT_params["sampling_rate"] = sampling_rate 
 
-    print (f"Now computing {spec_quantity} spectrograms for {ROI_type} ROIs with STFT parameters: \n"
+    print (f"Computing {spec_quantity} spectrograms for {ROI_type} ROIs with STFT parameters: \n"
            f"window_length (samples) = {window_length} \n"
            f"overlap_fraction        = {overlap_frac} \n")
 
@@ -1023,8 +1037,10 @@ def compute_and_save_spectrogram_for_all_ROIs(
             # Calculate average spectrogram for all the ROIs combined
             spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = spec_quantity_array_ROI_multi, STFT_params = STFT_params)
             
-            # Construct the title
-            spectrogram_title = f'{case_name}_win{window_length}_ROI{ROI_start_center_id}to{ROI_end_center_id}' 
+            # Construct the title: use region_name from CSV if available, else fall back to ROI ID range
+            region_name = ROI_params.get("region_name")
+            region_label = region_name if region_name else f'ROI{ROI_start_center_id}to{ROI_end_center_id}'
+            spectrogram_title = f'{case_name}_win{window_length}_region{region_label}'
 
             # Save full spectrogram data
             spec_output_npz = Path(output_folder_files) / f"{spectrogram_title}.npz"
@@ -1261,12 +1277,12 @@ def main():
     vol_mesh, _  = assemble_volume_mesh(mesh_file)
 
     # Printing info to log
-    print(f"\n[info] Mesh file:               {mesh_file}")
-    print(f"[info] Read CFD results from:   {input_folder}")
-    print(f"[info] Write spectrograms to:   {output_folder}")
+    print(f"\n[info] Mesh file:                         {mesh_file}")
+    print(f"[info] Read CFD results from:             {input_folder}")
+    print(f"[info] Write spectrograms to:             {output_folder}")
 
     if args.spec_regions_csv is not None:
-        print(f"[info] Read spectrogram regions from: {args.spec_regions_csv}\n")
+        print(f"[info] Read spectrogram regions from:   {args.spec_regions_csv}\n")
 
     if args.ROI_center_csv is not None:
         print(f"[info] Read ROI centers from:  {args.ROI_center_csv} \n")
@@ -1328,7 +1344,7 @@ def main():
     # Computing spectrograms
     for region_idx, region_params in enumerate(spec_regions):
         if len(spec_regions) > 1:
-            print(f"\n[info] ---- Region {region_idx + 1}/{len(spec_regions)} ----")
+            print(f"\n------------- Region {region_idx + 1}/{len(spec_regions)} ---------------------------")
         
         # Override the CLI ROI params if present in the spec_regions_csv file
         region_ROI_params = dict(ROI_params)
