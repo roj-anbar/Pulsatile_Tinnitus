@@ -27,7 +27,7 @@
 #           --mesh_folder        <path_to_case_mesh_data>     \
 #           --output_folder      <path_to_output_folder>      \
 #           --case_name          PTSeg028_base_0p64           \
-#           --ROI_center_csv     <path_to_ROI_CSV_file>       \
+#           --ROI_center_csv     <path_to_centerline_CSV_file>       \
 #           --ROI_radius         4.0                          \
 #
 #
@@ -242,7 +242,7 @@ def read_wallpressure_from_h5_files_parallel(CFD_h5_files, wall_mesh, n_process,
     # Array to hold pressures (n_points, n_times) - written by worker processes
     shared_pressure_ctype = create_shared_array([n_points, n_snapshots])
 
-    print(f"Reading {n_snapshots} CFD results HDF5 files in parallel into 1 array of shape [{n_points}, {n_snapshots}] ... \n")
+    print(f"\n Reading {n_snapshots} CFD results HDF5 files in parallel into 1 array of shape [{n_points}, {n_snapshots}] ... \n")
         
     # Divide all snapshot files into chunks and spread across workers
     time_indices    = list(range(n_snapshots))
@@ -357,9 +357,9 @@ def short_time_fourier(data,
 
 
 # ---------------------------------- ROI Utilities -------------------------------------------
-def read_ROI_points_from_csv(csv_path: str, ROI_type: str) -> np.ndarray:
+def read_ROI_centerlines_from_csv(csv_path: str, ROI_type: str) -> np.ndarray:
     """
-    Read a CSV of ROI points with columns:
+    Read a CSV of ROI centerline points with columns:
     - Points:0, Points:1, Points:2
     - FrenetTangent:0, FrenetTangent:1, FrenetTangent:2
     Uses header names to locate columns.
@@ -384,12 +384,47 @@ def read_ROI_points_from_csv(csv_path: str, ROI_type: str) -> np.ndarray:
         normx, normy, normz = np.zeros_like(x), np.zeros_like(y), np.zeros_like(z) 
 
     else:
-        raiseValueError(f'ROI type {ROI_type} not recognized! Choose from <cylinder> or <sphere>.')
+        raise ValueError(f'ROI type {ROI_type} not recognized! Choose from <cylinder> or <sphere>.')
 
     coords = np.vstack([x,y,z]).T
     normals = np.vstack([normx,normy,normz]).T
 
     return coords, normals
+
+
+def read_spec_regions_from_csv(csv_path: str) -> list:
+    """
+    Read ROI region definitions from a CSV file.
+    Required columns : ROI_start_center_id, ROI_end_center_id, ROI_stride, ROI_radius
+    Optional columns : ROI_height, flag_multi_ROI, flag_save_ROI
+    Any other columns (e.g. region_name) are silently ignored.
+    Returns a list of dicts, one per row, containing only the recognised keys.
+    """
+    int_keys   = {"ROI_start_center_id", "ROI_end_center_id", "ROI_stride"}
+    float_keys = {"ROI_radius", "ROI_height"}
+    bool_keys  = {"flag_multi_ROI", "flag_save_ROI"}
+    known_keys = int_keys | float_keys | bool_keys
+
+    data = np.genfromtxt(csv_path, delimiter=",", names=True, dtype=None, encoding="utf-8")
+    if data.ndim == 0:
+        data = data.reshape(1)   # handle single-row CSV
+
+    spec_regions = []
+    for row in data:
+        region = {}
+        for key in data.dtype.names:
+            if key not in known_keys:
+                continue
+            val = row[key]
+            if key in int_keys:
+                region[key] = int(val)
+            elif key in float_keys:
+                region[key] = float(val)
+            elif key in bool_keys:
+                region[key] = bool(int(val)) if str(val).strip().lstrip('-').isdigit() else str(val).strip().lower() in ("true", "yes")
+        spec_regions.append(region)
+
+    return spec_regions
 
 
 def assemble_quantity_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, var_name, var_array, ROI_params, return_indices=False):
@@ -733,19 +768,19 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
     spectral_metrics = {k: np.array(v) for k, v in spectral_metrics.items()}
 
 
-    #------ Define each phase
+    #------------ Define each phase --------------------
 
-    Q_phases = np.full(3, np.nan)
+    Q_phases = np.full(3, np.nan) # Initialize Qphases as NaNs
 
     # PHASE 1: First rise in midFreq power
-    idx_nonzero_midFreq_power = np.where(spectral_metrics['mean_power_midFreq'] > 5)[0] # array of indices of positive midFreq powers
+    idx_nonzero_midFreq_power = np.where(spectral_metrics['mean_power_midFreq'] > 2)[0] # array of indices of positive midFreq powers
 
     if len(idx_nonzero_midFreq_power) > 0:
         Q_phases[0] = bins_Q[idx_nonzero_midFreq_power[0]] # first rise in power
 
 
     # PHASE 2: First rise in highFreq power
-    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 5)[0] # array of indices of positive highFreq powers
+    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 2)[0] # array of indices of positive highFreq powers
 
     if len(idx_nonzero_highFreq_power) > 0:
         Q_phases[1] = bins_Q[idx_nonzero_highFreq_power[0]] # first rise in power
@@ -753,15 +788,34 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
     
     # PHASE 3: Biggest rise in spectral centroid  
     # Differences between consecutive centroid values with a stride
-    stride = 5
+    stride = 15
     centroid_jump = spectral_metrics['centroid_freq'][stride:] - spectral_metrics['centroid_freq'][:-stride]
     idx_max_centroid_jump = np.argmax(centroid_jump)          # Index of biggest jump
-    Q_phases[2] = bins_Q[idx_max_centroid_jump]
 
+    highFreq_slope = np.gradient(spectral_metrics['mean_power_highFreq'])
+    idx_max_highFreq_slope = np.argmax(highFreq_slope)
+
+    highFreq_jump = spectral_metrics['mean_power_highFreq'][stride:] - spectral_metrics['mean_power_highFreq'][:-stride]
+    idx_max_highFreq_jump = np.argmax(highFreq_jump)          # Index of biggest jump
+
+    # Corresponding indices in the original signal
+    idx_before = idx_max_highFreq_jump  - stride
+    idx_after  = idx_max_highFreq_jump
+
+    # High-frequency power before and after the centroid jump
+    highFreq_before = spectral_metrics['mean_power_highFreq'][idx_before]
+    highFreq_after  = spectral_metrics['mean_power_highFreq'][idx_after]
+
+    highFreq_jump_ratio = (highFreq_after - highFreq_before) / abs(highFreq_before)
+    
+    if highFreq_jump_ratio >= 0.25:
+        Q_phases[2] = bins_Q[idx_max_highFreq_jump]
+
+    print(f'max jump: {highFreq_jump_ratio:.2f}')
     return Q_phases, spectral_metrics
 
 
-def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data, Q_phases, spectral_metrics, plot_title, flag_plot_phases=True):
+def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data, Q_phases, spectral_metrics, analysis_params, plot_title, flag_plot_phases=True):
     """
     Plot and save spectrograms and spectral metrics as PNG files.
     """
@@ -789,7 +843,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     spectrogram = ax.pcolormesh(bins_Q, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
     
     #----- Set properties
-    ax.set_xlim([bins_Q[0]-0.01, bins_Q[-1]+0.03])
+    ax.set_xlim([analysis_params['Q_min'], analysis_params['Q_max']])
     ax.set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
     ax.set_ylabel('Frequency (Hz)',   fontweight='bold', labelpad=10)
     ax.set_title(plot_title,          fontweight='bold', pad=20)
@@ -797,9 +851,9 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
 
     # Set different limits based on the case
     if 'PTSeg043' in case_name:
-        ax.set_ylim([0, 1000])
+        ax.set_ylim([0, analysis_params['freq_mid']])
     else:
-        ax.set_ylim([0, freqs[-1]+5])
+        ax.set_ylim([0, analysis_params['freq_max']])
     
 
     #----- Adding the colorbar
@@ -807,14 +861,15 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
 
     # Set the limit for power colormap
-    spectrogram.set_clim(40, 120)
+    spectrogram.set_clim(analysis_params['SPL_db_min'], analysis_params['SPL_db_max'])
 
     
     #---------------- Adding the phases ------------------
     
     if flag_plot_phases:
-        for q in Q_phases:
+        for (phase, q) in enumerate(Q_phases, start=1):
             if not np.isnan(q):
+                print(f'Inlet flowrate of Phase {phase} = {q:.2f} mL/s')
                 ax.axvline(q, color="white", linestyle="solid", linewidth=2, alpha=0.7)
 
 
@@ -853,22 +908,29 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
 
 
     fig2, ax2 = plt.subplots(1,2, figsize=(20,8)) #plt.subplots(4,1, figsize=(10,24), sharex=True)
-    fig2.suptitle(plot_title, fontweight='bold', y=0.99) # y adds distance to the title's location
+    fig2.suptitle(plot_title, y=0.99)             # y adds distance to the title's location
 
     # Subplot 1: Banded SPL powers
     ax2[0].plot(bins_Q, spectral_metrics['mean_power_lowFreq'],  label='low-freq',  linewidth = 4, color='paleturquoise')
     ax2[0].plot(bins_Q, spectral_metrics['mean_power_midFreq'],  label='mid-freq',  linewidth = 4, color='deepskyblue')
     ax2[0].plot(bins_Q, spectral_metrics['mean_power_highFreq'], label='high-freq', linewidth = 4, color='mediumblue')
-    ax2[0].set_ylim([-1, 120])
-    ax2[0].set_xlim([bins_Q[0]-0.02, bins_Q[-1]+0.04])
+
+    ax2[0].set_ylim([-1, analysis_params['SPL_db_max']])
+    ax2[0].set_xlim([analysis_params['Q_min'], analysis_params['Q_max']])
     ax2[0].set_ylabel('Mean SPL power (dB)', fontweight='bold', labelpad=10)
     ax2[0].legend(loc = 'upper left', fontsize=font_size)
+    for q in Q_phases:
+        if not np.isnan(q):
+            ax2[0].axvline(q, color="gray", linestyle="solid", linewidth=0.8, alpha=0.7)
 
     # Subplot 2: Spectral centroid
     ax2[1].plot(bins_Q, spectral_metrics['centroid_freq'], linewidth = 4, color='black')
     ax2[1].set_ylim([-1, 500])
-    ax2[1].set_xlim([bins_Q[0]-0.02, bins_Q[-1]+0.04])
+    ax2[1].set_xlim([analysis_params['Q_min'], analysis_params['Q_max']])
     ax2[1].set_ylabel('Spectral Centroid (Hz)', fontweight='bold', labelpad=10)
+    for q in Q_phases:
+        if not np.isnan(q):
+            ax2[1].axvline(q, color="gray", linestyle="solid", linewidth=0.8, alpha=0.7)
 
     plt.tight_layout()
     plt.savefig(Path(output_folder_imgs) / f"specMetrics_{plot_title}.png")
@@ -923,7 +985,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
     #----------------- Case 1: CSV mode --------------------
     # Coordinates of multiple points given in a CSV file
     if ROI_center_csv is not None:
-        ROI_centers, ROI_normals = read_ROI_points_from_csv(ROI_center_csv, ROI_type)
+        ROI_centers, ROI_normals = read_ROI_centerlines_from_csv(ROI_center_csv, ROI_type)
         
         #print(f"Loaded {ROI_centers.shape[0]} ROI points from {ROI_center_csv}: \n")
         
@@ -975,7 +1037,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
             Q_phases, spectral_metrics = classify_spectrogram_phases(spectrogram_data_filt, spectral_analysis_params)
 
             # Plot spectrograms and metrics
-            plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data_filt, Q_phases, spectral_metrics, spectrogram_title)
+            plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data_filt, Q_phases, spectral_metrics, spectral_analysis_params, spectrogram_title)
 
 
             # -------- For plotting the wall pressure signal for individual nodes -------------
@@ -1030,7 +1092,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
                 Q_phases, spectral_metrics = classify_spectrogram_phases(spectrogram_data_filt, spectral_analysis_params)
 
                 # Plot spectrograms and metrics
-                plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data_filt, Q_phases, spectral_metrics, spectrogram_title)
+                plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data_filt, Q_phases, spectral_metrics, spectral_analysis_params, spectrogram_title)
 
                 """
                 # -------- For plotting the wall pressure signal for individual nodes -------------
@@ -1079,7 +1141,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
         Q_phases, spectral_metrics = classify_spectrogram_phases(spectrogram_data_filt, spectral_analysis_params)
 
         # Plot spectrograms and metrics
-        plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data_filt, Q_phases, spectral_metrics, spectrogram_title)
+        plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data_filt, Q_phases, spectral_metrics, spectral_analysis_params, spectrogram_title)
     
 
     print (f'\nFinished computing and saving spectrograms.')
@@ -1110,8 +1172,9 @@ def parse_args():
     ROI_group.add_argument("--ROI_center_coord", nargs=3,  type=float, metavar=("X", "Y", "Z"), help="XYZ coordinates for a single ROI center (mesh units)")
     ROI_group.add_argument("--ROI_center_csv",   type=str, help="CSV file with multiple ROI points; coords columns = Points:0/1/2")
     
+    ap.add_argument("--spec_regions_csv",    type=str,   default=None,      help="CSV file defining multiple anatomical regions to process for spectrograms. Required columns: region_name, ROI_start_center_id, ROI_end_center_id, ROI_stride, ROI_radius. Optional columns: ROI_height, flag_multi_ROI, flag_save_ROI.")
     ap.add_argument("--ROI_type",            type=str,   default="cylinder", choices=["point","sphere","cylinder"], help="Type of ROI shape")
-    ap.add_argument("--ROI_radius",          type=float, required=True,      help="Radius of ROI in mesh units (mm in most cases)")
+    ap.add_argument("--ROI_radius",          type=float, default=None,       help="Radius of ROI in mesh units (mm in most cases). Required unless --spec_regions_csv is used.")
     ap.add_argument("--ROI_height",          type=float, default=2,          help="Height of cylindrical ROI in mesh units (mm in most cases)")
     ap.add_argument("--ROI_start_center_id", type=int,   default=1,          help="ROI center ID of the start of the region of inerest")
     ap.add_argument("--ROI_end_center_id",   type=int,   default=10,         help="ROI center ID of the end of the region of inerest")
@@ -1131,13 +1194,14 @@ def parse_args():
 
 
     # Spectral analysis parameters
-    ap.add_argument("--cutoff_db",     type=float, default=0.0,      help="Minimum dB floor for visualization")
-    ap.add_argument("--freq_low",      type=float, default=100,      help="Upper threshold for low-frequency band in Hz (default: 100 Hz)")
-    ap.add_argument("--freq_mid",      type=float, default=1000,     help="Upper threshold for mid-frequency band in Hz (default: 1000 Hz)")
-    ap.add_argument("--freq_max",      type=float, default=5000,     help="Maximum frequency to filter spectrogram in Hz (default: 5000 Hz)")
-    ap.add_argument("--flowrate_min",  type=float, default=2.0,      help="Lower inlet flowrate limit for analysis window in mL/s (default: 2.0)")
-    ap.add_argument("--flowrate_max",  type=float, default=10.0,     help="Upper inlet flowrate limit for analysis window in mL/s (default: 2.0)")
-
+    ap.add_argument("--cutoff_db",          type=float, default=0.0,      help="Minimum dB floor for visualization")
+    ap.add_argument("--freq_low",           type=float, default=100,      help="Upper threshold for low-frequency band in Hz (default: 100 Hz)")
+    ap.add_argument("--freq_mid",           type=float, default=1000,     help="Upper threshold for mid-frequency band in Hz (default: 1000 Hz)")
+    ap.add_argument("--freq_max",           type=float, default=5000,     help="Maximum frequency to filter spectrogram in Hz (default: 5000 Hz)")
+    ap.add_argument("--flowrate_min",       type=float, default=2.0,      help="Lower inlet flowrate limit for analysis window in mL/s (default: 2.0)")
+    ap.add_argument("--flowrate_max",       type=float, default=10.0,     help="Upper inlet flowrate limit for analysis window in mL/s (default: 2.0)")
+    ap.add_argument("--power_SPL_db_min",   type=float, default=40.0,     help="Lower SPL power limit for spectrogram colormap in dB (default: 40)")
+    ap.add_argument("--power_SPL_db_max",   type=float, default=120.0,    help="Upper SPL power limit for spectrogram colormap in dB (default: 120)")
 
     return ap.parse_args()
 
@@ -1182,26 +1246,33 @@ def main():
         "detrend": args.detrend}
     
     spectral_analysis_params = {
-        "cutoff_db": args.cutoff_db,
-        "freq_low": args.freq_low,
-        "freq_mid": args.freq_mid,
-        "freq_max": args.freq_max,
-        "Q_min":     args.flowrate_min,
-        "Q_max":     args.flowrate_max}
+        "cutoff_db":  args.cutoff_db,
+        "freq_low":   args.freq_low,
+        "freq_mid":   args.freq_mid,
+        "freq_max":   args.freq_max,
+        "Q_min":      args.flowrate_min,
+        "Q_max":      args.flowrate_max,
+        "SPL_db_min": args.power_SPL_db_min,
+        "SPL_db_max": args.power_SPL_db_max}
 
     # Assemble mesh
     mesh_file = list(Path(mesh_folder).glob('*.h5'))[0]
     surf_mesh = assemble_surface_mesh(mesh_file)
     vol_mesh, _  = assemble_volume_mesh(mesh_file)
 
+    # Printing info to log
     print(f"\n[info] Mesh file:               {mesh_file}")
     print(f"[info] Read CFD results from:   {input_folder}")
     print(f"[info] Write spectrograms to:   {output_folder}")
+
+    if args.spec_regions_csv is not None:
+        print(f"[info] Read spectrogram regions from: {args.spec_regions_csv}\n")
 
     if args.ROI_center_csv is not None:
         print(f"[info] Read ROI centers from:  {args.ROI_center_csv} \n")
     else:
         print(f"[info] Read ROI center from:   {args.ROI_center_coord} \n")
+
 
     
     # Reading the input files for quantity used to generate spectrograms
@@ -1242,25 +1313,41 @@ def main():
         print(f"Found timesteps_per_cycle = {timesteps_per_cyc} from CFD results HDF5 file names. \n")
 
 
+    # If --spec_regions_csv is provided, load all regions from the CSV so H5 files are reused for every region without re-reading from disk.
+    # Each CSV row overrides the matching ROI_params keys for that region.
+    # Without --spec_regions_csv the list holds a single empty dict, so the CLI args are used for single-region usage.
+    if args.spec_regions_csv is not None:
+        spec_regions = read_spec_regions_from_csv(args.spec_regions_csv)
+    else:
+        spec_regions = [{}]   # single region, no overrides
+
+
     # Run post-processing of assembled CFD results
     print (f"Performing post-processing computation on {args.n_process} cores ... \n" )
 
+    # Computing spectrograms
+    for region_idx, region_params in enumerate(spec_regions):
+        if len(spec_regions) > 1:
+            print(f"\n[info] ---- Region {region_idx + 1}/{len(spec_regions)} ----")
+        
+        # Override the CLI ROI params if present in the spec_regions_csv file
+        region_ROI_params = dict(ROI_params)
+        region_ROI_params.update(region_params)
 
-    # Computing spectrograms 
-    compute_and_save_spectrogram_for_all_ROIs(
-                        case_name = args.case_name,
-                        output_folder_files = output_folder_files,
-                        output_folder_imgs = output_folder_imgs,
-                        output_folder_ROIs = output_folder_ROIs,
-                        surf_mesh = surf_mesh,
-                        vol_mesh = vol_mesh,
-                        spec_quantity = args.spec_quantity,
-                        spec_quantity_array = spec_quantity_array,
-                        period_seconds = period_seconds,
-                        timesteps_per_cyc = timesteps_per_cyc,
-                        ROI_params = ROI_params,
-                        STFT_params = short_time_fourier_params,
-                        spectral_analysis_params = spectral_analysis_params)
+        compute_and_save_spectrogram_for_all_ROIs(
+                            case_name                = args.case_name,
+                            output_folder_files      = output_folder_files,
+                            output_folder_imgs       = output_folder_imgs,
+                            output_folder_ROIs       = output_folder_ROIs,
+                            surf_mesh                = surf_mesh,
+                            vol_mesh                 = vol_mesh,
+                            spec_quantity            = args.spec_quantity,
+                            spec_quantity_array      = spec_quantity_array,
+                            period_seconds           = period_seconds,
+                            timesteps_per_cyc        = timesteps_per_cyc,
+                            ROI_params               = region_ROI_params,
+                            STFT_params              = short_time_fourier_params,
+                            spectral_analysis_params = spectral_analysis_params)
 
 if __name__ == '__main__':
     main()
