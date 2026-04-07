@@ -32,7 +32,7 @@
 set -euo pipefail
 
 # ---------------------------------- Define Paths -------------------------------------------------------------------------------
-CASE=PTSeg043_noLabbe_base                                             # Case name
+CASE=PTSeg028_base_0p64                                             # Case name
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE             # Parent directory of the case
 MESH="$BASE_DIR/step1_CFD/data"                                     # Path to mesh data folder containing the h5 mesh
 CENTERLINE="$MESH/${CASE}_centerline_points.csv"                    # Path to centerline csv file used to construct ROIs
@@ -81,13 +81,14 @@ python "$SCRIPT" \
     --spec_quantity         "wallpressure" \
     --window_length         2732 \
     --ROI_type              "cylinder" \
-    --flag_multi_ROI        \
     --ROI_radius            8 \
     --ROI_stride            4 \
-    --ROI_start_center_id   50 \
-    --ROI_end_center_id     150
+    --ROI_start_center_id   1030 \
+    --ROI_end_center_id     1200 \
+    --flag_multi_ROI        
 #    --flag_save_ROI
 #    --timesteps_per_cyc 10000 
+
 
 # Region 2: Transverse Sinus
 python "$SCRIPT" \
@@ -99,11 +100,11 @@ python "$SCRIPT" \
     --spec_quantity         "wallpressure" \
     --window_length         2732 \
     --ROI_type              "cylinder" \
-    --flag_multi_ROI        \
     --ROI_radius            8 \
     --ROI_stride            4 \
-    --ROI_start_center_id   350 \
-    --ROI_end_center_id     430
+    --ROI_start_center_id   772 \
+    --ROI_end_center_id     900 \
+    --flag_multi_ROI        
 
 
 
@@ -117,11 +118,11 @@ python "$SCRIPT" \
     --spec_quantity         "wallpressure" \
     --window_length         2732 \
     --ROI_type              "cylinder" \
-    --flag_multi_ROI        \
     --ROI_radius            8 \
-    --ROI_stride            4 \
-    --ROI_start_center_id   462 \
-    --ROI_end_center_id     608 \
+    --ROI_stride            2 \
+    --ROI_start_center_id   627 \
+    --ROI_end_center_id     756 \
+    --flag_multi_ROI        
 
 
 # Region 4: Post-stenotic Dilatation
@@ -134,11 +135,11 @@ python "$SCRIPT" \
     --spec_quantity         "wallpressure" \
     --window_length         2732 \
     --ROI_type              "cylinder" \
-    --flag_multi_ROI        \
-    --ROI_radius            8 \
+    --ROI_radius            10 \
     --ROI_stride            2 \
-    --ROI_start_center_id   1162 \
-    --ROI_end_center_id     1232
+    --ROI_start_center_id   532 \
+    --ROI_end_center_id     610 \
+    --flag_multi_ROI        
 
 
 # Region 5: Sigmoid Sinus
@@ -152,10 +153,10 @@ python "$SCRIPT" \
     --window_length         2732 \
     --ROI_type              "cylinder" \
     --flag_multi_ROI        \
-    --ROI_radius            8 \
-    --ROI_stride            2 \
-    --ROI_start_center_id   1072 \
-    --ROI_end_center_id     1150 \
+    --ROI_radius            10 \
+    --ROI_stride            4 \
+    --ROI_start_center_id   425 \
+    --ROI_end_center_id     520 \
     --flag_save_ROI
 
 
@@ -170,12 +171,11 @@ python "$SCRIPT" \
     --spec_quantity         "wallpressure" \
     --window_length         2732 \
     --ROI_type              "cylinder" \
-    --flag_multi_ROI        \
     --ROI_radius            10 \
-    --ROI_stride            4 \
-    --ROI_start_center_id   986 \
-    --ROI_end_center_id     1060 
-
+    --ROI_stride            2 \
+    --ROI_start_center_id   365 \
+    --ROI_end_center_id     410 \
+    --flag_multi_ROI        
 
 
 
