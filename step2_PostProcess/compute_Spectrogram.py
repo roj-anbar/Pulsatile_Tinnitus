@@ -741,21 +741,6 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
       2: mid-frequency activity (harmonics)
       3: strong high-frequency activity (turbulent-like)
     """
-    
-    # Internal helper dunction
-    def _rolling_variance(signal, window_size, padding = True):
-        # To calculate the rolling variance of a signal over a window of defined length.
-        
-        rolling_windows = np.lib.stride_tricks.sliding_window_view(signal, window_size)   # shape (N-W+1, W)
-        rolling_var     = np.var(rolling_windows, axis=1)                   # variance along window axis
-        #rolling_rms    = np.sqrt(np.mean(windows**2, axis=1))
-
-        # Padding the rolling variance to have same length as original signal
-        if padding:
-            pad = window_size // 2
-            rolling_var = np.pad(rolling_var, (pad, window_size - 1 - pad), mode='edge')
-
-        return rolling_var
 
     # Unpack parameters
     f_low  = spectral_analysis_params.get("freq_low")
@@ -792,55 +777,28 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
     Q_phases = np.full(3, np.nan) # Initialize Qphases as NaNs
 
     # PHASE 1: First rise in midFreq power
-    idx_nonzero_midFreq_power = np.where(spectral_metrics['mean_power_midFreq'] > 5)[0] # array of indices of positive midFreq powers
+    idx_nonzero_midFreq_power = np.where(spectral_metrics['mean_power_midFreq'] > 2)[0] # array of indices of positive midFreq powers
 
     if len(idx_nonzero_midFreq_power) > 0:
         Q_phases[0] = bins_Q[idx_nonzero_midFreq_power[0]] # first rise in power
 
 
     # PHASE 2: First rise in highFreq power
-    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 5)[0] # array of indices of positive highFreq powers
+    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 2)[0] # array of indices of positive highFreq powers
 
     if len(idx_nonzero_highFreq_power) > 0:
         Q_phases[1] = bins_Q[idx_nonzero_highFreq_power[0]] # first rise in power
 
     
     # PHASE 3: Sustained centroid freq above f_low
-    centroid_below_lowFreq = spectral_metrics['centroid_freq'] <= f_low
-    idx_centroid_below_lowFreq = np.where(centroid_below_lowFreq)[0]
+    centroid_above_lowFreq = spectral_metrics['centroid_freq'] > f_low
+    idx_centroid_below_lowFreq = np.where(~centroid_above_lowFreq)[0]
 
-    # if len(idx_below_lowFreq) = len(spectral_centroid) never above f_low → Phase 3 never occurs
-    if len(idx_centroid_below_lowFreq) < len(spectral_metrics['centroid_freq']):
-        idx_phase3 = idx_centroid_below_lowFreq[-1] + 5 # last index below + 1
+
+    if centroid_above_lowFreq[-1]:  # centroid stays above f_low until end
+        start = idx_centroid_below_lowFreq[-1] + 1
+        idx_phase3 = start - 1
         Q_phases[2] = bins_Q[idx_phase3]
-
-    """
-    # Compute the rolling variance of highFreq power over a window 
-    var_window = spectral_analysis_params.get("rolling_var_window", 10)
-    slope_power_highFreq = np.gradient(spectral_metrics['mean_power_highFreq'])
-    var_slope_power_highFreq = _rolling_variance(slope_power_highFreq, var_window)
-
-    # Normalize the variance
-    var_slope_power_highFreq_normal = var_slope_power_highFreq / np.max(var_slope_power_highFreq)
-    spectral_metrics['var_slope_power_highFreq'] = var_slope_power_highFreq_normal
-
-    collapse_threshold = 0.3
-    idx_peak = np.argmax(var_slope_power_highFreq_normal)
-    idx_phase3 = None
-    for i in range(idx_peak, len(var_slope_power_highFreq_normal)):
-        if np.all(var_slope_power_highFreq_normal[i:] < collapse_threshold):
-            idx_phase3 = i
-            break
-                
-    if idx_phase3 is not None:
-        Q_phases[2] = bins_Q[idx_phase3]
-
-    slope_centroid = np.gradient(spectral_metrics['centroid_freq'])
-    var_slope_centroid = _rolling_variance(slope_centroid, var_window)
-    spectral_metrics['var_slope_centroid'] = var_slope_centroid
-    # Find all local peaks
-    peaks_idx, _ = find_peaks(var_slope_centroid)
-    """
 
 
     return Q_phases, spectral_metrics
@@ -870,7 +828,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     plt.rc('axes',   labelsize=18)     # fontsize of the x and y labels
 
 
-    fig, ax = plt.subplots(3,1, figsize=(10, 21), sharex = True)
+    fig, ax = plt.subplots(1,3, figsize=(24, 8))
     fig.suptitle(plot_title, fontweight='bold', y=0.99)             # y adds distance to the title's location
     #ax.set_title(plot_title,fontweight='bold', pad=20)
 
@@ -912,8 +870,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     #------- Common x-axis settings
     for a in ax:
         a.set_xlim([analysis_params['Q_min'], analysis_params['Q_max']])
-        
-    ax[2].set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
+        a.set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
 
     #--------- Adding phase lines 
     if flag_plot_phases:

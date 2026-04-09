@@ -111,20 +111,20 @@ python "$SCRIPT" \
 # Note1: You HAVE to load the modules first from terminal then run below
 # Note2: You HAVE to comment this part if submitting this file through sbatch
 
-python compute_Spectrogram.py \
-    --case_name             "PTSeg106_base_0p64" \
-    --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/results/PTSeg106_base_0p64_ts10000_cy6_saveFreq1/" \
-    --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data" \
-    --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess" \
-    --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data/PTSeg106_base_0p64_centerline_points.csv" \
-    --spec_quantity         "wallpressure" \
-    --window_length         2732 \
-    --ROI_type              "cylinder" \
-    --flag_multi_ROI        \
-    --ROI_start_center_id   1100 \
-    --ROI_end_center_id     1183 \
-    --ROI_radius            10 \
-    --ROI_stride            4
+# python compute_Spectrogram.py \
+#     --case_name             "PTSeg106_base_0p64" \
+#     --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/results/PTSeg106_base_0p64_ts10000_cy6_saveFreq1/" \
+#     --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data" \
+#     --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess" \
+#     --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data/PTSeg106_base_0p64_centerline_points.csv" \
+#     --spec_quantity         "wallpressure" \
+#     --window_length         2732 \
+#     --ROI_type              "cylinder" \
+#     --flag_multi_ROI        \
+#     --ROI_start_center_id   1100 \
+#     --ROI_end_center_id     1183 \
+#     --ROI_radius            10 \
+#     --ROI_stride            4
 
 
 #    --spec_regions_csv      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/PTSeg028_base_0p64_spectrogram_regions.csv" \
