@@ -147,34 +147,35 @@ def extract_sim_params_from_h5_filename(h5_file: Path) -> tuple[float, int]:
 
 # ---------------------------------------- Mesh Utilities -----------------------------------------------------
 
-def assemble_surface_mesh(mesh_file:Path) -> pv.PolyData:
+def load_surface_mesh(mesh_file:Path) -> pv.PolyData:
     """
-    Create a Pyvista PolyData surface from the wall mesh stored in a BSLSolver-style HDF5.
+    Build a Pyvista PolyData surface from the wall mesh stored in a BSLSolver-style HDF5 file.
 
-    Expects datasets:
-      Mesh/Wall/coordinates : (Npoints, 3) float
-      Mesh/Wall/topology    : (Ncells, 3 or 4) int - triangles expected
-      Mesh/Wall/pointIds    : (Npoints,) int       - mapping back to volume point numbering
+    Expects HDF5 layout:
+      Mesh/Wall/coordinates : (Npoints, 3) float    – XYZ node positions
+      Mesh/Wall/topology    : (Ncells, 3 or 4) int  – triangle connectivity
+      Mesh/Wall/pointIds    : (Npoints,) int        – global volume-mesh point IDs
     """
 
     with h5py.File(mesh_file, 'r') as h5:
-        wall_coords = np.array(h5['Mesh/Wall/coordinates'])  # coords of wall points (n_points, 3)
-        wall_cells  = np.array(h5['Mesh/Wall/topology'])     # connectivity of wall points (n_cells, 3) -> triangles
-        wall_pids   = np.array(h5['Mesh/Wall/pointIds'])     # mapping to volume point IDs (n_points,)
+        coords = np.array(h5['Mesh/Wall/coordinates'])      # coords of wall points (n_points, 3)
+        cells  = np.array(h5['Mesh/Wall/topology'])         # connectivity of wall points (n_cells, 3) -> triangles
+        point_ids   = np.array(h5['Mesh/Wall/pointIds'])    # mapping to volume point IDs (n_points,)
         
     # Create connectivity array compatible with VTK --> requires a size prefix per cell (here '3' for triangles)
-    n_cells        = wall_cells.shape[0]
-    node_per_cell  = 3      # the surface cells are triangles with size of 3 (3 nodes per elem)
-    cell_size      = np.full((n_cells, 1), node_per_cell, dtype=np.int64) # array of size (n_cells, 1) filled with 3 
-    cells_vtk      = np.hstack([cell_size, wall_cells]).ravel() # horizontal stacking of arrays / ravel: flattens the array into a 1d array
+    n_cells        = cells.shape[0]
+    node_per_cell  = 3                                                      # the surface cells are triangles with size of 3 (3 nodes per elem)
+    cell_size      = np.full((n_cells, 1), node_per_cell, dtype=np.int64)   # array of size (n_cells, 1) filled with 3 
+    cells_vtk      = np.hstack([cell_size, cells]).ravel()                  # horizontal stacking of arrays / ravel: flattens the array into a 1d array
         
     # Build surface and attach point ID
-    surf = pv.PolyData(wall_coords, cells_vtk)
-    surf.point_data['vtkOriginalPtIds'] = wall_pids
+    surf = pv.PolyData(coords, cells_vtk)
+    surf.point_data['vtkOriginalPtIds'] = point_ids
 
     return surf
 
-def assemble_volume_mesh(mesh_file: Path) -> pv.UnstructuredGrid:
+
+def load_volume_mesh(mesh_file: Path) -> pv.UnstructuredGrid:
     """
     Create a PyVista UnstructuredGrid from the volumetric mesh stored in a BSLSolver-style HDF5.
 
@@ -1225,10 +1226,10 @@ def main():
         "SPL_db_min": args.power_SPL_db_min,
         "SPL_db_max": args.power_SPL_db_max}
 
-    # Assemble mesh
+    # Load mesh
     mesh_file = list(Path(mesh_folder).glob('*.h5'))[0]
-    surf_mesh = assemble_surface_mesh(mesh_file)
-    vol_mesh, _  = assemble_volume_mesh(mesh_file)
+    surf_mesh    = load_surface_mesh(mesh_file)
+    vol_mesh, _  = load_volume_mesh(mesh_file)
 
     # Printing info to log
     print(f"\n[info] Mesh file:                         {mesh_file}")
