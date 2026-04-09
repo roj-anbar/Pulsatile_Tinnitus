@@ -34,8 +34,8 @@ set -euo pipefail
 # ---------------------------------- Define Paths -------------------------------------------------------------------------------
 CASE=PTSeg028_base_0p64                                             # Case name
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE             # Parent directory of the case
-MESH="$BASE_DIR/step1_CFD/data"                                     # Path to mesh data folder containing the h5 mesh
-CENTERLINE="$MESH/${CASE}_centerline_points.csv"                    # Path to centerline csv file used to construct ROIs
+MESH_FOLDER="$BASE_DIR/step1_CFD/data"                              # Path to mesh data folder containing the h5 mesh
+CENTERLINE="$MESH_FOLDER/${CASE}_centerline_points.csv"                    # Path to centerline csv file used to construct ROIs
 INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq1"   # Path to CFD results folder containing timeseries HDF5 files
 OUTPUT="$BASE_DIR/step2_PostProcess"                                # Path to saving spectrogram files
 SPECTROGRAM_REGIONS="$OUTPUT/${CASE}_spectrogram_regions.csv"       # Path to spectrogram regions csv file used to generate regional specs
@@ -75,7 +75,7 @@ export PYVISTA_OFF_SCREEN=true                              #tells pyvista to us
 python "$SCRIPT" \
     --case_name             "$CASE" \
     --input_folder          "$INPUT" \
-    --mesh_folder           "$MESH" \
+    --mesh_folder           "$MESH_FOLDER" \
     --output_folder         "$OUTPUT" \
     --ROI_center_csv        "$CENTERLINE" \
     --spec_regions_csv      "$SPECTROGRAM_REGIONS" \
@@ -92,7 +92,7 @@ python "$SCRIPT" \
 #python "$SCRIPT" \
 #    --case_name             "$CASE" \
 #    --input_folder          "$INPUT" \
-#    --mesh_folder           "$MESH" \
+#    --mesh_folder           "$MESH_FOLDER" \
 #    --output_folder         "$OUTPUT" \
 #    --centerline_csv        "$CENTERLINE" \
 #    --spec_quantity         "wallpressure" \

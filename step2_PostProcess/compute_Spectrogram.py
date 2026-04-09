@@ -397,15 +397,15 @@ def read_spec_regions_from_csv(csv_path: str) -> list:
     """
     Read ROI region definitions from a CSV file.
     Required columns : ROI_start_center_id, ROI_end_center_id, ROI_stride, ROI_radius
-    Optional columns : region_abbrev, ROI_height, flag_multi_ROI, flag_save_ROI
+    Optional columns : region_shortname, ROI_height, flag_multi_ROI, flag_save_ROI
     Any other columns (e.g. region_name) are silently ignored.
-    region_abbrev is used for constructing the spectrograms labels.
+    region_shortname is used for constructing the spectrograms labels.
     Returns a list of dicts, one per row, containing only the recognised keys.
     """
     int_keys   = {"ROI_start_center_id", "ROI_end_center_id", "ROI_stride"}
     float_keys = {"ROI_radius", "ROI_height"}
     bool_keys  = {"flag_multi_ROI", "flag_save_ROI"}
-    str_keys   = {"region_abbrev"}
+    str_keys   = {"region_shortname"}
     known_keys = int_keys | float_keys | bool_keys | str_keys
 
     data = np.genfromtxt(csv_path, delimiter=",", names=True, dtype=None, encoding="utf-8")
@@ -992,8 +992,8 @@ def compute_and_save_spectrogram_for_all_ROIs(
             # Calculate average spectrogram for all the ROIs combined
             spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = spec_quantity_array_ROI_multi, STFT_params = STFT_params)
             
-            # Construct the title: use region_abbrev from CSV if available, else fall back to ROI ID range
-            region_name = ROI_params.get("region_abbrev")
+            # Construct the title: use region_shortname from CSV if available, else fall back to ROI ID range
+            region_name = ROI_params.get("region_shortname")
             region_label = region_name if region_name else f'ROI{ROI_start_center_id}to{ROI_end_center_id}'
             spectrogram_title = f'{case_name}_win{window_length}_region{region_label}'
 
@@ -1232,6 +1232,7 @@ def main():
     vol_mesh, _  = load_volume_mesh(mesh_file)
 
     # Printing info to log
+    print("=" * 200 + "\n")
     print(f"\n[info] Mesh file:                         {mesh_file}")
     print(f"[info] Read CFD results from:             {input_folder}")
     print(f"[info] Write spectrograms to:             {output_folder}")
@@ -1243,7 +1244,8 @@ def main():
         print(f"[info] Read ROI centers from:          {args.ROI_center_csv} \n")
     else:
         print(f"[info] Read ROI center from:           {args.ROI_center_coord} \n")
-
+    
+    print("=" * 200 + "\n")
 
     
     # Reading the input files for quantity used to generate spectrograms
