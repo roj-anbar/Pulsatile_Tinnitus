@@ -396,14 +396,15 @@ def read_spec_regions_from_csv(csv_path: str) -> list:
     """
     Read ROI region definitions from a CSV file.
     Required columns : ROI_start_center_id, ROI_end_center_id, ROI_stride, ROI_radius
-    Optional columns : ROI_height, flag_multi_ROI, flag_save_ROI
+    Optional columns : region_abbrev, ROI_height, flag_multi_ROI, flag_save_ROI
     Any other columns (e.g. region_name) are silently ignored.
+    region_abbrev is used for constructing the spectrograms labels.
     Returns a list of dicts, one per row, containing only the recognised keys.
     """
     int_keys   = {"ROI_start_center_id", "ROI_end_center_id", "ROI_stride"}
     float_keys = {"ROI_radius", "ROI_height"}
     bool_keys  = {"flag_multi_ROI", "flag_save_ROI"}
-    str_keys   = {"region_name"}
+    str_keys   = {"region_abbrev"}
     known_keys = int_keys | float_keys | bool_keys | str_keys
 
     data = np.genfromtxt(csv_path, delimiter=",", names=True, dtype=None, encoding="utf-8")
@@ -741,6 +742,21 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
       3: strong high-frequency activity (turbulent-like)
     """
     
+    # Internal helper dunction
+    def _rolling_variance(signal, window_size, padding = True):
+        # To calculate the rolling variance of a signal over a window of defined length.
+        
+        rolling_windows = np.lib.stride_tricks.sliding_window_view(signal, window_size)   # shape (N-W+1, W)
+        rolling_var     = np.var(rolling_windows, axis=1)                   # variance along window axis
+        #rolling_rms    = np.sqrt(np.mean(windows**2, axis=1))
+
+        # Padding the rolling variance to have same length as original signal
+        if padding:
+            pad = window_size // 2
+            rolling_var = np.pad(rolling_var, (pad, window_size - 1 - pad), mode='edge')
+
+        return rolling_var
+
     # Unpack parameters
     f_low  = spectral_analysis_params.get("freq_low")
     f_mid  = spectral_analysis_params.get("freq_mid")
@@ -773,54 +789,58 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
 
     #------------ Define each phase --------------------
 
-    Q_phases = np.full(4, np.nan) # Initialize Qphases as NaNs
+    Q_phases = np.full(3, np.nan) # Initialize Qphases as NaNs
 
     # PHASE 1: First rise in midFreq power
-    idx_nonzero_midFreq_power = np.where(spectral_metrics['mean_power_midFreq'] > 10)[0] # array of indices of positive midFreq powers
+    idx_nonzero_midFreq_power = np.where(spectral_metrics['mean_power_midFreq'] > 5)[0] # array of indices of positive midFreq powers
 
     if len(idx_nonzero_midFreq_power) > 0:
         Q_phases[0] = bins_Q[idx_nonzero_midFreq_power[0]] # first rise in power
 
 
     # PHASE 2: First rise in highFreq power
-    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 10)[0] # array of indices of positive highFreq powers
+    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 5)[0] # array of indices of positive highFreq powers
 
     if len(idx_nonzero_highFreq_power) > 0:
         Q_phases[1] = bins_Q[idx_nonzero_highFreq_power[0]] # first rise in power
 
     
-    # PHASE 3: Biggest rise in spectral centroid  
-    # Differences between consecutive centroid values with a stride
-    stride = 15
-    centroid_jump = spectral_metrics['centroid_freq'][stride:] - spectral_metrics['centroid_freq'][:-stride]
-    idx_max_centroid_jump = np.argmax(centroid_jump)          # Index of biggest jump
+    # PHASE 3: Sustained centroid freq above f_low
+    centroid_below_lowFreq = spectral_metrics['centroid_freq'] <= f_low
+    idx_centroid_below_lowFreq = np.where(centroid_below_lowFreq)[0]
 
-    highFreq_slope = np.gradient(spectral_metrics['mean_power_highFreq'])
-    idx_max_highFreq_slope = np.argmax(highFreq_slope)
+    # if len(idx_below_lowFreq) = len(spectral_centroid) never above f_low → Phase 3 never occurs
+    if len(idx_centroid_below_lowFreq) < len(spectral_metrics['centroid_freq']):
+        idx_phase3 = idx_centroid_below_lowFreq[-1] + 5 # last index below + 1
+        Q_phases[2] = bins_Q[idx_phase3]
 
-    highFreq_jump = spectral_metrics['mean_power_highFreq'][stride:] - spectral_metrics['mean_power_highFreq'][:-stride]
-    idx_max_highFreq_jump = np.argmax(highFreq_jump)          # Index of biggest jump
+    """
+    # Compute the rolling variance of highFreq power over a window 
+    var_window = spectral_analysis_params.get("rolling_var_window", 10)
+    slope_power_highFreq = np.gradient(spectral_metrics['mean_power_highFreq'])
+    var_slope_power_highFreq = _rolling_variance(slope_power_highFreq, var_window)
 
-    # Corresponding indices in the original signal
-    idx_before = idx_max_highFreq_jump  - stride
-    idx_after  = idx_max_highFreq_jump
+    # Normalize the variance
+    var_slope_power_highFreq_normal = var_slope_power_highFreq / np.max(var_slope_power_highFreq)
+    spectral_metrics['var_slope_power_highFreq'] = var_slope_power_highFreq_normal
 
-    # High-frequency power before and after the centroid jump
-    highFreq_before = spectral_metrics['mean_power_highFreq'][idx_before]
-    highFreq_after  = spectral_metrics['mean_power_highFreq'][idx_after]
+    collapse_threshold = 0.3
+    idx_peak = np.argmax(var_slope_power_highFreq_normal)
+    idx_phase3 = None
+    for i in range(idx_peak, len(var_slope_power_highFreq_normal)):
+        if np.all(var_slope_power_highFreq_normal[i:] < collapse_threshold):
+            idx_phase3 = i
+            break
+                
+    if idx_phase3 is not None:
+        Q_phases[2] = bins_Q[idx_phase3]
 
-    highFreq_jump_ratio = (highFreq_after - highFreq_before) / abs(highFreq_before)
-    
-    if highFreq_jump_ratio >= 0.25:
-        Q_phases[2] = bins_Q[idx_max_highFreq_jump]
-
-    # Obtain all the locations where spectral centroid becomes higher that f_low
-    idx_centroid_above_freq_low = np.where(spectral_metrics['centroid_freq'] > 2*f_low)[0]
-
-    if len(idx_centroid_above_freq_low) > 0:
-        # First index
-        idx_phase2 = idx_centroid_above_freq_low[0] 
-        Q_phases[3] = bins_Q[idx_phase2]
+    slope_centroid = np.gradient(spectral_metrics['centroid_freq'])
+    var_slope_centroid = _rolling_variance(slope_centroid, var_window)
+    spectral_metrics['var_slope_centroid'] = var_slope_centroid
+    # Find all local peaks
+    peaks_idx, _ = find_peaks(var_slope_centroid)
+    """
 
 
     return Q_phases, spectral_metrics
@@ -850,41 +870,58 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     plt.rc('axes',   labelsize=18)     # fontsize of the x and y labels
 
 
-    fig, ax = plt.subplots(1,1, figsize=(10,7))
-    spectrogram = ax.pcolormesh(bins_Q, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
-    
-    #----- Set properties
-    ax.set_xlim([analysis_params['Q_min'], analysis_params['Q_max']])
-    ax.set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
-    ax.set_ylabel('Frequency (Hz)',   fontweight='bold', labelpad=10)
-    ax.set_title(plot_title,          fontweight='bold', pad=20)
-    #ax.set_xlabel('Time (s)', fontweight='bold', labelpad=0)
+    fig, ax = plt.subplots(3,1, figsize=(10, 21), sharex = True)
+    fig.suptitle(plot_title, fontweight='bold', y=0.99)             # y adds distance to the title's location
+    #ax.set_title(plot_title,fontweight='bold', pad=20)
 
-    # Set different limits based on the case
+
+    # ------------------------ Subplot 0: Spectrogram ----------------------------
+    spectrogram = ax[0].pcolormesh(bins_Q, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
+        
+    ax[0].set_ylabel('Frequency (Hz)',   fontweight='bold', labelpad=10)
+
+    # Set different y limits based on the case
     if 'PTSeg043' in case_name:
-        ax.set_ylim([0, analysis_params['freq_mid']])
+        ax[0].set_ylim([0, analysis_params['freq_mid']])
     else:
-        ax.set_ylim([0, analysis_params['freq_max']])
-    
+        ax[0].set_ylim([0, analysis_params['freq_max']])
 
-    #----- Adding the colorbar
-    cbar = fig.colorbar(spectrogram, ax=ax, orientation='vertical') #pad=0.5
+    # Adding the colorbar
+    cbar = fig.colorbar(spectrogram, ax=ax[0], orientation='vertical') #pad=0.5
     cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
 
     # Set the limit for power colormap
     spectrogram.set_clim(analysis_params['SPL_db_min'], analysis_params['SPL_db_max'])
 
-    
-    #---------------- Adding the phases ------------------
-    
+    # ------------------------ Subplot 1: Mean power ----------------------------
+    ax[1].plot(bins_Q, spectral_metrics['mean_power_lowFreq'],  label='low-freq',  linewidth = 4, color='paleturquoise')
+    ax[1].plot(bins_Q, spectral_metrics['mean_power_midFreq'],  label='mid-freq',  linewidth = 4, color='deepskyblue')
+    ax[1].plot(bins_Q, spectral_metrics['mean_power_highFreq'], label='high-freq', linewidth = 4, color='mediumblue')
+
+    ax[1].set_ylim([-1, analysis_params['SPL_db_max']])
+    ax[1].set_ylabel('Mean SPL power (dB)', fontweight='bold', labelpad=10)
+    ax[1].legend(loc = 'upper left', fontsize=font_size)
+
+    # ------------------------ Subplot 2: Spectral Centroid ----------------------------
+    ax[2].plot(bins_Q, spectral_metrics['centroid_freq'], linewidth = 4, color='black')
+    ax[2].set_ylim([-1, 500])
+    ax[2].set_ylabel('Spectral Centroid (Hz)', fontweight='bold', labelpad=10)
+
+
+
+    #------- Common x-axis settings
+    for a in ax:
+        a.set_xlim([analysis_params['Q_min'], analysis_params['Q_max']])
+        
+    ax[2].set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
+
+    #--------- Adding phase lines 
     if flag_plot_phases:
         for (phase, Qphase) in enumerate(Q_phases, start=1):
             if not np.isnan(Qphase):
                 print(f'Inlet flowrate of Phase {phase} = {Qphase:.2f} mL/s')
-                ax.axvline(Qphase, color="white", linestyle="solid", linewidth=2, alpha=0.7)
-
-                if phase == 4:
-                    ax.axvline(Qphase, color="yellow", linestyle="solid", linewidth=2, alpha=0.7)
+                for a in ax:
+                    a.axvline(Qphase, color="silver", linestyle="solid", linewidth=1.5, alpha=0.7)
 
 
     #----- For customizing the colorbar and axis for figures ----
@@ -909,46 +946,6 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     plt.savefig(Path(output_folder_imgs) / f"{plot_title}.png")#, transparent=True)
     plt.close(fig)
 
-
-    #---------- Plotting the continuous metrics
-
-    # Setting plot properties
-    #font_size = 16
-    plt.rc('axes',  titlesize=font_size)    # fontsize of the title
-    plt.rc('font',  size=font_size)         # controls default text size
-    plt.rc('xtick', labelsize=font_size)    # fontsize of the x tick labels
-    plt.rc('ytick', labelsize=font_size)    # fontsize of the y tick labels
-    plt.rc('axes',  labelsize=18)           # fontsize of the x and y labels
-
-
-    fig2, ax2 = plt.subplots(1,2, figsize=(20,8)) #plt.subplots(4,1, figsize=(10,24), sharex=True)
-    fig2.suptitle(plot_title, y=0.99)             # y adds distance to the title's location
-
-    # Subplot 1: Banded SPL powers
-    ax2[0].plot(bins_Q, spectral_metrics['mean_power_lowFreq'],  label='low-freq',  linewidth = 4, color='paleturquoise')
-    ax2[0].plot(bins_Q, spectral_metrics['mean_power_midFreq'],  label='mid-freq',  linewidth = 4, color='deepskyblue')
-    ax2[0].plot(bins_Q, spectral_metrics['mean_power_highFreq'], label='high-freq', linewidth = 4, color='mediumblue')
-
-    ax2[0].set_ylim([-1, analysis_params['SPL_db_max']])
-    ax2[0].set_xlim([analysis_params['Q_min'], analysis_params['Q_max']])
-    ax2[0].set_ylabel('Mean SPL power (dB)', fontweight='bold', labelpad=10)
-    ax2[0].legend(loc = 'upper left', fontsize=font_size)
-    for q in Q_phases:
-        if not np.isnan(q):
-            ax2[0].axvline(q, color="gray", linestyle="solid", linewidth=0.8, alpha=0.7)
-
-    # Subplot 2: Spectral centroid
-    ax2[1].plot(bins_Q, spectral_metrics['centroid_freq'], linewidth = 4, color='black')
-    ax2[1].set_ylim([-1, 500])
-    ax2[1].set_xlim([analysis_params['Q_min'], analysis_params['Q_max']])
-    ax2[1].set_ylabel('Spectral Centroid (Hz)', fontweight='bold', labelpad=10)
-    for q in Q_phases:
-        if not np.isnan(q):
-            ax2[1].axvline(q, color="gray", linestyle="solid", linewidth=0.8, alpha=0.7)
-
-    plt.tight_layout()
-    plt.savefig(Path(output_folder_imgs) / f"specMetrics_{plot_title}.png")
-    plt.close(fig2)
 
 
 def compute_and_save_spectrogram_for_all_ROIs(
@@ -1037,8 +1034,8 @@ def compute_and_save_spectrogram_for_all_ROIs(
             # Calculate average spectrogram for all the ROIs combined
             spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = spec_quantity_array_ROI_multi, STFT_params = STFT_params)
             
-            # Construct the title: use region_name from CSV if available, else fall back to ROI ID range
-            region_name = ROI_params.get("region_name")
+            # Construct the title: use region_abbrev from CSV if available, else fall back to ROI ID range
+            region_name = ROI_params.get("region_abbrev")
             region_label = region_name if region_name else f'ROI{ROI_start_center_id}to{ROI_end_center_id}'
             spectrogram_title = f'{case_name}_win{window_length}_region{region_label}'
 
@@ -1055,7 +1052,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
             # Plot spectrograms and metrics
             plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data_filt, Q_phases, spectral_metrics, spectral_analysis_params, spectrogram_title)
 
-
+            """
             # -------- For plotting the wall pressure signal for individual nodes -------------
             # Generate figs for a couple of points
             #print('Generating figures of wall-pressure signals at some nodes ...')
@@ -1073,7 +1070,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
             #    ax.set_xlim([2,10])
             #    plt.tight_layout()
             #    plt.savefig(Path(output_folder_imgs) / f"signal_wallPressure_node{id}.png") 
-
+            """
         
         #-----Case 1B: Generate one spectrogram per ROI
         else:
@@ -1209,7 +1206,7 @@ def parse_args():
     ap.add_argument("--detrend",          type=str,   default='linear', help="Detrend option for STFT: 'linear', 'constant', or False (default: linear)")
 
 
-    # Spectral analysis parameters
+    # Spectral analysis and visualization parameters
     ap.add_argument("--cutoff_db",          type=float, default=0.0,      help="Minimum dB floor for visualization")
     ap.add_argument("--freq_low",           type=float, default=100,      help="Upper threshold for low-frequency band in Hz (default: 100 Hz)")
     ap.add_argument("--freq_mid",           type=float, default=1000,     help="Upper threshold for mid-frequency band in Hz (default: 1000 Hz)")
@@ -1282,12 +1279,12 @@ def main():
     print(f"[info] Write spectrograms to:             {output_folder}")
 
     if args.spec_regions_csv is not None:
-        print(f"[info] Read spectrogram regions from:   {args.spec_regions_csv}\n")
+        print(f"[info] Read spectrogram regions from:  {args.spec_regions_csv}")
 
     if args.ROI_center_csv is not None:
-        print(f"[info] Read ROI centers from:  {args.ROI_center_csv} \n")
+        print(f"[info] Read ROI centers from:          {args.ROI_center_csv} \n")
     else:
-        print(f"[info] Read ROI center from:   {args.ROI_center_coord} \n")
+        print(f"[info] Read ROI center from:           {args.ROI_center_coord} \n")
 
 
     
