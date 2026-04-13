@@ -243,7 +243,7 @@ def read_wallpressure_from_h5_files_parallel(CFD_h5_files, wall_mesh, n_process,
     # Array to hold pressures (n_points, n_times) - written by worker processes
     shared_pressure_ctype = create_shared_array([n_points, n_snapshots])
 
-    print(f"\n Reading {n_snapshots} CFD results HDF5 files in parallel into 1 array of shape [{n_points}, {n_snapshots}] ... \n")
+    print(f"\nReading {n_snapshots} CFD results HDF5 files in parallel into 1 array of shape [{n_points}, {n_snapshots}] ... \n")
         
     # Divide all snapshot files into chunks and spread across workers
     time_indices    = list(range(n_snapshots))
@@ -405,7 +405,7 @@ def read_spec_regions_from_csv(csv_path: str) -> list:
     int_keys   = {"ROI_start_center_id", "ROI_end_center_id", "ROI_stride"}
     float_keys = {"ROI_radius", "ROI_height"}
     bool_keys  = {"flag_multi_ROI", "flag_save_ROI"}
-    str_keys   = {"region_shortname"}
+    str_keys   = {"region_fullname", "region_shortname"}
     known_keys = int_keys | float_keys | bool_keys | str_keys
 
     data = np.genfromtxt(csv_path, delimiter=",", names=True, dtype=None, encoding="utf-8")
@@ -489,8 +489,8 @@ def assemble_quantity_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh,
     # --- Sanity check: ensure ROI is not empty ---
     if ROI_pids.size == 0:
         raise ValueError("No mesh points found in ROI. Try increasing --ROI_radius (check mesh units: mm vs m) or choose a different --ROI_center_coord. ")
-    else:
-        print(f"Found {ROI_pids.size} mesh points in {ROI_id} with center coordinate {ROI_center_coord} ...")
+    #else:
+    #    print(f"Found {ROI_pids.size} mesh points in {ROI_id} with center coordinate {ROI_center_coord} ...")
 
     # Assemble variable array for ROI points
     var_array_ROI = var_array[ROI_pids,:]
@@ -673,7 +673,7 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_mid, f_
     - mean_power_lowFreq: Average acoustic power below low frequency f_low.
     - mean_power_midFreq: 
     - mean_power_highFreq: Average acoustic power above mid frequency f_mid and below high frequency f_max.
-    - centroid_freq:
+    - centroid_freq: Spectral centroid defined as the center of mass of the spectral power in Hz.
     """
     
     # Create a mask for each frequency band
@@ -760,7 +760,7 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
     phases   = np.zeros(n_cols, dtype=int)
     spectral_metrics = defaultdict(list)
 
-    # Loop over each frame and calculate spectral metrics for it
+    # Loop over each frame (column) and calculate spectral metrics for it
     for col in range(n_cols):
         metrics_column = extract_metrics_from_spectrogram_column(freqs, spec_dB[:, col], f_low, f_mid, f_max)
         
@@ -829,7 +829,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     plt.rc('axes',   labelsize=18)     # fontsize of the x and y labels
 
 
-    fig, ax = plt.subplots(1,3, figsize=(24, 8))
+    fig, ax = plt.subplots(1,3, figsize=(24,8))
     fig.suptitle(plot_title, fontweight='bold', y=0.99)             # y adds distance to the title's location
     #ax.set_title(plot_title,fontweight='bold', pad=20)
 
@@ -846,14 +846,14 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
         ax[0].set_ylim([0, analysis_params['freq_max']])
 
     # Adding the colorbar
-    cbar = fig.colorbar(spectrogram, ax=ax[0], orientation='vertical') #pad=0.5
-    cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
+    #cbar = fig.colorbar(spectrogram, ax=ax[0], orientation='vertical') #pad=0.5
+    #cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
 
     # Set the limit for power colormap
     spectrogram.set_clim(analysis_params['SPL_db_min'], analysis_params['SPL_db_max'])
 
     # ------------------------ Subplot 1: Mean power ----------------------------
-    ax[1].plot(bins_Q, spectral_metrics['mean_power_lowFreq'],  label='low-freq',  linewidth = 4, color='paleturquoise')
+    ax[1].plot(bins_Q, spectral_metrics['mean_power_lowFreq'],  label='low-freq',  linewidth = 4, color=(160/255,230/255,245/255)) #RGB:'#A6CEE3'
     ax[1].plot(bins_Q, spectral_metrics['mean_power_midFreq'],  label='mid-freq',  linewidth = 4, color='deepskyblue')
     ax[1].plot(bins_Q, spectral_metrics['mean_power_highFreq'], label='high-freq', linewidth = 4, color='mediumblue')
 
@@ -871,13 +871,14 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     #------- Common x-axis settings
     for a in ax:
         a.set_xlim([analysis_params['Q_min'], analysis_params['Q_max']])
-        a.set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
+        #a.set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
+    ax[2].set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
 
     #--------- Adding phase lines 
     if flag_plot_phases:
         for (phase, Qphase) in enumerate(Q_phases, start=1):
             if not np.isnan(Qphase):
-                print(f'Inlet flowrate of Phase {phase} = {Qphase:.2f} mL/s')
+                print(f'Inlet flowrate of onset Phase {phase} = {Qphase:.2f} mL/s')
                 for a in ax:
                     a.axvline(Qphase, color="silver", linestyle="solid", linewidth=1.5, alpha=0.7)
 
@@ -1233,6 +1234,7 @@ def main():
 
     # Printing info to log
     print("=" * 200 + "\n")
+    print("compute_Spectrogram.py")
     print(f"\n[info] Mesh file:                         {mesh_file}")
     print(f"[info] Read CFD results from:             {input_folder}")
     print(f"[info] Write spectrograms to:             {output_folder}")
@@ -1301,8 +1303,9 @@ def main():
     # Computing spectrograms
     for region_idx, region_params in enumerate(spec_regions):
         if len(spec_regions) > 1:
-            print(f"\n------------- Region {region_idx + 1}/{len(spec_regions)} ---------------------------")
-        
+            print(f"\n---------------------- Region {region_idx + 1}/{len(spec_regions)} --------------------------------")
+            print(f"{region_params['region_fullname']}: ROI {region_params['ROI_start_center_id']} to {region_params['ROI_end_center_id']} \n")
+
         # Override the CLI ROI params if present in the spec_regions_csv file
         region_ROI_params = dict(ROI_params)
         region_ROI_params.update(region_params)

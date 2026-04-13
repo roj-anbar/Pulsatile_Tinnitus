@@ -53,10 +53,10 @@ scinet_user=ranbar                # your cluster username (need to specify this 
 group_name=def-steinman           # group allocation to run the job under
 debug=off                          # job partition -> choose between 'on'/'off' (Whether or not you are using debug node)
 num_cores=100                     # number of cores to use per node (everything runs on a single node) 
-required_time="11:59:59"          # amount of time cluster will need to run the case (max 24 hours)
+required_time="15:59:59"          # amount of time cluster will need to run the case (max 24 hours)
 post_processing_time_minutes=180  # amount of time needed to post-process the case (this is run on a single proc)
 
-casename="PTSeg106_base"          # What your case will be called in the output files & on cluster -- should be the same name as this script without the sh
+casename="PTSeg028_base_0p64"          # What your case will be called in the output files & on cluster -- should be the same name as this script without the sh
 cycles=6                          # number of cycles to run, determines total simulation time (default: 2)
 period=915.0                      # waveform period [ms] (default: 915 ms)
 timesteps_per_cycle=10000         # number of timesteps for each cycle (default: 2000)
