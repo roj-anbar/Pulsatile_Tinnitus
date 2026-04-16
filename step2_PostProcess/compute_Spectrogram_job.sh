@@ -33,7 +33,7 @@ set -euo pipefail
 echo "Job started: $(date)"
 
 # ---------------------------------- Define Paths -------------------------------------------------------------------------------
-CASE=PTSeg043_noLabbe_base                                             # Case name
+CASE=PTSeg028_base_0p512                                             # Case name
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE             # Parent directory of the case
 MESH_FOLDER="$BASE_DIR/step1_CFD/data"                              # Path to mesh data folder containing the h5 mesh
 CENTERLINE="$MESH_FOLDER/${CASE}_centerline_points.csv"                    # Path to centerline csv file used to construct ROIs
@@ -112,26 +112,27 @@ python "$SCRIPT" \
 # Note1: You HAVE to load the modules first from terminal then run below
 # Note2: You HAVE to comment this part if submitting this file through sbatch
 
-# python compute_Spectrogram.py \
-#     --case_name             "PTSeg043_noLabbe_base" \
-#     --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/results/PTSeg043_noLabbe_base_ts10000_cy6_saveFreq1/" \
-#     --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data" \
-#     --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step2_PostProcess" \
-#     --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data/PTSeg043_noLabbe_base_centerline_points.csv" \
-#     --spec_quantity         "wallpressure" \
-#     --window_length         2732 \
-#     --ROI_type              "cylinder" \
-#     --flag_multi_ROI        \
-#     --ROI_start_center_id   1162 \
-#     --ROI_end_center_id     1232 \
-#     --ROI_radius            8 \
-#     --ROI_stride            2
+python compute_Spectrogram.py \
+    --case_name             "PTSeg028_base_0p64" \
+    --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq1/" \
+    --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data" \
+    --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess" \
+    --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data/PTSeg028_base_0p64_centerline_points.csv" \
+    --spec_quantity         "wallpressure" \
+    --window_length         2732 \
+    --ROI_type              "cylinder" \
+    --ROI_start_center_id   1100 \
+    --ROI_end_center_id     1101 \
+    --ROI_radius            8 \
+    --ROI_stride            4 \
+    --flag_multi_ROI        
+    --flag_save_ROI
 
 
 #    --spec_regions_csv      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/PTSeg028_base_0p64_spectrogram_regions.csv" \
 
 
 # Move log file to output folder
-mv "${SLURM_SUBMIT_DIR}/PT_Spectrogram_${SLURM_JOB_ID}.txt" "$OUTPUT/"
+#mv "${SLURM_SUBMIT_DIR}/PT_Spectrogram_${SLURM_JOB_ID}.txt" "$OUTPUT/"
 
 wait

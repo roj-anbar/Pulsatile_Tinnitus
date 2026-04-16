@@ -489,8 +489,8 @@ def assemble_quantity_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh,
     # --- Sanity check: ensure ROI is not empty ---
     if ROI_pids.size == 0:
         raise ValueError("No mesh points found in ROI. Try increasing --ROI_radius (check mesh units: mm vs m) or choose a different --ROI_center_coord. ")
-    #else:
-    #    print(f"Found {ROI_pids.size} mesh points in {ROI_id} with center coordinate {ROI_center_coord} ...")
+    else:
+        print(f"Found {ROI_pids.size} mesh points in {ROI_id} with center coordinate {ROI_center_coord} ...")
 
     # Assemble variable array for ROI points
     var_array_ROI = var_array[ROI_pids,:]
@@ -820,7 +820,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     bins_Q = 2*bins # Q_in = 2*t
 
     # Setting plot properties
-    font_size = 16
+    font_size = 20
     plt.rc('axes',   titlesize=font_size)     # fontsize of the title
     plt.rc('font',   size=font_size)          # controls default text size
     plt.rc('xtick',  labelsize=font_size)    # fontsize of the x tick labels
@@ -987,6 +987,10 @@ def compute_and_save_spectrogram_for_all_ROIs(
             # Keep only the unique indices
             ROI_point_indices = np.unique(ROI_point_indices)
             spec_quantity_array_ROI_multi = spec_quantity_array[ROI_point_indices, :]
+            
+            # [DEBUG] Save raw node signals for the ROI region
+            raw_signals_npz = Path(output_folder_files) / f"raw_signal_{ROI_id}.npz"
+            np.savez(raw_signals_npz, quantity_array=spec_quantity_array_ROI_multi, point_indices=ROI_point_indices)
 
             print(f"Found {len(ROI_point_indices)} unique mesh points in total in the specified region. \n")
 
@@ -1033,6 +1037,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
         
         #-----Case 1B: Generate one spectrogram per ROI
         else:
+            print("[DEBUG] SCRIPT GOT HERE!!!!")
             for i in range(ROI_start_center_id, ROI_end_center_id, ROI_stride): #range(0, len(ROI_centers), 1):
                 
                 center = ROI_centers[i]
@@ -1087,7 +1092,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
 
     #------- Case 2: Coords mode
     # Single ROI center coordinates provided
-    if ROI_center_coord is not None:
+    elif ROI_center_coord is not None:
         ROI_center_coord = np.array(ROI_center_coord, dtype=float)
 
         # Add extra fields to ROI_params
