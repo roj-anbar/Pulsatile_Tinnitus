@@ -24,7 +24,7 @@
 # USAGE:
 #    - python compare_nodal_pressures.py
 #    - adjust PATH_DATA, ROI names, node indices, and time window as needed
-
+# -----------------------------------------------------------------------------------------------------------------------
 
 import numpy as np
 import matplotlib.pyplot as plt
