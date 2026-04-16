@@ -1,3 +1,31 @@
+# -----------------------------------------------------------------------------------------------------------------------
+# compare_nodal_pressures.py
+# Debug script for comparing wall-pressure signals at two individual mesh nodes from different regions of interest (ROIs).
+# 
+# __author__: Rojin Anbarafshan <rojin.anbar@gmail.com>
+# __date__:   2026-04
+#
+# PURPOSE:
+#   - Loads pre-extracted nodal pressure time series (saved as .npz files) from two ROIs and computes spectral diagnostics to assess signal similarity.
+#   - Outputs a 3x3 figure panel covering: 
+#        Row 0: Spectrograms (ROI1, ROI2, and their difference in dB)
+#        Row 1 — Pressure signals, windowed RMS, and Welch PSD
+#        Row 2 — Spectral centroid, rolloff (85%), and instantaneous peak frequency
+#
+# REQUIREMENTS:
+#   - h5py, pyvista, vtk, numpy, scipy, matplotlib
+#   - On Trillium: virtual environment called "pyvista36"
+#
+# EXECUTION:
+#    - Execution environment: LOCAL (not on HPC)
+#    - Run on a local workstation with access to .npz data files via Dropbox.
+#    - Requires: numpy, matplotlib, scipy
+#
+# USAGE:
+#    - python compare_nodal_pressures.py
+#    - adjust PATH_DATA, ROI names, node indices, and time window as needed
+
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import signal
