@@ -11,7 +11,7 @@
 #     and saves the data and a plot.
 #
 # REQUIREMENTS:
-#   - h5py, numpy, scipy, matplotlib
+#   - h5py, numpy, matplotlib
 #   - On Trillium: virtual environment called "pyvista36"
 #
 # EXECUTION:
@@ -62,6 +62,8 @@ import argparse
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
+import multiprocessing as mp
+from multiprocessing import sharedctypes
 from pathlib import Path
 
 
@@ -118,28 +120,61 @@ def find_nearest_volume_node(vol_coords: np.ndarray, query_point: np.ndarray) ->
     return int(np.argmin(dists))
 
 
-def read_pressure_timeseries_at_nodes(h5_files: list, node_ids: list, density: float) -> np.ndarray:
-    """
-    Read pressure at the given volume node IDs for every HDF5 snapshot.
+def _create_shared_array(size):
+    """Create a ctypes-backed shared array filled with zeros."""
+    ctype_array = np.ctypeslib.as_ctypes(np.zeros(size, dtype=np.float64))
+    return sharedctypes.Array(ctype_array._type_, ctype_array, lock=False)
 
+def _view_shared_array(shared_obj):
+    """Get a NumPy view (no copy) onto a shared ctypes array."""
+    return np.ctypeslib.as_array(shared_obj)
+
+
+def _read_pressure_worker(file_ids, node_ids_arr, h5_files, shared_pressure_ctype, density):
+    """Worker: read a chunk of snapshots and write into the shared (n_nodes, n_times) array."""
+    shared_pressure = _view_shared_array(shared_pressure_ctype)
+    for t_index in file_ids:
+        with h5py.File(h5_files[t_index], 'r') as h5:
+            shared_pressure[:, t_index] = np.array(h5['Solution']['p']).flatten()[node_ids_arr] * density
+
+
+def read_pressure_timeseries_at_nodes(h5_files: list, node_ids: list, density: float, n_process: int) -> np.ndarray:
+    """
+    Read pressure at the given volume node IDs for every HDF5 snapshot in parallel.
+
+    Spawns n_process workers, each reading a contiguous time chunk into shared memory.
     Oasis stores p/rho; multiplied by density to get Pa.
 
     Returns
     -------
     pressures : (n_nodes, n_snapshots) float array [Pa]
     """
-    n_snapshots = len(h5_files)
-    n_nodes     = len(node_ids)
-    pressures   = np.zeros((n_nodes, n_snapshots))
-
+    n_snapshots  = len(h5_files)
+    n_nodes      = len(node_ids)
     node_ids_arr = np.array(node_ids)
 
-    print(f"Reading pressure at {n_nodes} nodes from {n_snapshots} HDF5 snapshots ...")
-    for t, h5_path in enumerate(h5_files):
-        with h5py.File(h5_path, 'r') as h5:
-            pressures[:, t] = np.array(h5['Solution']['p']).flatten()[node_ids_arr] * density
+    shared_pressure_ctype = _create_shared_array([n_nodes, n_snapshots])
 
-    return pressures
+    print(f"\nReading pressure at {n_nodes} nodes from {n_snapshots} HDF5 snapshots in parallel ...\n")
+
+    time_indices    = list(range(n_snapshots))
+    chunk_size      = max(n_snapshots // n_process, 1)
+    time_groups     = [time_indices[i : i + chunk_size] for i in range(0, n_snapshots, chunk_size)]
+
+    processes = []
+    for idx, group in enumerate(time_groups):
+        proc = mp.Process(
+            target = _read_pressure_worker,
+            name   = f"Reader{idx}",
+            args   = (group, node_ids_arr, h5_files, shared_pressure_ctype, density))
+        processes.append(proc)
+
+    for proc in processes:
+        proc.start()
+    for proc in processes:
+        proc.join()
+
+    return _view_shared_array(shared_pressure_ctype).copy()  # (n_nodes, n_snapshots)
 
 
 # ======================================================================================================
@@ -165,30 +200,19 @@ def plot_pressure_drop(output_folder: Path, case_name: str,
     plt.rc('legend', fontsize=font_size - 2)
     plt.rc('axes',   labelsize=font_size)
 
-    fig, axes = plt.subplots(1, 2, figsize=(18, 6))
-    fig.suptitle(f'{case_name}  —  Pressure Drop (Inlet to Outlet)', fontweight='bold')
+    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+    fig.suptitle(f'{case_name}: Pressure Drop (Inlet - Outlet)', fontweight='bold')
 
-    # --- Subplot 0: Pressure drop dP ---
-    axes[0].plot(Q_in, dP, linewidth=2.5, color='navy')
-    axes[0].set_xlabel('Inlet Flow Rate (mL/s)', fontweight='bold', labelpad=10)
-    axes[0].set_ylabel('dP  (Pa)',               fontweight='bold', labelpad=10)
-    axes[0].set_title('Pressure Drop  (P_inlet - P_outlet)')
-    axes[0].set_xlim([Q_min, Q_max])
-    axes[0].axhline(0, color='gray', linewidth=0.8, linestyle='--')
-    axes[0].grid(True, alpha=0.3)
+    # --- Pressure drop ---
+    ax.plot(Q_in, dP/133.3, linewidth=1, color='blue', linestyle='-o')
+    ax.set_xlabel('Inlet Flow Rate (mL/s)',   fontweight='bold', labelpad=10)
+    ax.set_ylabel('dP  (mmHg)',               fontweight='bold', labelpad=10)
+    ax.set_xlim([Q_min, Q_max])
+    ax.grid(True, alpha=0.3)
 
-    # --- Subplot 1: Individual pressures ---
-    axes[1].plot(Q_in, P_inlet,  linewidth=2.5, color='tomato',    label='Inlet')
-    axes[1].plot(Q_in, P_outlet, linewidth=2.5, color='steelblue', label='Outlet')
-    axes[1].set_xlabel('Inlet Flow Rate (mL/s)', fontweight='bold', labelpad=10)
-    axes[1].set_ylabel('Pressure (Pa)',           fontweight='bold', labelpad=10)
-    axes[1].set_title('Inlet & Outlet Pressures')
-    axes[1].set_xlim([Q_min, Q_max])
-    axes[1].legend(loc='upper left')
-    axes[1].grid(True, alpha=0.3)
 
     plt.tight_layout()
-    out_png = output_folder / f"{case_name}_pressure_drop.png"
+    out_png = output_folder / f"{case_name}_pressureDrop.png"
     plt.savefig(out_png, dpi=150)
     plt.close(fig)
     print(f"Saved plot  ->  {out_png}")
@@ -212,6 +236,7 @@ def parse_args():
     ap.add_argument("--timesteps_per_cyc", type=int,   default=None,   help="Timesteps per cycle (parsed from filename if omitted)")
     ap.add_argument("--flowrate_min",      type=float, default=2.0,    help="Lower inlet flowrate limit for plot x-axis [mL/s] (default: 2.0)")
     ap.add_argument("--flowrate_max",      type=float, default=10.0,   help="Upper inlet flowrate limit for plot x-axis [mL/s] (default: 10.0)")
+    ap.add_argument("--n_process",         type=int,   default=max(1, mp.cpu_count() - 1), help="Number of parallel reader processes (default: #CPUs - 1)")
     return ap.parse_args()
 
 
@@ -220,7 +245,7 @@ def main():
 
     input_folder  = Path(args.input_folder)
     mesh_folder   = Path(args.mesh_folder)
-    output_folder = Path(args.output_folder) / "PressureDrop"
+    output_folder = Path(args.output_folder)
     output_folder.mkdir(parents=True, exist_ok=True)
 
     print("=" * 120)
@@ -263,7 +288,7 @@ def main():
 
     # ---- Read pressure time series at the two nodes ----
     pressures = read_pressure_timeseries_at_nodes(
-        CFD_h5_files, [inlet_vol_id, outlet_vol_id], args.density
+        CFD_h5_files, [inlet_vol_id, outlet_vol_id], args.density, args.n_process
     )
     P_inlet  = pressures[0, :]   # (n_snapshots,) [Pa]
     P_outlet = pressures[1, :]   # (n_snapshots,) [Pa]

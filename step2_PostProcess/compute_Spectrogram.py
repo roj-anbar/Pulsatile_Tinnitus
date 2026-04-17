@@ -989,8 +989,8 @@ def compute_and_save_spectrogram_for_all_ROIs(
             spec_quantity_array_ROI_multi = spec_quantity_array[ROI_point_indices, :]
             
             # [DEBUG] Save raw node signals for the ROI region
-            raw_signals_npz = Path(output_folder_files) / f"raw_signal_{ROI_id}.npz"
-            np.savez(raw_signals_npz, quantity_array=spec_quantity_array_ROI_multi, point_indices=ROI_point_indices)
+            #raw_signals_npz = Path(output_folder_files) / f"raw_signal_{ROI_id}.npz"
+            #np.savez(raw_signals_npz, quantity_array=spec_quantity_array_ROI_multi, point_indices=ROI_point_indices)
 
             print(f"Found {len(ROI_point_indices)} unique mesh points in total in the specified region. \n")
 
