@@ -192,7 +192,7 @@ def plot_pressure_drop(output_folder: Path, case_name: str,
     Q_min = plot_params.get("Q_min", Q_in.min())
     Q_max = plot_params.get("Q_max", Q_in.max())
 
-    font_size = 18
+    font_size = 14
     plt.rc('font',   size=font_size)
     plt.rc('axes',   titlesize=font_size)
     plt.rc('xtick',  labelsize=font_size)
@@ -201,18 +201,27 @@ def plot_pressure_drop(output_folder: Path, case_name: str,
     plt.rc('axes',   labelsize=font_size)
 
     fig, ax = plt.subplots(1, 1, figsize=(8, 8))
-    fig.suptitle(f'{case_name}: Pressure Drop (Inlet - Outlet)', fontweight='bold')
+    fig.suptitle(f'{case_name}: Pressure Drop', fontweight='bold')
 
-    # --- Pressure drop ---
-    ax.plot(Q_in, dP/133.3, linewidth=1, color='blue', linestyle='-o')
+    # -------------- Subplot1: Pressure drop -----------------------
+    ax.plot(Q_in, dP/133.3, linewidth = 1, color='blue')
     ax.set_xlabel('Inlet Flow Rate (mL/s)',   fontweight='bold', labelpad=10)
     ax.set_ylabel('dP  (mmHg)',               fontweight='bold', labelpad=10)
     ax.set_xlim([Q_min, Q_max])
+    ax.set_ylim([0, 60])
     ax.grid(True, alpha=0.3)
+
+    # -------------- Subplot2: Pressure values -----------------------
+    # ax[1].plot(Q_in, P_inlet/133.3,  linewidth = 2, color='black')
+    # ax[1].plot(Q_in, P_outlet/133.3, linewidth = 2,  color='red')
+    # ax[1].set_xlabel('Inlet Flow Rate (mL/s)',  fontweight='bold', labelpad=10)
+    # ax[1].set_ylabel('Pressure (mmHg)',         fontweight='bold', labelpad=10)
+    # ax[1].set_xlim([Q_min, Q_max])
+    #ax[1].set_ylim([0, 60])
 
 
     plt.tight_layout()
-    out_png = output_folder / f"{case_name}_pressureDrop.png"
+    out_png = output_folder / f"{case_name}_pressureInOut.png"
     plt.savefig(out_png, dpi=150)
     plt.close(fig)
     print(f"Saved plot  ->  {out_png}")
@@ -234,6 +243,7 @@ def parse_args():
     ap.add_argument("--density",           type=float, default=1057,   help="Blood density [kg/m3] (default: 1057)")
     ap.add_argument("--period_seconds",    type=float, default=0.915,  help="Flow period in seconds (default: 0.915)")
     ap.add_argument("--timesteps_per_cyc", type=int,   default=None,   help="Timesteps per cycle (parsed from filename if omitted)")
+    ap.add_argument("--save_freq",         type=int,   default=1,      help="Snapshot save frequency: 1 = every timestep, 5 = every 5th timestep, etc. (default: 1)")
     ap.add_argument("--flowrate_min",      type=float, default=2.0,    help="Lower inlet flowrate limit for plot x-axis [mL/s] (default: 2.0)")
     ap.add_argument("--flowrate_max",      type=float, default=10.0,   help="Upper inlet flowrate limit for plot x-axis [mL/s] (default: 10.0)")
     ap.add_argument("--n_process",         type=int,   default=max(1, mp.cpu_count() - 1), help="Number of parallel reader processes (default: #CPUs - 1)")
@@ -298,15 +308,15 @@ def main():
 
     # ---- Build inlet flowrate array (Q = 2*t, ramp-specific) ----
     n_snapshots = len(CFD_h5_files)
-    dt          = args.period_seconds / timesteps_per_cyc   # [s] per snapshot
-    time_array  = np.arange(n_snapshots) * dt               # [s]
-    Q_in        = 2.0 * time_array                          # [mL/s]
+    dt          = args.save_freq * args.period_seconds / timesteps_per_cyc  # [s] per saved snapshot
+    time_array  = np.arange(n_snapshots) * dt                               # [s]
+    Q_in        = 2.0 * time_array                                          # [mL/s]
 
     print(f"\nQ_inlet range: {Q_in.min():.2f} to {Q_in.max():.2f} mL/s  ({n_snapshots} snapshots)")
     print(f"dP range     : {dP.min():.2f} to {dP.max():.2f} Pa\n")
 
     # ---- Save numerical results ----
-    out_npz = output_folder / f"{args.case_name}_pressure_drop.npz"
+    out_npz = output_folder / f"{args.case_name}_pressureInOut.npz"
     np.savez(out_npz,
              Q_in=Q_in, dP=dP, P_inlet=P_inlet, P_outlet=P_outlet,
              inlet_vol_id=np.array(inlet_vol_id),  outlet_vol_id=np.array(outlet_vol_id),
