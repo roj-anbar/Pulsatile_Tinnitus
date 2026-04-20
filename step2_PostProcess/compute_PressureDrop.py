@@ -126,6 +126,19 @@ def find_nearest_volume_nodes(vol_coords: np.ndarray, query_points: np.ndarray) 
     return [find_nearest_volume_node(vol_coords, pt) for pt in query_points]
 
 
+def compute_centerline_distances(centerline_coords: np.ndarray, inlet_point_id: int) -> np.ndarray:
+    """Cumulative arc-length distance along the centerline, zeroed at inlet_point_id [mm].
+
+    centerline_coords : (n_points, 3) in [mm].
+    inlet_point_id    : row index of the inlet in centerline_coords.
+    Returns (n_points,) distances in mm; negative = upstream of inlet.
+    """
+    diffs = np.diff(centerline_coords, axis=0)              # (n-1, 3) [mm]
+    seg_lengths = np.linalg.norm(diffs, axis=1)
+    cumulative = np.concatenate([[0.0], np.cumsum(seg_lengths)])
+    return cumulative - cumulative[inlet_point_id]
+
+
 def _create_shared_array(size):
     """Create a ctypes-backed shared array filled with zeros."""
     ctype_array = np.ctypeslib.as_ctypes(np.zeros(size, dtype=np.float64))
@@ -235,19 +248,19 @@ def plot_pressure_drop(output_folder: Path, case_name: str,
 
 def animate_centerline_pressure(output_folder: Path, case_name: str,
                                 pressures_all: np.ndarray, Q_in: np.ndarray,
-                                frame_stride: int):
+                                cl_dist: np.ndarray, frame_stride: int):
     """
-    Animate P (mmHg) vs. centerline point ID stepping every frame_stride snapshots.
+    Animate P (mmHg) vs. distance from inlet stepping every frame_stride snapshots.
 
     Parameters
     ----------
     pressures_all : (n_cl_points, n_snapshots) float [Pa]
     Q_in          : (n_snapshots,) float [mL/s]
+    cl_dist       : (n_cl_points,) cumulative arc-length from inlet [mm]
     frame_stride  : int — use every Nth snapshot as an animation frame
     """
     n_cl_points, n_snapshots = pressures_all.shape
     frame_indices = list(range(0, n_snapshots, frame_stride))
-    cl_ids        = np.arange(n_cl_points)
     P_mmHg        = pressures_all / 133.3                     # Pa -> mmHg
 
     P_min = float(P_mmHg.min())
@@ -262,10 +275,10 @@ def animate_centerline_pressure(output_folder: Path, case_name: str,
 
     fig, ax = plt.subplots(figsize=(10, 6))
     (line,)  = ax.plot([], [], linewidth=1.5, color='steelblue')
-    ax.set_xlim(0, n_cl_points - 1)
+    ax.set_xlim(cl_dist[0], cl_dist[-1])
     ax.set_ylim(P_min - pad, P_max + pad)
-    ax.set_xlabel('Centerline Point ID', fontweight='bold', labelpad=8)
-    ax.set_ylabel('Pressure (mmHg)',     fontweight='bold', labelpad=8)
+    ax.set_xlabel('Distance from Inlet (mm)', fontweight='bold', labelpad=8)
+    ax.set_ylabel('Pressure (mmHg)',          fontweight='bold', labelpad=8)
     ax.grid(True, alpha=0.3)
     title_obj = ax.set_title('')
     fig.tight_layout()
@@ -277,7 +290,7 @@ def animate_centerline_pressure(output_folder: Path, case_name: str,
 
     def _update(anim_frame):
         t_idx = frame_indices[anim_frame]
-        line.set_data(cl_ids, P_mmHg[:, t_idx])
+        line.set_data(cl_dist, P_mmHg[:, t_idx])
         title_obj.set_text(
             f'{case_name}  |  Q_inlet = {Q_in[t_idx]:.2f} mL/s  '
             f'(snapshot {t_idx} / {n_snapshots - 1})'
@@ -304,6 +317,45 @@ def animate_centerline_pressure(output_folder: Path, case_name: str,
         print(f"Saved animation  ->  {out_gif}")
     finally:
         plt.close(fig)
+
+
+def plot_centerline_pressure_3d(output_folder: Path, case_name: str,
+                                pressures_all: np.ndarray, Q_in: np.ndarray,
+                                cl_dist: np.ndarray, frame_stride: int):
+    """
+    3D surface plot: x = distance from inlet (mm), y = Q_inlet (mL/s), z = pressure (mmHg).
+
+    The time axis is subsampled by frame_stride to keep the surface tractable.
+    """
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 — registers the 3D projection
+
+    _n_cl_points, n_snapshots = pressures_all.shape
+    P_mmHg = pressures_all / 133.3
+
+    t_idx = np.arange(0, n_snapshots, frame_stride)
+    P_sub = P_mmHg[:, t_idx]           # (n_cl_points, n_t_sub)
+    Q_sub = Q_in[t_idx]                 # (n_t_sub,)
+
+    X, Y = np.meshgrid(cl_dist, Q_sub, indexing='ij')   # (n_cl_points, n_t_sub)
+
+    fig = plt.figure(figsize=(13, 8))
+    ax  = fig.add_subplot(111, projection='3d')
+
+    surf = ax.plot_surface(X, Y, P_sub, cmap='viridis',
+                           linewidth=0, antialiased=True, alpha=0.92)
+
+    ax.set_xlabel('Distance from Inlet (mm)', fontweight='bold', labelpad=12)
+    ax.set_ylabel('Inlet Flow Rate$ (mL/s)', fontweight='bold', labelpad=12)
+    ax.set_zlabel('Pressure (mmHg)',    fontweight='bold', labelpad=12)
+    ax.set_title(f'{case_name}: Centerline Pressure', fontweight='bold', pad=14)
+
+    fig.colorbar(surf, ax=ax, shrink=0.45, aspect=12, pad=0.1,
+                 label='Pressure (mmHg)')
+
+    out_png = output_folder / f"{case_name}_pressureCenterline3D.png"
+    plt.savefig(out_png, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Saved 3D plot    ->  {out_png}")
 
 
 # ======================================================================================================
@@ -367,7 +419,8 @@ def main():
     # ---- Map ALL centerline points to nearest volume nodes ----
     print(f"Mapping all {len(centerline_coords)} centerline points to volume mesh nodes ...")
     all_vol_node_ids = find_nearest_volume_nodes(vol_coords, centerline_coords)
-    print(f"Done.\n")
+    cl_dist = compute_centerline_distances(centerline_coords, args.inlet_point_id)
+    print(f"Centerline length: {cl_dist[-1]:.1f} mm\n")
 
     # ---- Find & sort CFD snapshot HDF5 files ----
     CFD_h5_files = sorted(input_folder.glob('*_curcyc_*up.h5'), key=extract_timestep_from_h5_filename)
@@ -415,15 +468,22 @@ def main():
     plot_params = {"Q_min": args.flowrate_min, "Q_max": args.flowrate_max}
     plot_pressure_drop(output_folder, args.case_name, Q_in, dP, P_inlet, P_outlet, plot_params)
 
-    # ---- Animate P vs. centerline ID over time ----
+    # ---- Animate P vs. distance from inlet over time ----
     print(f"\nGenerating centerline pressure animation (frame stride = {args.frame_stride}) ...")
     animate_centerline_pressure(
         output_folder, args.case_name,
-        pressures_all, Q_in,
+        pressures_all, Q_in, cl_dist,
         frame_stride=args.frame_stride,
     )
 
-    print("\nDone.")
+    # ---- 3D surface: distance from inlet x time x pressure ----
+    print(f"\nGenerating 3D surface plot (time subsampled every {args.frame_stride} snapshots) ...")
+    plot_centerline_pressure_3d(
+        output_folder, args.case_name,
+        pressures_all, Q_in, cl_dist,
+        frame_stride=args.frame_stride,
+    )
+
 
 
 if __name__ == '__main__':

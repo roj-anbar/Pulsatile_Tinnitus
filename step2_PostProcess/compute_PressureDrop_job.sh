@@ -27,7 +27,7 @@ CASE=PTSeg028_base_0p64
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE
 MESH_FOLDER="$BASE_DIR/step1_CFD/data"
 CENTERLINE="$MESH_FOLDER/${CASE}_centerline_points.csv"
-INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq1"
+INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq5"
 OUTPUT="$BASE_DIR/step2_PostProcess/Pressure"
 
 SCRIPT="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/compute_PressureDrop.py"
@@ -50,10 +50,10 @@ python "$SCRIPT" \
     --centerline_csv    "$CENTERLINE" \
     --inlet_point_id    1333          \
     --outlet_point_id   0             \
-    --save_freq         1             \
+    --save_freq         5             \
     --flowrate_min      2.0           \
     --flowrate_max      10.0          \
-    --frame_stride      200
+    --frame_stride      100
 
 
 # ------------------------------ Run directly from terminal -----------------------------------------------------------
