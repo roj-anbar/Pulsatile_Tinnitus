@@ -52,21 +52,23 @@ python "$SCRIPT" \
     --outlet_point_id   0             \
     --save_freq         1             \
     --flowrate_min      2.0           \
-    --flowrate_max      10.0
+    --flowrate_max      10.0          \
+    --frame_stride      200
 
 
 # ------------------------------ Run directly from terminal -----------------------------------------------------------
-python compute_PressureDrop.py \
-    --case_name         "PTSeg043_noLabbe_base"       \
-    --input_folder      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/results/PTSeg043_noLabbe_base_ts10000_cy6_saveFreq5/"      \
-    --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data" \
-    --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step2_PostProcess/Pressure"     \
-    --centerline_csv    "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data/PTSeg043_noLabbe_base_centerline_points.csv" \
-    --inlet_point_id    1          \
-    --outlet_point_id   614            \
-    --save_freq         5             \
-    --flowrate_min      2.0           \
-    --flowrate_max      10.0
+# python compute_PressureDrop.py \
+#     --case_name         "PTSeg043_noLabbe_base"       \
+#     --input_folder      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/results/PTSeg043_noLabbe_base_ts10000_cy6_saveFreq5/"      \
+#     --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data" \
+#     --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step2_PostProcess/Pressure"     \
+#     --centerline_csv    "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data/PTSeg043_noLabbe_base_centerline_points.csv" \
+#     --inlet_point_id    1          \
+#     --outlet_point_id   614            \
+#     --save_freq         5             \
+#     --flowrate_min      2.0           \
+#     --flowrate_max      10.0          \
+#     --frame_stride      20
 
 
 echo "Job finished: $(date)"

@@ -62,6 +62,7 @@ import argparse
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.animation as manim
 import multiprocessing as mp
 from multiprocessing import sharedctypes
 from pathlib import Path
@@ -118,6 +119,11 @@ def find_nearest_volume_node(vol_coords: np.ndarray, query_point: np.ndarray) ->
     """Return the global volume mesh node index nearest to query_point."""
     dists = np.sum((vol_coords - query_point) ** 2, axis=1)
     return int(np.argmin(dists))
+
+
+def find_nearest_volume_nodes(vol_coords: np.ndarray, query_points: np.ndarray) -> list:
+    """Return volume mesh node indices nearest to each row in query_points."""
+    return [find_nearest_volume_node(vol_coords, pt) for pt in query_points]
 
 
 def _create_shared_array(size):
@@ -227,6 +233,79 @@ def plot_pressure_drop(output_folder: Path, case_name: str,
     print(f"Saved plot  ->  {out_png}")
 
 
+def animate_centerline_pressure(output_folder: Path, case_name: str,
+                                pressures_all: np.ndarray, Q_in: np.ndarray,
+                                frame_stride: int):
+    """
+    Animate P (mmHg) vs. centerline point ID stepping every frame_stride snapshots.
+
+    Parameters
+    ----------
+    pressures_all : (n_cl_points, n_snapshots) float [Pa]
+    Q_in          : (n_snapshots,) float [mL/s]
+    frame_stride  : int — use every Nth snapshot as an animation frame
+    """
+    n_cl_points, n_snapshots = pressures_all.shape
+    frame_indices = list(range(0, n_snapshots, frame_stride))
+    cl_ids        = np.arange(n_cl_points)
+    P_mmHg        = pressures_all / 133.3                     # Pa -> mmHg
+
+    P_min = float(P_mmHg.min())
+    P_max = float(P_mmHg.max())
+    pad   = max((P_max - P_min) * 0.05, 1.0)
+
+    font_size = 13
+    plt.rc('font',   size=font_size)
+    plt.rc('axes',   labelsize=font_size)
+    plt.rc('xtick',  labelsize=font_size)
+    plt.rc('ytick',  labelsize=font_size)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    (line,)  = ax.plot([], [], linewidth=1.5, color='steelblue')
+    ax.set_xlim(0, n_cl_points - 1)
+    ax.set_ylim(P_min - pad, P_max + pad)
+    ax.set_xlabel('Centerline Point ID', fontweight='bold', labelpad=8)
+    ax.set_ylabel('Pressure (mmHg)',     fontweight='bold', labelpad=8)
+    ax.grid(True, alpha=0.3)
+    title_obj = ax.set_title('')
+    fig.tight_layout()
+
+    def _init():
+        line.set_data([], [])
+        title_obj.set_text('')
+        return line, title_obj
+
+    def _update(anim_frame):
+        t_idx = frame_indices[anim_frame]
+        line.set_data(cl_ids, P_mmHg[:, t_idx])
+        title_obj.set_text(
+            f'{case_name}  |  Q_inlet = {Q_in[t_idx]:.2f} mL/s  '
+            f'(snapshot {t_idx} / {n_snapshots - 1})'
+        )
+        return line, title_obj
+
+    anim = manim.FuncAnimation(
+        fig, _update,
+        frames   = len(frame_indices),
+        init_func= _init,
+        blit     = True,
+        interval = 100,
+    )
+
+    out_mp4 = output_folder / f"{case_name}_pressureCenterline.mp4"
+    try:
+        writer = manim.FFMpegWriter(fps=10, metadata=dict(title=case_name), bitrate=1800)
+        anim.save(str(out_mp4), writer=writer, dpi=150)
+        print(f"Saved animation  ->  {out_mp4}")
+    except Exception:
+        out_gif = output_folder / f"{case_name}_centerline_pressure_anim.gif"
+        print("ffmpeg not available — falling back to GIF")
+        anim.save(str(out_gif), writer='pillow', fps=10, dpi=120)
+        print(f"Saved animation  ->  {out_gif}")
+    finally:
+        plt.close(fig)
+
+
 # ======================================================================================================
 # MAIN
 # ======================================================================================================
@@ -247,6 +326,7 @@ def parse_args():
     ap.add_argument("--flowrate_min",      type=float, default=2.0,    help="Lower inlet flowrate limit for plot x-axis [mL/s] (default: 2.0)")
     ap.add_argument("--flowrate_max",      type=float, default=10.0,   help="Upper inlet flowrate limit for plot x-axis [mL/s] (default: 10.0)")
     ap.add_argument("--n_process",         type=int,   default=max(1, mp.cpu_count() - 1), help="Number of parallel reader processes (default: #CPUs - 1)")
+    ap.add_argument("--frame_stride",      type=int,   default=20,    help="Animation frame stride: use every Nth snapshot (default: 20)")
     return ap.parse_args()
 
 
@@ -284,6 +364,11 @@ def main():
     print(f"Inlet  centerline coord (row {args.inlet_point_id:4d}) : {inlet_coord}  ->  volume node {inlet_vol_id}")
     print(f"Outlet centerline coord (row {args.outlet_point_id:4d}) : {outlet_coord}  ->  volume node {outlet_vol_id}\n")
 
+    # ---- Map ALL centerline points to nearest volume nodes ----
+    print(f"Mapping all {len(centerline_coords)} centerline points to volume mesh nodes ...")
+    all_vol_node_ids = find_nearest_volume_nodes(vol_coords, centerline_coords)
+    print(f"Done.\n")
+
     # ---- Find & sort CFD snapshot HDF5 files ----
     CFD_h5_files = sorted(input_folder.glob('*_curcyc_*up.h5'), key=extract_timestep_from_h5_filename)
     if not CFD_h5_files:
@@ -296,12 +381,14 @@ def main():
         timesteps_per_cyc = extract_sim_params_from_h5_filename(CFD_h5_files[0])
         print(f"Parsed timesteps_per_cycle = {timesteps_per_cyc} from filename.\n")
 
-    # ---- Read pressure time series at the two nodes ----
-    pressures = read_pressure_timeseries_at_nodes(
-        CFD_h5_files, [inlet_vol_id, outlet_vol_id], args.density, args.n_process
-    )
-    P_inlet  = pressures[0, :]   # (n_snapshots,) [Pa]
-    P_outlet = pressures[1, :]   # (n_snapshots,) [Pa]
+    # ---- Read pressure time series at ALL centerline nodes ----
+    pressures_all = read_pressure_timeseries_at_nodes(
+        CFD_h5_files, all_vol_node_ids, args.density, args.n_process
+    )   # (n_cl_points, n_snapshots) [Pa]
+
+    # ---- Extract inlet / outlet from the full array ----
+    P_inlet  = pressures_all[args.inlet_point_id,  :]   # (n_snapshots,) [Pa]
+    P_outlet = pressures_all[args.outlet_point_id, :]   # (n_snapshots,) [Pa]
 
     # ---- Compute pressure drop ----
     dP = P_inlet - P_outlet      # (n_snapshots,) [Pa]
@@ -319,13 +406,22 @@ def main():
     out_npz = output_folder / f"{args.case_name}_pressureInOut.npz"
     np.savez(out_npz,
              Q_in=Q_in, dP=dP, P_inlet=P_inlet, P_outlet=P_outlet,
+             pressures_all=pressures_all,
              inlet_vol_id=np.array(inlet_vol_id),  outlet_vol_id=np.array(outlet_vol_id),
              inlet_coord=inlet_coord,               outlet_coord=outlet_coord)
     print(f"Saved data  ->  {out_npz}")
 
-    # ---- Plot ----
+    # ---- Plot pressure drop ----
     plot_params = {"Q_min": args.flowrate_min, "Q_max": args.flowrate_max}
     plot_pressure_drop(output_folder, args.case_name, Q_in, dP, P_inlet, P_outlet, plot_params)
+
+    # ---- Animate P vs. centerline ID over time ----
+    print(f"\nGenerating centerline pressure animation (frame stride = {args.frame_stride}) ...")
+    animate_centerline_pressure(
+        output_folder, args.case_name,
+        pressures_all, Q_in,
+        frame_stride=args.frame_stride,
+    )
 
     print("\nDone.")
 
