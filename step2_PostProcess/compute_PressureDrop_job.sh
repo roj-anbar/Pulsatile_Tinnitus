@@ -57,13 +57,13 @@ python "$SCRIPT" \
 
 # ------------------------------ Run directly from terminal -----------------------------------------------------------
 python compute_PressureDrop.py \
-    --case_name         "PTSeg028_base_0p64"       \
-    --input_folder      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq5/"      \
-    --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data" \
-    --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/Pressure"     \
-    --centerline_csv    "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data/PTSeg028_base_0p64_centerline_points.csv" \
-    --inlet_point_id    1333          \
-    --outlet_point_id   0            \
+    --case_name         "PTSeg043_noLabbe_base"       \
+    --input_folder      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/results/PTSeg043_noLabbe_base_ts10000_cy6_saveFreq5/"      \
+    --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data" \
+    --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step2_PostProcess/Pressure"     \
+    --centerline_csv    "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data/PTSeg043_noLabbe_base_centerline_points.csv" \
+    --inlet_point_id    1          \
+    --outlet_point_id   614            \
     --save_freq         5             \
     --flowrate_min      2.0           \
     --flowrate_max      10.0
