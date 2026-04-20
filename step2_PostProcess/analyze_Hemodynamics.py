@@ -1,34 +1,39 @@
 # -----------------------------------------------------------------------------------------------------------------------
-# compute_PressureDrop.py
-# Computes pressure drop from inlet to outlet and plots it as a function of inlet flowrate.
+# analyze_Hemodynamics.py
+# Post-processes CFD HDF5 snapshots to extract and visualize pressure and velocity hemodynamic metrics.
 #
 # __author__: Rojin Anbarafshan <rojin.anbar@gmail.com>
 # __date__:   2026-04
 #
 # PURPOSE:
-#   - Reads CFD HDF5 snapshots, extracts pressure at a single inlet and outlet point,
-#     computes ΔP = P_inlet − P_outlet over time, converts time to inlet flowrate (Q = 2t),
-#     and saves the data and a plot.
+#   - Reads Oasis/FEniCS HDF5 snapshots and extracts pressure along all centerline points over time.
+#   - Computes pressure drop (ΔP = P_inlet − P_outlet) as a function of inlet flowrate (Q = 2t).
+#   - Animates centerline pressure distribution over time (P vs. distance from inlet).
+#   - Generates a 3D surface plot: centerline distance × inlet flowrate × pressure.
+#   - Renders a geometry reference image of centerline points colored by distance from inlet.
+#   - Extracts velocity magnitude at a hardcoded probe node and plots it vs inlet flowrate.
 #
 # REQUIREMENTS:
 #   - h5py, numpy, matplotlib
 #   - On Trillium: virtual environment called "pyvista36"
 #
 # EXECUTION:
-#   - Run using "compute_PressureDrop_job.sh" bash script.
+#   - Run using "analyze_Hemodynamics_job.sh" bash script.
 #   - Run directly on a login/debug node:
 #       > module load StdEnv/2023 gcc/12.3 python/3.12.4
 #       > source $HOME/virtual_envs/pyvista36/bin/activate
 #
 # EXAMPLE CLI:
-#       > python compute_PressureDrop.py \
-#           --input_folder   <path_to_CFD_results_folder> \
-#           --mesh_folder    <path_to_case_mesh_data>     \
-#           --output_folder  <path_to_output_folder>      \
-#           --case_name      PTSeg028_base_0p64           \
-#           --centerline_csv <path_to_centerline_CSV>     \
-#           --inlet_point_id  5                           \
-#           --outlet_point_id 95                          \
+#       > python analyze_Hemodynamics.py \
+#           --input_folder      <path_to_CFD_results_folder> \
+#           --mesh_folder       <path_to_case_mesh_data>     \
+#           --output_folder     <path_to_output_folder>      \
+#           --case_name         PTSeg028_base_0p64           \
+#           --centerline_csv    <path_to_centerline_CSV>     \
+#           --inlet_point_id    1333                         \
+#           --outlet_point_id   0                            \
+#           --save_freq         5                            \
+#           --frame_stride      100                          \
 #
 # INPUTS:
 #   --input_folder      Path to results directory with HDF5 snapshots
@@ -41,17 +46,26 @@
 #   --density           Blood density [kg/m³] (default: 1057)
 #   --period_seconds    Flow period [s] (default: 0.915)
 #   --timesteps_per_cyc Timesteps per cycle (parsed from filename if omitted)
+#   --save_freq         Snapshot save frequency: 1 = every timestep (default: 1)
 #   --flowrate_min      Lower flowrate limit for plot x-axis [mL/s] (default: 2.0)
 #   --flowrate_max      Upper flowrate limit for plot x-axis [mL/s] (default: 10.0)
+#   --n_process         Number of parallel reader processes (default: #CPUs - 1)
+#   --frame_stride      Animation frame stride: use every Nth snapshot (default: 20)
 #
 # OUTPUTS:
-#   - <case_name>_pressure_drop.npz  — Q_in, dP, P_inlet, P_outlet arrays
-#   - <case_name>_pressure_drop.png  — ΔP and individual pressures vs Q_inlet
+#   - <case_name>_pressureInOut.npz          — Q_in, dP, P_inlet, P_outlet, pressures_all arrays
+#   - <case_name>_pressureInOut.png          — ΔP vs Q_inlet
+#   - <case_name>_pressureCenterline.mp4     — animated centerline pressure vs distance from inlet
+#   - <case_name>_pressureCenterline3D.png   — 3D surface: distance × flowrate × pressure
+#   - <case_name>_centerlineGeometry.png     — geometry reference: centerline colored by distance
+#   - <case_name>_velocity_node<ID>.png      — velocity magnitude at probe node vs Q_inlet
 #
 # NOTES:
-#   - Pressure in Oasis HDF5 is p/rho; multiplied by density to get Pa.
+#   - Pressure in Oasis HDF5 is p/rho; multiplied by density to get Pa, then converted to mmHg.
 #   - Inlet flowrate is derived from time as Q_inlet = 2 * t [mL/s] (PT-Ramp ramp slope).
-#   - Nearest volume mesh node to each centerline coordinate is found via KDTree.
+#   - Nearest volume mesh node to each centerline coordinate is found via brute-force L2 search.
+#   - Velocity probe node (PROBE_NODE_ID) is hardcoded in main() — not a CLI argument.
+#   - Centerline coordinates and mesh coordinates are expected in mm.
 #
 # Copyright (C) 2026 University of Toronto, Biomedical Simulation Lab.
 # -----------------------------------------------------------------------------------------------------------------------
@@ -196,12 +210,35 @@ def read_pressure_timeseries_at_nodes(h5_files: list, node_ids: list, density: f
     return _view_shared_array(shared_pressure_ctype).copy()  # (n_nodes, n_snapshots)
 
 
+def read_velocity_timeseries_at_node(h5_files: list, node_id: int) -> np.ndarray:
+    """
+    Read velocity magnitude at a single volume mesh node for every HDF5 snapshot.
+
+    node_id is set inside this function — it is NOT a CLI argument.
+    Oasis stores velocity components as Solution/u0, u1, u2 in m/s.
+
+    Returns
+    -------
+    vel_mag : (n_snapshots,) float [m/s]
+    """
+    n_snapshots = len(h5_files)
+    vel_mag = np.zeros(n_snapshots)
+    for t_index, h5f in enumerate(h5_files):
+        with h5py.File(h5f, 'r') as h5:
+            u0 = float(np.array(h5['Solution']['u0']).flatten()[node_id])
+            u1 = float(np.array(h5['Solution']['u1']).flatten()[node_id])
+            u2 = float(np.array(h5['Solution']['u2']).flatten()[node_id])
+            vel_mag[t_index] = np.sqrt(u0**2 + u1**2 + u2**2)
+    return vel_mag
+
+
+
 # ======================================================================================================
 # PLOTTING
 # ======================================================================================================
 
 
-def plot_centerline(output_folder: Path, case_name: str,
+def plot_centerline_geometry(output_folder: Path, case_name: str,
                 mesh_file: Path, 
                 centerline_coords: np.ndarray, cl_dist: np.ndarray,
                 inlet_point_id: int):
@@ -216,25 +253,29 @@ def plot_centerline(output_folder: Path, case_name: str,
     """
     out_png = output_folder / f"{case_name}_geometryCenterline.png"
 
-    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+    # Scale box aspect to data ranges so elongated geometries don't look squished
+    ranges = centerline_coords.max(axis=0) - centerline_coords.min(axis=0)
+    ranges = np.where(ranges == 0, 1.0, ranges)   # avoid divide-by-zero for flat dims
 
-
-    fig = plt.figure(figsize=(9, 9))
+    fig = plt.figure(figsize=(4, 8))
     ax  = fig.add_subplot(111, projection='3d')
-    sc = ax.scatter(centerline_coords[:, 0], centerline_coords[:, 1], centerline_coords[:, 2], c=cl_dist, cmap='hot', s=18, zorder=5, linewidths=0)
+    ax.set_box_aspect(ranges / ranges.max())       # rectangular box matching data shape
+
+    sc = ax.scatter(centerline_coords[:, 0], centerline_coords[:, 1], centerline_coords[:, 2], c=cl_dist, cmap='gnuplot2', s=10, zorder=5, linewidths=0)
     inlet_coord = centerline_coords[inlet_point_id]
     ax.scatter(*inlet_coord, color='red', s=80, zorder=10)
-    ax.text(*inlet_coord, '  Inlet', color='red', fontsize=10)
-    fig.colorbar(sc, ax=ax, shrink=0.5, pad=0.1, label='Distance from Inlet (mm)')
-    ax.set_xlabel('X (mm)'); ax.set_ylabel('Y (mm)'); ax.set_zlabel('Z (mm)')
+    ax.text(*inlet_coord, '  inlet', color='red', fontsize=8)
+    cbar = fig.colorbar(sc, ax=ax, shrink=0.35, pad=0.2, label='Distance from Inlet (mm)')
+    cbar.ax.tick_params(labelsize=8)
+    cbar.set_label('Distance from Inlet (mm)', fontsize=8)
+    ax.set_xlabel('X (mm)', fontsize=8); ax.set_ylabel('Y (mm)', fontsize=8); ax.set_zlabel('Z (mm)', fontsize=8)
     ax.set_title(f'{case_name} — Centerlines', fontweight='bold')
     ax.view_init(elev=30, azim=120)   # 180° flip from matplotlib default (azim=-60)
+    
     plt.tight_layout()
     plt.savefig(out_png, dpi=150, bbox_inches='tight')
     plt.close(fig)
-    print(f"Saved centerline geometry  ->  {out_png}  (matplotlib fallback)")
-
-
+    #print(f"Saved centerline geometry  ->  {out_png}  (matplotlib fallback)")
 
 
 def plot_pressure_drop(output_folder: Path, case_name: str,
@@ -280,7 +321,77 @@ def plot_pressure_drop(output_folder: Path, case_name: str,
     out_png = output_folder / f"{case_name}_pressureInOut.png"
     plt.savefig(out_png, dpi=150)
     plt.close(fig)
-    print(f"Saved plot  ->  {out_png}")
+    #print(f"Saved plot  ->  {out_png}")
+
+
+def plot_centerline_pressure_3d(output_folder: Path, case_name: str,
+                                pressures_all: np.ndarray, Q_in: np.ndarray,
+                                cl_dist: np.ndarray, frame_stride: int):
+    """
+    3D surface plot: x = distance from inlet (mm), y = Q_inlet (mL/s), z = pressure (mmHg).
+
+    The time axis is subsampled by frame_stride to keep the surface tractable.
+    """
+
+    _n_cl_points, n_snapshots = pressures_all.shape
+    P_mmHg = pressures_all / 133.3
+
+    t_idx = np.arange(0, n_snapshots, frame_stride)
+    P_sub = P_mmHg[:, t_idx]           # (n_cl_points, n_t_sub)
+    Q_sub = Q_in[t_idx]                 # (n_t_sub,)
+
+    X, Y = np.meshgrid(cl_dist, Q_sub, indexing='ij')   # (n_cl_points, n_t_sub)
+
+    fig = plt.figure(figsize=(16, 8))
+    ax  = fig.add_subplot(111, projection='3d')
+
+    surf = ax.plot_surface(X, Y, P_sub, cmap='winter', linewidth=0, antialiased=True, alpha=0.8)
+
+    ax.set_xlim(0, -250)
+    #ax.set_ylim([2,10])
+    ax.set_xlabel('Distance from Inlet (mm)', fontweight='bold', labelpad=10)
+    ax.set_ylabel('Inlet Flow Rate (mL/s)',   fontweight='bold', labelpad=10)
+    ax.set_zlabel('Pressure (mmHg)',          fontweight='bold', labelpad=10)
+    ax.set_title(f'{case_name}: Centerline Pressure', fontweight='bold', pad=10)
+    fig.colorbar(surf, ax=ax, shrink=0.45, aspect=12, pad=0.1, label='Pressure (mmHg)')
+
+    out_png = output_folder / f"{case_name}_pressureCenterline3D.png"
+    plt.savefig(out_png, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Saved 3D plot    ->  {out_png}")
+
+
+def plot_velocity_at_node(output_folder: Path, case_name: str,
+                          vel_mag: np.ndarray, Q_in: np.ndarray, node_id: int):
+    """
+    Plot velocity magnitude at a single probe node vs inlet flowrate.
+    Saves a PNG to output_folder.
+    """
+    #Q_min = plot_params.get("Q_min", Q_in.min())
+    #Q_max = plot_params.get("Q_max", Q_in.max())
+
+    font_size = 14
+    plt.rc('font',   size=font_size)
+    plt.rc('axes',   titlesize=font_size)
+    plt.rc('xtick',  labelsize=font_size)
+    plt.rc('ytick',  labelsize=font_size)
+    plt.rc('legend', fontsize=font_size - 2)
+    plt.rc('axes',   labelsize=font_size)
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    fig.suptitle(f'{case_name}: Velocity at Node {node_id}', fontweight='bold')
+
+    ax.plot(Q_in, vel_mag * 100, linewidth=1, color='darkred')   # m/s -> cm/s
+    ax.set_xlabel('Inlet Flow Rate (mL/s)', fontweight='bold', labelpad=10)
+    ax.set_ylabel('Velocity Magnitude (m/s)', fontweight='bold', labelpad=10)
+    #ax.set_xlim([Q_min, Q_max])
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    out_png = output_folder / f"{case_name}_velocity_node{node_id}.png"
+    plt.savefig(out_png, dpi=150)
+    plt.close(fig)
+    #print(f"Saved plot  ->  {out_png}")
 
 
 def animate_centerline_pressure(output_folder: Path, case_name: str,
@@ -304,21 +415,21 @@ def animate_centerline_pressure(output_folder: Path, case_name: str,
     P_max = float(P_mmHg.max())
     pad   = max((P_max - P_min) * 0.05, 1.0)
 
-    font_size = 13
+    font_size = 12
     plt.rc('font',   size=font_size)
     plt.rc('axes',   labelsize=font_size)
     plt.rc('xtick',  labelsize=font_size)
     plt.rc('ytick',  labelsize=font_size)
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    (line,)  = ax.plot([], [], linewidth=1.5, color='steelblue')
+    fig, ax = plt.subplots(figsize=(8, 6))
+    (line,)  = ax.plot([], [], linewidth=2.5, color='blue')
     ax.set_xlim(cl_dist[0], cl_dist[-1])
     ax.set_ylim(P_min - pad, P_max + pad)
     ax.set_xlabel('Distance from Inlet (mm)', fontweight='bold', labelpad=8)
     ax.set_ylabel('Pressure (mmHg)',          fontweight='bold', labelpad=8)
     ax.grid(True, alpha=0.3)
     title_obj = ax.set_title('')
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
 
     def _init():
         line.set_data([], [])
@@ -343,56 +454,11 @@ def animate_centerline_pressure(output_folder: Path, case_name: str,
     )
 
     out_mp4 = output_folder / f"{case_name}_pressureCenterline.mp4"
-    try:
-        writer = manim.FFMpegWriter(fps=10, metadata=dict(title=case_name), bitrate=1800)
-        anim.save(str(out_mp4), writer=writer, dpi=150)
-        print(f"Saved animation  ->  {out_mp4}")
-    except Exception:
-        out_gif = output_folder / f"{case_name}_centerline_pressure_anim.gif"
-        print("ffmpeg not available — falling back to GIF")
-        anim.save(str(out_gif), writer='pillow', fps=10, dpi=120)
-        print(f"Saved animation  ->  {out_gif}")
-    finally:
-        plt.close(fig)
-
-
-def plot_centerline_pressure_3d(output_folder: Path, case_name: str,
-                                pressures_all: np.ndarray, Q_in: np.ndarray,
-                                cl_dist: np.ndarray, frame_stride: int):
-    """
-    3D surface plot: x = distance from inlet (mm), y = Q_inlet (mL/s), z = pressure (mmHg).
-
-    The time axis is subsampled by frame_stride to keep the surface tractable.
-    """
-    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 — registers the 3D projection
-
-    _n_cl_points, n_snapshots = pressures_all.shape
-    P_mmHg = pressures_all / 133.3
-
-    t_idx = np.arange(0, n_snapshots, frame_stride)
-    P_sub = P_mmHg[:, t_idx]           # (n_cl_points, n_t_sub)
-    Q_sub = Q_in[t_idx]                 # (n_t_sub,)
-
-    X, Y = np.meshgrid(cl_dist, Q_sub, indexing='ij')   # (n_cl_points, n_t_sub)
-
-    fig = plt.figure(figsize=(13, 8))
-    ax  = fig.add_subplot(111, projection='3d')
-
-    surf = ax.plot_surface(X, Y, P_sub, cmap='viridis',
-                           linewidth=0, antialiased=True, alpha=0.92)
-
-    ax.set_xlabel('Distance from Inlet (mm)', fontweight='bold', labelpad=12)
-    ax.set_ylabel('Inlet Flow Rate$ (mL/s)', fontweight='bold', labelpad=12)
-    ax.set_zlabel('Pressure (mmHg)',    fontweight='bold', labelpad=12)
-    ax.set_title(f'{case_name}: Centerline Pressure', fontweight='bold', pad=14)
-
-    fig.colorbar(surf, ax=ax, shrink=0.45, aspect=12, pad=0.1,
-                 label='Pressure (mmHg)')
-
-    out_png = output_folder / f"{case_name}_pressureCenterline3D.png"
-    plt.savefig(out_png, dpi=150, bbox_inches='tight')
+    writer = manim.FFMpegWriter(fps=10, metadata=dict(title=case_name), bitrate=1800)
+    anim.save(str(out_mp4), writer=writer, dpi=150)
+    #print(f"Saved animation  ->  {out_mp4}")
     plt.close(fig)
-    print(f"Saved 3D plot    ->  {out_png}")
+
 
 
 # ======================================================================================================
@@ -424,7 +490,7 @@ def main():
 
     input_folder  = Path(args.input_folder)
     mesh_folder   = Path(args.mesh_folder)
-    output_folder = Path(args.output_folder)
+    output_folder = Path(args.output_folder)/f"cy6_saveFreq{args.save_freq}"
     output_folder.mkdir(parents=True, exist_ok=True)
 
     print("=" * 120)
@@ -437,12 +503,13 @@ def main():
     print(f"  Outlet point ID : {args.outlet_point_id}")
     print("=" * 120 + "\n")
 
-    # ---- Load volume mesh coordinates ----
+    # --------------------- Read and Load Data ------------------------------------------------
+    # Load volume mesh coordinates 
     mesh_file  = list(mesh_folder.glob('*.h5'))[0]
     vol_coords = load_volume_mesh_coords(mesh_file)
     print(f"Loaded volume mesh: {vol_coords.shape[0]} nodes  ({mesh_file.name})\n")
 
-    # ---- Identify inlet / outlet volume nodes from centerline CSV ----
+    # Identify inlet / outlet volume nodes from centerline CSV
     centerline_coords = read_centerline_coords_from_csv(args.centerline_csv)
     inlet_coord  = centerline_coords[args.inlet_point_id]
     outlet_coord = centerline_coords[args.outlet_point_id]
@@ -453,69 +520,75 @@ def main():
     print(f"Inlet  centerline coord (row {args.inlet_point_id:4d}) : {inlet_coord}  ->  volume node {inlet_vol_id}")
     print(f"Outlet centerline coord (row {args.outlet_point_id:4d}) : {outlet_coord}  ->  volume node {outlet_vol_id}\n")
 
-    # ---- Map ALL centerline points to nearest volume nodes ----
+    # Map ALL centerline points to nearest volume nodes 
     print(f"Mapping all {len(centerline_coords)} centerline points to volume mesh nodes ...")
     all_vol_node_ids = find_nearest_volume_nodes(vol_coords, centerline_coords)
     cl_dist = compute_centerline_distances(centerline_coords, args.inlet_point_id)
     print(f"Centerline length: {cl_dist[-1]:.1f} mm\n")
 
-    # ---- Find & sort CFD snapshot HDF5 files ----
+    # Find & sort CFD snapshot HDF5 files 
     CFD_h5_files = sorted(input_folder.glob('*_curcyc_*up.h5'), key=extract_timestep_from_h5_filename)
     if not CFD_h5_files:
         print(f"No CFD snapshots found in {input_folder}!")
         sys.exit(1)
 
-    # ---- Parse temporal parameters ----
+    # Parse temporal parameters 
     timesteps_per_cyc = args.timesteps_per_cyc
     if timesteps_per_cyc is None:
         timesteps_per_cyc = extract_sim_params_from_h5_filename(CFD_h5_files[0])
         print(f"Parsed timesteps_per_cycle = {timesteps_per_cyc} from filename.\n")
 
-    # ---- Read pressure time series at ALL centerline nodes ----
+    # Read pressure time series at ALL centerline nodes 
     pressures_all = read_pressure_timeseries_at_nodes(CFD_h5_files, all_vol_node_ids, args.density, args.n_process)   # (n_cl_points, n_snapshots) [Pa]
 
-    # ---- Extract inlet / outlet from the full array ----
-    P_inlet  = pressures_all[args.inlet_point_id,  :]   # (n_snapshots,) [Pa]
-    P_outlet = pressures_all[args.outlet_point_id, :]   # (n_snapshots,) [Pa]
-
-    # ---- Compute pressure drop ----
-    dP = P_inlet - P_outlet      # (n_snapshots,) [Pa]
-
-    # ---- Build inlet flowrate array (Q = 2*t, ramp-specific) ----
+    # Build inlet flowrate array (Q = 2*t, ramp-specific) 
     n_snapshots = len(CFD_h5_files)
     dt          = args.save_freq * args.period_seconds / timesteps_per_cyc  # [s] per saved snapshot
     time_array  = np.arange(n_snapshots) * dt                               # [s]
     Q_in        = 2.0 * time_array                                          # [mL/s]
 
-    print(f"\nQ_inlet range: {Q_in.min():.2f} to {Q_in.max():.2f} mL/s  ({n_snapshots} snapshots)")
-    print(f"dP range     : {dP.min():.2f} to {dP.max():.2f} Pa\n")
 
-    # ---- Save numerical results ----
+    # ------------------- Plot: 3D surface Centerline pressure over time --------------------------
+    print(f"\nGenerating plot of centerline geometry ...")
+    plot_centerline_geometry(output_folder, args.case_name, mesh_file, centerline_coords, cl_dist, args.inlet_point_id)
+
+
+    # --------------------- Compute and plot pressure drop ------------------------------------------------
+    # Extract inlet / outlet from the full array
+    P_inlet  = pressures_all[args.inlet_point_id,  :]   # (n_snapshots,) [Pa]
+    P_outlet = pressures_all[args.outlet_point_id, :]   # (n_snapshots,) [Pa]
+
+    # Compute pressure drop
+    dP = P_inlet - P_outlet      # (n_snapshots,) [Pa]
+    #print(f"dP range     : {dP.min():.2f} to {dP.max():.2f} Pa\n")
+
+    # Save numerical results
     out_npz = output_folder / f"{args.case_name}_pressureInOut.npz"
     np.savez(out_npz,
              Q_in=Q_in, dP=dP, P_inlet=P_inlet, P_outlet=P_outlet,
              pressures_all=pressures_all,
              inlet_vol_id=np.array(inlet_vol_id),  outlet_vol_id=np.array(outlet_vol_id),
              inlet_coord=inlet_coord,               outlet_coord=outlet_coord)
-    print(f"Saved data  ->  {out_npz}")
 
-
-    # ---- Geometry reference: surface mesh + centerline colored by distance ----
-    print("\nGenerating geometry image with centerlines...")
-    plot_centerline(output_folder, args.case_name, mesh_file, centerline_coords, cl_dist, inlet_point_id=args.inlet_point_id)
-
-
-    # ---- Plot pressure drop ----
+    # Plot pressure drop
     plot_params = {"Q_min": args.flowrate_min, "Q_max": args.flowrate_max}
     plot_pressure_drop(output_folder, args.case_name, Q_in, dP, P_inlet, P_outlet, plot_params)
 
-    # ---- Animate P vs. distance from inlet over time ----
+    # ------------------- Animation: Centerline pressure over time ----------------------------------
     print(f"\nGenerating centerline pressure animation (frame stride = {args.frame_stride}) ...")
     animate_centerline_pressure(output_folder, args.case_name, pressures_all, Q_in, cl_dist, frame_stride=args.frame_stride)
 
-    # ---- 3D surface: distance from inlet x time x pressure ----
+
+    # ------------------- Plot: 3D surface Centerline pressure over time --------------------------
     print(f"\nGenerating 3D surface plot (time subsampled every {args.frame_stride} snapshots) ...")
     plot_centerline_pressure_3d(output_folder, args.case_name, pressures_all, Q_in, cl_dist,frame_stride=args.frame_stride)
+
+
+    # ------------------- Velocity at probe node --------------------------------------------------
+    PROBE_NODE_ID = 9853   # <-- set to desired volume mesh node ID (from mesh.vtu file not centerline.csv)
+    print(f"\nReading velocity magnitude at probe node {PROBE_NODE_ID} ...")
+    vel_mag = read_velocity_timeseries_at_node(h5_files, PROBE_NODE_ID)
+    plot_velocity_at_node(output_folder, args.case_name, vel_mag, Q_in, PROBE_NODE_ID)
 
 
 

@@ -1,13 +1,13 @@
 #!/bin/bash
 #-----------------------------------------------------------------------------------------------------------------------
-# compute_PressureDrop_job.sh
-# SLURM wrapper to run compute_PressureDrop.py for a specific case on Trillium-style clusters.
+# analyze_Hemodynamics_job.sh
+# SLURM wrapper to run analyze_Hemodynamics.py for a specific case on Trillium-style clusters.
 #
 # __author__ = Rojin Anbarafshan <rojin.anbar@gmail.com>
 # __date__   = 2026-04
 #
 # EXECUTION:
-#   sbatch compute_PressureDrop_job.sh
+#   sbatch analyze_Hemodynamics_job.sh
 #
 # Copyright (C) 2026 University of Toronto, Biomedical Simulation Lab.
 #-----------------------------------------------------------------------------------------------------------------------
@@ -16,8 +16,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=192
 #SBATCH --time=00:20:00
-#SBATCH --job-name PT_Pressures
-#SBATCH --output=PT_PressureDrop_%j.txt
+#SBATCH --job-name PT_Hemodynamics
+#SBATCH --output=PT_Hemodynamics_%j.txt
 
 set -euo pipefail
 echo "Job started: $(date)"
@@ -30,7 +30,7 @@ CENTERLINE="$MESH_FOLDER/${CASE}_centerline_points.csv"
 INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq5"
 OUTPUT="$BASE_DIR/step2_PostProcess/Pressure"
 
-SCRIPT="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/compute_PressureDrop.py"
+SCRIPT="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/analyze_Hemodynamics.py"
 
 # --------------------------------- Load Modules ------------------------------------------------------------------------
 module load StdEnv/2023 gcc/12.3 python/3.12.4
@@ -57,7 +57,7 @@ python "$SCRIPT" \
 
 
 # ------------------------------ Run directly from terminal -----------------------------------------------------------
-# python compute_PressureDrop.py \
+# python compute_Pressures.py \
 #     --case_name         "PTSeg043_noLabbe_base"       \
 #     --input_folder      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/results/PTSeg043_noLabbe_base_ts10000_cy6_saveFreq5/"      \
 #     --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data" \
