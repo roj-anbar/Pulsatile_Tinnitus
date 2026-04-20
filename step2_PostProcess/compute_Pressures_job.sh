@@ -16,7 +16,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=192
 #SBATCH --time=00:20:00
-#SBATCH --job-name PT_PressureDrop
+#SBATCH --job-name PT_Pressures
 #SBATCH --output=PT_PressureDrop_%j.txt
 
 set -euo pipefail

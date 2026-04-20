@@ -200,6 +200,43 @@ def read_pressure_timeseries_at_nodes(h5_files: list, node_ids: list, density: f
 # PLOTTING
 # ======================================================================================================
 
+
+def plot_centerline(output_folder: Path, case_name: str,
+                mesh_file: Path, 
+                centerline_coords: np.ndarray, cl_dist: np.ndarray,
+                inlet_point_id: int):
+    """
+    Render centerline points colored by distance from inlet using matplotlib 3D scatter.
+
+    Parameters
+    ----------
+    centerline_coords : (n_cl_points, 3) centerline coordinates [mm]
+    cl_dist           : (n_cl_points,) distance from inlet [mm]
+    inlet_point_id    : row index of inlet in centerline_coords
+    """
+    out_png = output_folder / f"{case_name}_geometryCenterline.png"
+
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+
+
+    fig = plt.figure(figsize=(9, 9))
+    ax  = fig.add_subplot(111, projection='3d')
+    sc = ax.scatter(centerline_coords[:, 0], centerline_coords[:, 1], centerline_coords[:, 2], c=cl_dist, cmap='hot', s=18, zorder=5, linewidths=0)
+    inlet_coord = centerline_coords[inlet_point_id]
+    ax.scatter(*inlet_coord, color='red', s=80, zorder=10)
+    ax.text(*inlet_coord, '  Inlet', color='red', fontsize=10)
+    fig.colorbar(sc, ax=ax, shrink=0.5, pad=0.1, label='Distance from Inlet (mm)')
+    ax.set_xlabel('X (mm)'); ax.set_ylabel('Y (mm)'); ax.set_zlabel('Z (mm)')
+    ax.set_title(f'{case_name} — Centerlines', fontweight='bold')
+    ax.view_init(elev=30, azim=120)   # 180° flip from matplotlib default (azim=-60)
+    plt.tight_layout()
+    plt.savefig(out_png, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Saved centerline geometry  ->  {out_png}  (matplotlib fallback)")
+
+
+
+
 def plot_pressure_drop(output_folder: Path, case_name: str,
                        Q_in: np.ndarray, dP: np.ndarray,
                        P_inlet: np.ndarray, P_outlet: np.ndarray,
@@ -435,9 +472,7 @@ def main():
         print(f"Parsed timesteps_per_cycle = {timesteps_per_cyc} from filename.\n")
 
     # ---- Read pressure time series at ALL centerline nodes ----
-    pressures_all = read_pressure_timeseries_at_nodes(
-        CFD_h5_files, all_vol_node_ids, args.density, args.n_process
-    )   # (n_cl_points, n_snapshots) [Pa]
+    pressures_all = read_pressure_timeseries_at_nodes(CFD_h5_files, all_vol_node_ids, args.density, args.n_process)   # (n_cl_points, n_snapshots) [Pa]
 
     # ---- Extract inlet / outlet from the full array ----
     P_inlet  = pressures_all[args.inlet_point_id,  :]   # (n_snapshots,) [Pa]
@@ -464,25 +499,24 @@ def main():
              inlet_coord=inlet_coord,               outlet_coord=outlet_coord)
     print(f"Saved data  ->  {out_npz}")
 
+
+    # ---- Geometry reference: surface mesh + centerline colored by distance ----
+    print("\nGenerating geometry image with centerlines...")
+    plot_centerline(output_folder, args.case_name, mesh_file, centerline_coords, cl_dist, inlet_point_id=args.inlet_point_id)
+
+
     # ---- Plot pressure drop ----
     plot_params = {"Q_min": args.flowrate_min, "Q_max": args.flowrate_max}
     plot_pressure_drop(output_folder, args.case_name, Q_in, dP, P_inlet, P_outlet, plot_params)
 
     # ---- Animate P vs. distance from inlet over time ----
     print(f"\nGenerating centerline pressure animation (frame stride = {args.frame_stride}) ...")
-    animate_centerline_pressure(
-        output_folder, args.case_name,
-        pressures_all, Q_in, cl_dist,
-        frame_stride=args.frame_stride,
-    )
+    animate_centerline_pressure(output_folder, args.case_name, pressures_all, Q_in, cl_dist, frame_stride=args.frame_stride)
 
     # ---- 3D surface: distance from inlet x time x pressure ----
     print(f"\nGenerating 3D surface plot (time subsampled every {args.frame_stride} snapshots) ...")
-    plot_centerline_pressure_3d(
-        output_folder, args.case_name,
-        pressures_all, Q_in, cl_dist,
-        frame_stride=args.frame_stride,
-    )
+    plot_centerline_pressure_3d(output_folder, args.case_name, pressures_all, Q_in, cl_dist,frame_stride=args.frame_stride)
+
 
 
 
