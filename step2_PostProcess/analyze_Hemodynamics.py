@@ -51,6 +51,7 @@
 #   --flowrate_max      Upper flowrate limit for plot x-axis [mL/s] (default: 10.0)
 #   --n_process         Number of parallel reader processes (default: #CPUs - 1)
 #   --frame_stride      Animation frame stride: use every Nth snapshot (default: 20)
+#   --probe_vol_node_id Volume mesh node ID for velocity probe [from mesh.vtu — NOT a centerline CSV index]
 #
 # OUTPUTS:
 #   - <case_name>_pressureInOut.npz          — Q_in, dP, P_inlet, P_outlet, pressures_all arrays
@@ -171,7 +172,7 @@ def _read_pressure_worker(file_ids, node_ids_arr, h5_files, shared_pressure_ctyp
             shared_pressure[:, t_index] = np.array(h5['Solution']['p']).flatten()[node_ids_arr] * density
 
 
-def read_pressure_timeseries_at_nodes(h5_files: list, node_ids: list, density: float, n_process: int) -> np.ndarray:
+def read_pressure_timeseries_at_nodes_in_parallel(h5_files: list, node_ids: list, density: float, n_process: int) -> np.ndarray:
     """
     Read pressure at the given volume node IDs for every HDF5 snapshot in parallel.
 
@@ -210,26 +211,49 @@ def read_pressure_timeseries_at_nodes(h5_files: list, node_ids: list, density: f
     return _view_shared_array(shared_pressure_ctype).copy()  # (n_nodes, n_snapshots)
 
 
-def read_velocity_timeseries_at_node(h5_files: list, node_id: int) -> np.ndarray:
-    """
-    Read velocity magnitude at a single volume mesh node for every HDF5 snapshot.
+def _read_velocity_worker(file_ids, node_id, h5_files, shared_vel_ctype):
+    """Worker: read velocity magnitude at node_id for a chunk of snapshots into shared 1-D array."""
+    shared_vel = _view_shared_array(shared_vel_ctype)
+    for t_index in file_ids:
+        with h5py.File(h5_files[t_index], 'r') as h5:
+            uvec = np.array(h5['Solution']['u'])[node_id, :]   # (3,)
+            shared_vel[t_index] = np.linalg.norm(uvec)
 
-    node_id is set inside this function — it is NOT a CLI argument.
-    Oasis stores velocity components as Solution/u0, u1, u2 in m/s.
+
+def read_velocity_timeseries_at_node_in_parallel(h5_files: list, node_id: int, n_process: int) -> np.ndarray:
+    """
+    Read velocity magnitude at a single volume mesh node for every HDF5 snapshot in parallel.
+
+    node_id is set at the call site — NOT a CLI argument.
+    Oasis stores velocity as Solution/u with shape (n_nodes, 3).
 
     Returns
     -------
     vel_mag : (n_snapshots,) float [m/s]
     """
-    n_snapshots = len(h5_files)
-    vel_mag = np.zeros(n_snapshots)
-    for t_index, h5f in enumerate(h5_files):
-        with h5py.File(h5f, 'r') as h5:
-            u0 = float(np.array(h5['Solution']['u0']).flatten()[node_id])
-            u1 = float(np.array(h5['Solution']['u1']).flatten()[node_id])
-            u2 = float(np.array(h5['Solution']['u2']).flatten()[node_id])
-            vel_mag[t_index] = np.sqrt(u0**2 + u1**2 + u2**2)
-    return vel_mag
+    n_snapshots      = len(h5_files)
+    shared_vel_ctype = _create_shared_array(n_snapshots)
+
+    print(f"\nReading velocity magnitude at node {node_id} from {n_snapshots} HDF5 snapshots in parallel ...\n")
+
+    time_indices = list(range(n_snapshots))
+    chunk_size   = max(n_snapshots // n_process, 1)
+    time_groups  = [time_indices[i : i + chunk_size] for i in range(0, n_snapshots, chunk_size)]
+
+    processes = []
+    for idx, group in enumerate(time_groups):
+        proc = mp.Process(
+            target = _read_velocity_worker,
+            name   = f"VelReader{idx}",
+            args   = (group, node_id, h5_files, shared_vel_ctype))
+        processes.append(proc)
+
+    for proc in processes:
+        proc.start()
+    for proc in processes:
+        proc.join()
+
+    return _view_shared_array(shared_vel_ctype).copy()  # (n_snapshots,)
 
 
 
@@ -257,7 +281,7 @@ def plot_centerline_geometry(output_folder: Path, case_name: str,
     ranges = centerline_coords.max(axis=0) - centerline_coords.min(axis=0)
     ranges = np.where(ranges == 0, 1.0, ranges)   # avoid divide-by-zero for flat dims
 
-    fig = plt.figure(figsize=(4, 8))
+    fig = plt.figure(figsize=(10, 5))
     ax  = fig.add_subplot(111, projection='3d')
     ax.set_box_aspect(ranges / ranges.max())       # rectangular box matching data shape
 
@@ -358,7 +382,6 @@ def plot_centerline_pressure_3d(output_folder: Path, case_name: str,
     out_png = output_folder / f"{case_name}_pressureCenterline3D.png"
     plt.savefig(out_png, dpi=150, bbox_inches='tight')
     plt.close(fig)
-    print(f"Saved 3D plot    ->  {out_png}")
 
 
 def plot_velocity_at_node(output_folder: Path, case_name: str,
@@ -472,8 +495,9 @@ def parse_args():
     ap.add_argument("--output_folder",     required=True,              help="Output directory for results")
     ap.add_argument("--case_name",         required=True,              help="Case name (used in output filenames)")
     ap.add_argument("--centerline_csv",    required=True,              help="CSV file with centerline point coordinates (Points:0/1/2)")
-    ap.add_argument("--inlet_point_id",    type=int,   required=True,  help="Row index into centerline CSV for the inlet point")
-    ap.add_argument("--outlet_point_id",   type=int,   required=True,  help="Row index into centerline CSV for the outlet point")
+    ap.add_argument("--inlet_point_id",    type=int,   required=True,  help="Row index into centerline CSV for the inlet point  [centerline CSV index, NOT a volume mesh node ID]")
+    ap.add_argument("--outlet_point_id",   type=int,   required=True,  help="Row index into centerline CSV for the outlet point [centerline CSV index, NOT a volume mesh node ID]")
+    ap.add_argument("--probe_vol_node_id", type=int,   required=True,  help="Volume mesh node ID for velocity probe point       [from mesh.vtu, NOT a centerline CSV index]")
     ap.add_argument("--density",           type=float, default=1057,   help="Blood density [kg/m3] (default: 1057)")
     ap.add_argument("--period_seconds",    type=float, default=0.915,  help="Flow period in seconds (default: 0.915)")
     ap.add_argument("--timesteps_per_cyc", type=int,   default=None,   help="Timesteps per cycle (parsed from filename if omitted)")
@@ -539,7 +563,7 @@ def main():
         print(f"Parsed timesteps_per_cycle = {timesteps_per_cyc} from filename.\n")
 
     # Read pressure time series at ALL centerline nodes 
-    pressures_all = read_pressure_timeseries_at_nodes(CFD_h5_files, all_vol_node_ids, args.density, args.n_process)   # (n_cl_points, n_snapshots) [Pa]
+    pressures_all = read_pressure_timeseries_at_nodes_in_parallel(CFD_h5_files, all_vol_node_ids, args.density, args.n_process)   # (n_cl_points, n_snapshots) [Pa]
 
     # Build inlet flowrate array (Q = 2*t, ramp-specific) 
     n_snapshots = len(CFD_h5_files)
@@ -549,7 +573,7 @@ def main():
 
 
     # ------------------- Plot: 3D surface Centerline pressure over time --------------------------
-    print(f"\nGenerating plot of centerline geometry ...")
+    print(f"\nPlotting centerline geometry ...")
     plot_centerline_geometry(output_folder, args.case_name, mesh_file, centerline_coords, cl_dist, args.inlet_point_id)
 
 
@@ -580,15 +604,17 @@ def main():
 
 
     # ------------------- Plot: 3D surface Centerline pressure over time --------------------------
-    print(f"\nGenerating 3D surface plot (time subsampled every {args.frame_stride} snapshots) ...")
+    print(f"\Plotting 3D surface of centerline pressures through time (time subsampled every {args.frame_stride} snapshots) ...")
     plot_centerline_pressure_3d(output_folder, args.case_name, pressures_all, Q_in, cl_dist,frame_stride=args.frame_stride)
 
 
     # ------------------- Velocity at probe node --------------------------------------------------
-    PROBE_NODE_ID = 9853   # <-- set to desired volume mesh node ID (from mesh.vtu file not centerline.csv)
-    print(f"\nReading velocity magnitude at probe node {PROBE_NODE_ID} ...")
-    vel_mag = read_velocity_timeseries_at_node(h5_files, PROBE_NODE_ID)
-    plot_velocity_at_node(output_folder, args.case_name, vel_mag, Q_in, PROBE_NODE_ID)
+    # NOTE: probe_vol_node_id is a volume mesh node index (from mesh.vtu / ParaView)
+    #       It is NOT a row index from the centerline CSV.
+    probe_vol_node_id = args.probe_vol_node_id
+    print(f"\nPlotting velocity at a probing node through time {probe_vol_node_id} ...")
+    velocity_mag = read_velocity_timeseries_at_node_in_parallel(CFD_h5_files, probe_vol_node_id, args.n_process)
+    plot_velocity_at_node(output_folder, args.case_name, velocity_mag, Q_in, probe_vol_node_id)
 
 
 

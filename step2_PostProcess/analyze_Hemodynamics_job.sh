@@ -28,7 +28,7 @@ BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE
 MESH_FOLDER="$BASE_DIR/step1_CFD/data"
 CENTERLINE="$MESH_FOLDER/${CASE}_centerline_points.csv"
 INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq5"
-OUTPUT="$BASE_DIR/step2_PostProcess/Pressure"
+OUTPUT="$BASE_DIR/step2_PostProcess/Hemodynamics"
 
 SCRIPT="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/analyze_Hemodynamics.py"
 
@@ -50,6 +50,7 @@ python "$SCRIPT" \
     --centerline_csv    "$CENTERLINE" \
     --inlet_point_id    1333          \
     --outlet_point_id   0             \
+    --probe_vol_node_id 9853          \
     --save_freq         5             \
     --flowrate_min      2.0           \
     --flowrate_max      10.0          \
