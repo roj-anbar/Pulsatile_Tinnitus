@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------------------------------------------------
-# analyze_Hemodynamics.py
+# viz_Hemodynamics.py
 # Post-processes CFD HDF5 snapshots to extract and visualize pressure and velocity hemodynamic metrics.
 #
 # __author__: Rojin Anbarafshan <rojin.anbar@gmail.com>
@@ -18,13 +18,13 @@
 #   - On Trillium: virtual environment called "pyvista36"
 #
 # EXECUTION:
-#   - Run using "analyze_Hemodynamics_job.sh" bash script.
+#   - Run using "viz_Hemodynamics_job.sh" bash script.
 #   - Run directly on a login/debug node:
 #       > module load StdEnv/2023 gcc/12.3 python/3.12.4
 #       > source $HOME/virtual_envs/pyvista36/bin/activate
 #
 # EXAMPLE CLI:
-#       > python analyze_Hemodynamics.py \
+#       > python viz_Hemodynamics.py \
 #           --input_folder      <path_to_CFD_results_folder> \
 #           --mesh_folder       <path_to_case_mesh_data>     \
 #           --output_folder     <path_to_output_folder>      \
@@ -281,7 +281,7 @@ def plot_centerline_geometry(output_folder: Path, case_name: str,
     ranges = centerline_coords.max(axis=0) - centerline_coords.min(axis=0)
     ranges = np.where(ranges == 0, 1.0, ranges)   # avoid divide-by-zero for flat dims
 
-    fig = plt.figure(figsize=(10, 5))
+    fig = plt.figure(figsize=(5, 12))
     ax  = fig.add_subplot(111, projection='3d')
     ax.set_box_aspect(ranges / ranges.max())       # rectangular box matching data shape
 
@@ -289,7 +289,7 @@ def plot_centerline_geometry(output_folder: Path, case_name: str,
     inlet_coord = centerline_coords[inlet_point_id]
     ax.scatter(*inlet_coord, color='red', s=80, zorder=10)
     ax.text(*inlet_coord, '  inlet', color='red', fontsize=8)
-    cbar = fig.colorbar(sc, ax=ax, shrink=0.35, pad=0.2, label='Distance from Inlet (mm)')
+    cbar = fig.colorbar(sc, ax=ax, shrink=0.25, pad=0.2, label='Distance from Inlet (mm)')
     cbar.ax.tick_params(labelsize=8)
     cbar.set_label('Distance from Inlet (mm)', fontsize=8)
     ax.set_xlabel('X (mm)', fontsize=8); ax.set_ylabel('Y (mm)', fontsize=8); ax.set_zlabel('Z (mm)', fontsize=8)
@@ -384,39 +384,6 @@ def plot_centerline_pressure_3d(output_folder: Path, case_name: str,
     plt.close(fig)
 
 
-def plot_velocity_at_node(output_folder: Path, case_name: str,
-                          vel_mag: np.ndarray, Q_in: np.ndarray, node_id: int):
-    """
-    Plot velocity magnitude at a single probe node vs inlet flowrate.
-    Saves a PNG to output_folder.
-    """
-    #Q_min = plot_params.get("Q_min", Q_in.min())
-    #Q_max = plot_params.get("Q_max", Q_in.max())
-
-    font_size = 14
-    plt.rc('font',   size=font_size)
-    plt.rc('axes',   titlesize=font_size)
-    plt.rc('xtick',  labelsize=font_size)
-    plt.rc('ytick',  labelsize=font_size)
-    plt.rc('legend', fontsize=font_size - 2)
-    plt.rc('axes',   labelsize=font_size)
-
-    fig, ax = plt.subplots(figsize=(8, 8))
-    fig.suptitle(f'{case_name}: Velocity at Node {node_id}', fontweight='bold')
-
-    ax.plot(Q_in, vel_mag * 100, linewidth=1, color='darkred')   # m/s -> cm/s
-    ax.set_xlabel('Inlet Flow Rate (mL/s)', fontweight='bold', labelpad=10)
-    ax.set_ylabel('Velocity Magnitude (m/s)', fontweight='bold', labelpad=10)
-    #ax.set_xlim([Q_min, Q_max])
-    ax.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    out_png = output_folder / f"{case_name}_velocity_node{node_id}.png"
-    plt.savefig(out_png, dpi=150)
-    plt.close(fig)
-    #print(f"Saved plot  ->  {out_png}")
-
-
 def animate_centerline_pressure(output_folder: Path, case_name: str,
                                 pressures_all: np.ndarray, Q_in: np.ndarray,
                                 cl_dist: np.ndarray, frame_stride: int):
@@ -477,12 +444,41 @@ def animate_centerline_pressure(output_folder: Path, case_name: str,
     )
 
     out_mp4 = output_folder / f"{case_name}_pressureCenterline.mp4"
-    writer = manim.FFMpegWriter(fps=10, metadata=dict(title=case_name), bitrate=1800)
+    writer = manim.FFMpegWriter(fps=60, metadata=dict(title=case_name), bitrate=1800)
     anim.save(str(out_mp4), writer=writer, dpi=150)
     #print(f"Saved animation  ->  {out_mp4}")
     plt.close(fig)
 
 
+def plot_velocity_at_node(output_folder: Path, case_name: str, vel_mag: np.ndarray, Q_in: np.ndarray, node_id: int):
+    """
+    Plot velocity magnitude at a single probe node vs inlet flowrate.
+    Saves a PNG to output_folder.
+    """
+    #Q_min = plot_params.get("Q_min", Q_in.min())
+    #Q_max = plot_params.get("Q_max", Q_in.max())
+
+    font_size = 14
+    plt.rc('font',   size=font_size)
+    plt.rc('axes',   titlesize=font_size)
+    plt.rc('xtick',  labelsize=font_size)
+    plt.rc('ytick',  labelsize=font_size)
+    plt.rc('legend', fontsize=font_size - 2)
+    plt.rc('axes',   labelsize=font_size)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    fig.suptitle(f'{case_name}: Velocity at Node {node_id}', fontweight='bold')
+
+    ax.plot(Q_in, vel_mag, linewidth=2, color='red')
+    ax.set_xlabel('Inlet Flow Rate (mL/s)',   fontweight='bold', labelpad=10)
+    ax.set_ylabel('Velocity Magnitude (m/s)', fontweight='bold', labelpad=10)
+    #ax.set_xlim([Q_min, Q_max])
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    out_png = output_folder / f"{case_name}_velocity_node{node_id}.png"
+    plt.savefig(out_png, dpi=150)
+    plt.close(fig)
 
 # ======================================================================================================
 # MAIN
@@ -497,7 +493,8 @@ def parse_args():
     ap.add_argument("--centerline_csv",    required=True,              help="CSV file with centerline point coordinates (Points:0/1/2)")
     ap.add_argument("--inlet_point_id",    type=int,   required=True,  help="Row index into centerline CSV for the inlet point  [centerline CSV index, NOT a volume mesh node ID]")
     ap.add_argument("--outlet_point_id",   type=int,   required=True,  help="Row index into centerline CSV for the outlet point [centerline CSV index, NOT a volume mesh node ID]")
-    ap.add_argument("--probe_vol_node_id", type=int,   required=True,  help="Volume mesh node ID for velocity probe point       [from mesh.vtu, NOT a centerline CSV index]")
+    ap.add_argument("--probe_node_id",     type=int,   required=True,  help="Volume mesh node ID for velocity probe point       [from mesh.vtu, NOT a centerline CSV index]")
+    
     ap.add_argument("--density",           type=float, default=1057,   help="Blood density [kg/m3] (default: 1057)")
     ap.add_argument("--period_seconds",    type=float, default=0.915,  help="Flow period in seconds (default: 0.915)")
     ap.add_argument("--timesteps_per_cyc", type=int,   default=None,   help="Timesteps per cycle (parsed from filename if omitted)")
@@ -604,17 +601,17 @@ def main():
 
 
     # ------------------- Plot: 3D surface Centerline pressure over time --------------------------
-    print(f"\Plotting 3D surface of centerline pressures through time (time subsampled every {args.frame_stride} snapshots) ...")
-    plot_centerline_pressure_3d(output_folder, args.case_name, pressures_all, Q_in, cl_dist,frame_stride=args.frame_stride)
+    print(f"\nPlotting 3D surface of centerline pressures through time (time subsampled every {args.frame_stride} snapshots) ...")
+    plot_centerline_pressure_3d(output_folder, args.case_name, pressures_all, Q_in, cl_dist, frame_stride=args.frame_stride)
 
 
     # ------------------- Velocity at probe node --------------------------------------------------
-    # NOTE: probe_vol_node_id is a volume mesh node index (from mesh.vtu / ParaView)
+    # NOTE: probe_node_id is a volume mesh node index (from mesh.vtu / ParaView)
     #       It is NOT a row index from the centerline CSV.
-    probe_vol_node_id = args.probe_vol_node_id
-    print(f"\nPlotting velocity at a probing node through time {probe_vol_node_id} ...")
-    velocity_mag = read_velocity_timeseries_at_node_in_parallel(CFD_h5_files, probe_vol_node_id, args.n_process)
-    plot_velocity_at_node(output_folder, args.case_name, velocity_mag, Q_in, probe_vol_node_id)
+    probe_node_id = args.probe_node_id
+    print(f"\nPlotting velocity at a probing node through time {probe_node_id} ...")
+    velocity_mag = read_velocity_timeseries_at_node_in_parallel(CFD_h5_files, probe_node_id, args.n_process)
+    plot_velocity_at_node(output_folder, args.case_name, velocity_mag, Q_in, probe_node_id)
 
 
 

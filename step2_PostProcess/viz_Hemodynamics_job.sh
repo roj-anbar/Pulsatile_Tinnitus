@@ -1,13 +1,13 @@
 #!/bin/bash
 #-----------------------------------------------------------------------------------------------------------------------
-# analyze_Hemodynamics_job.sh
-# SLURM wrapper to run analyze_Hemodynamics.py for a specific case on Trillium-style clusters.
+# viz_Hemodynamics_job.sh
+# SLURM wrapper to run viz_Hemodynamics.py for a specific case on Trillium-style clusters.
 #
 # __author__ = Rojin Anbarafshan <rojin.anbar@gmail.com>
 # __date__   = 2026-04
 #
 # EXECUTION:
-#   sbatch analyze_Hemodynamics_job.sh
+#   sbatch viz_Hemodynamics_job.sh
 #
 # Copyright (C) 2026 University of Toronto, Biomedical Simulation Lab.
 #-----------------------------------------------------------------------------------------------------------------------
@@ -30,7 +30,7 @@ CENTERLINE="$MESH_FOLDER/${CASE}_centerline_points.csv"
 INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq5"
 OUTPUT="$BASE_DIR/step2_PostProcess/Hemodynamics"
 
-SCRIPT="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/analyze_Hemodynamics.py"
+SCRIPT="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/viz_Hemodynamics.py"
 
 # --------------------------------- Load Modules ------------------------------------------------------------------------
 module load StdEnv/2023 gcc/12.3 python/3.12.4
@@ -50,11 +50,11 @@ python "$SCRIPT" \
     --centerline_csv    "$CENTERLINE" \
     --inlet_point_id    1333          \
     --outlet_point_id   0             \
-    --probe_vol_node_id 9853          \
+    --probe_node_id     567045          \
     --save_freq         5             \
     --flowrate_min      2.0           \
     --flowrate_max      10.0          \
-    --frame_stride      100
+    --frame_stride      10
 
 
 # ------------------------------ Run directly from terminal -----------------------------------------------------------
