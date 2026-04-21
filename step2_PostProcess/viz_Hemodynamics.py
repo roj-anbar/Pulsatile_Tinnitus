@@ -211,30 +211,40 @@ def read_pressure_timeseries_at_nodes_in_parallel(h5_files: list, node_ids: list
     return _view_shared_array(shared_pressure_ctype).copy()  # (n_nodes, n_snapshots)
 
 
-def _read_velocity_worker(file_ids, node_id, h5_files, shared_vel_ctype):
-    """Worker: read velocity magnitude at node_id for a chunk of snapshots into shared 1-D array."""
-    shared_vel = _view_shared_array(shared_vel_ctype)
+def _read_probe_worker(file_ids, node_ids, h5_files, shared_pressure_ctype, shared_vel_ctype, density, n_snapshots):
+    """Worker: read pressure and velocity magnitude at all probe node_ids for a chunk of snapshots.
+
+    Opens each HDF5 file once and extracts both fields, avoiding two separate full-array reads.
+    Shared arrays are flat (n_nodes * n_snapshots,), indexed as [node_idx * n_snapshots + t_index].
+    """
+    shared_p = _view_shared_array(shared_pressure_ctype)
+    shared_v = _view_shared_array(shared_vel_ctype)
     for t_index in file_ids:
         with h5py.File(h5_files[t_index], 'r') as h5:
-            uvec = np.array(h5['Solution']['u'])[node_id, :]   # (3,)
-            shared_vel[t_index] = np.linalg.norm(uvec)
+            p = np.array(h5['Solution']['p']).flatten()
+            u = np.array(h5['Solution']['u'])   # (n_vol_nodes, 3)
+            for i, nid in enumerate(node_ids):
+                shared_p[i * n_snapshots + t_index] = p[nid] * density
+                shared_v[i * n_snapshots + t_index] = np.linalg.norm(u[nid, :])
 
 
-def read_velocity_timeseries_at_node_in_parallel(h5_files: list, node_id: int, n_process: int) -> np.ndarray:
+def read_probe_timeseries_in_parallel(h5_files: list, node_ids: list, density: float, n_process: int):
     """
-    Read velocity magnitude at a single volume mesh node for every HDF5 snapshot in parallel.
-
-    node_id is set at the call site — NOT a CLI argument.
-    Oasis stores velocity as Solution/u with shape (n_nodes, 3).
+    Read pressure [Pa] and velocity magnitude [m/s] at all probe nodes in a single parallel pass.
 
     Returns
     -------
-    vel_mag : (n_snapshots,) float [m/s]
+    pressures : (n_nodes, n_snapshots) float [Pa]
+    vel_mags  : (n_nodes, n_snapshots) float [m/s]
     """
-    n_snapshots      = len(h5_files)
-    shared_vel_ctype = _create_shared_array(n_snapshots)
+    n_snapshots = len(h5_files)
+    n_nodes     = len(node_ids)
+    size        = n_nodes * n_snapshots
 
-    print(f"\nReading velocity magnitude at node {node_id} from {n_snapshots} HDF5 snapshots in parallel ...\n")
+    shared_p = _create_shared_array(size)
+    shared_v = _create_shared_array(size)
+
+    #print(f"\nReading pressure + velocity at {n_nodes} probe node(s) from {n_snapshots} HDF5 snapshots in parallel ...\n")
 
     time_indices = list(range(n_snapshots))
     chunk_size   = max(n_snapshots // n_process, 1)
@@ -243,9 +253,9 @@ def read_velocity_timeseries_at_node_in_parallel(h5_files: list, node_id: int, n
     processes = []
     for idx, group in enumerate(time_groups):
         proc = mp.Process(
-            target = _read_velocity_worker,
-            name   = f"VelReader{idx}",
-            args   = (group, node_id, h5_files, shared_vel_ctype))
+            target = _read_probe_worker,
+            name   = f"ProbeReader{idx}",
+            args   = (group, node_ids, h5_files, shared_p, shared_v, density, n_snapshots))
         processes.append(proc)
 
     for proc in processes:
@@ -253,13 +263,71 @@ def read_velocity_timeseries_at_node_in_parallel(h5_files: list, node_id: int, n
     for proc in processes:
         proc.join()
 
-    return _view_shared_array(shared_vel_ctype).copy()  # (n_snapshots,)
+    pressures = _view_shared_array(shared_p).copy().reshape(n_nodes, n_snapshots)
+    vel_mags  = _view_shared_array(shared_v).copy().reshape(n_nodes, n_snapshots)
+    return pressures, vel_mags
 
 
 
 # ======================================================================================================
 # PLOTTING
 # ======================================================================================================
+
+
+def plot_probe_node_hemodynamics(output_folder: Path, case_name: str,
+                                 Q_in: np.ndarray, pressure_pa: np.ndarray,
+                                 vel_mag_ms: np.ndarray, node_id: int,
+                                 plot_params: dict, node_order: int = 1):
+    """
+    Single-axes twinx figure for a probe node: pressure (mmHg, left) and velocity (m/s, right) vs Q_inlet.
+    Saves one PNG per node to output_folder.
+
+    Parameters
+    ----------
+    pressure_pa  : (n_snapshots,) pressure at this node [Pa]
+    vel_mag_ms   : (n_snapshots,) velocity magnitude at this node [m/s]
+    node_id      : volume mesh node index (for title / filename)
+    plot_params  : dict with optional 'Q_min', 'Q_max' keys
+    node_order   : 1-based position of this node in the CLI list (used in filename)
+    """
+    Q_min = plot_params.get("Q_min", Q_in.min())
+    Q_max = plot_params.get("Q_max", Q_in.max())
+
+    tick_size  = 9
+    label_size = 11
+    plt.rc('font',   size=label_size)
+    plt.rc('axes',   titlesize=label_size, labelsize=label_size)
+    plt.rc('xtick',  labelsize=tick_size)
+    plt.rc('ytick',  labelsize=tick_size)
+
+    fig, ax_p = plt.subplots(figsize=(8, 5))
+    fig.suptitle(f'{case_name}  —  Probe node {node_id}', fontweight='bold', fontsize=label_size)
+
+    color_p = 'blue'
+    color_v = 'red'
+
+    ax_p.plot(Q_in, pressure_pa / 133.3, linewidth=1.5, color=color_p)
+    ax_p.set_xlabel('Inlet Flow Rate (mL/s)', fontweight='bold', labelpad=8)
+    ax_p.set_ylabel('Pressure (mmHg)',        fontweight='bold', labelpad=8, color=color_p)
+    ax_p.tick_params(axis='y', labelcolor=color_p, labelsize=tick_size)
+    ax_p.set_xlim([Q_min, Q_max])
+    ax_p.set_ylim([-5, 60])
+    ax_p.grid(True, alpha=0.3)
+
+    ax_v = ax_p.twinx()
+    ax_v.plot(Q_in, vel_mag_ms, linewidth=1.5, color=color_v)
+    ax_v.set_ylabel('Velocity Magnitude (m/s)', fontweight='bold', labelpad=8, color=color_v)
+    ax_v.tick_params(axis='y', labelcolor=color_v, labelsize=tick_size)
+    ax_v.set_ylim([-0.1, 4.5])
+
+    lines = [plt.Line2D([0], [0], color=color_p, lw=1.5),
+             plt.Line2D([0], [0], color=color_v, lw=1.5)]
+    ax_p.legend(lines, ['Pressure (mmHg)', 'Velocity (m/s)'], fontsize=tick_size, loc='upper left')
+
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    out_png = output_folder / f"{case_name}_node{node_order}_id{node_id}.png"
+    plt.savefig(out_png, dpi=150, bbox_inches='tight')
+    plt.close(fig)
 
 
 def plot_centerline_geometry(output_folder: Path, case_name: str,
@@ -281,22 +349,31 @@ def plot_centerline_geometry(output_folder: Path, case_name: str,
     ranges = centerline_coords.max(axis=0) - centerline_coords.min(axis=0)
     ranges = np.where(ranges == 0, 1.0, ranges)   # avoid divide-by-zero for flat dims
 
-    fig = plt.figure(figsize=(5, 12))
+    tick_size  = 7
+    label_size = 8
+
+    fig = plt.figure(figsize=(5, 10))
     ax  = fig.add_subplot(111, projection='3d')
     ax.set_box_aspect(ranges / ranges.max())       # rectangular box matching data shape
 
-    sc = ax.scatter(centerline_coords[:, 0], centerline_coords[:, 1], centerline_coords[:, 2], c=cl_dist, cmap='gnuplot2', s=10, zorder=5, linewidths=0)
+    sc = ax.scatter(centerline_coords[:, 0], centerline_coords[:, 1], centerline_coords[:, 2],
+                    c=cl_dist, cmap='gnuplot2', s=10, zorder=5, linewidths=0)
     inlet_coord = centerline_coords[inlet_point_id]
     ax.scatter(*inlet_coord, color='red', s=80, zorder=10)
-    ax.text(*inlet_coord, '  inlet', color='red', fontsize=8)
-    cbar = fig.colorbar(sc, ax=ax, shrink=0.25, pad=0.2, label='Distance from Inlet (mm)')
-    cbar.ax.tick_params(labelsize=8)
-    cbar.set_label('Distance from Inlet (mm)', fontsize=8)
-    ax.set_xlabel('X (mm)', fontsize=8); ax.set_ylabel('Y (mm)', fontsize=8); ax.set_zlabel('Z (mm)', fontsize=8)
-    ax.set_title(f'{case_name} — Centerlines', fontweight='bold')
-    ax.view_init(elev=30, azim=120)   # 180° flip from matplotlib default (azim=-60)
-    
-    plt.tight_layout()
+    ax.text(*inlet_coord, '  inlet', color='red', fontsize=label_size)
+
+    cbar = fig.colorbar(sc, ax=ax, shrink=0.15, pad=0.2)
+    cbar.ax.tick_params(labelsize=tick_size)
+    cbar.set_label('Distance from Inlet (mm)', fontsize=label_size)
+
+    ax.set_xlabel('X (mm)', fontsize=label_size, labelpad=2)
+    ax.set_ylabel('Y (mm)', fontsize=label_size, labelpad=2)
+    ax.set_zlabel('Z (mm)', fontsize=label_size, labelpad=2)
+    ax.tick_params(axis='both', labelsize=tick_size, pad=2)
+    ax.set_title(f'{case_name} — Centerlines', fontweight='bold', fontsize=label_size, pad=6)
+    ax.view_init(elev=30, azim=120)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.savefig(out_png, dpi=150, bbox_inches='tight')
     plt.close(fig)
     #print(f"Saved centerline geometry  ->  {out_png}  (matplotlib fallback)")
@@ -413,7 +490,7 @@ def animate_centerline_pressure(output_folder: Path, case_name: str,
 
     fig, ax = plt.subplots(figsize=(8, 6))
     (line,)  = ax.plot([], [], linewidth=2.5, color='blue')
-    ax.set_xlim(cl_dist[0], cl_dist[-1])
+    ax.set_xlim(cl_dist[-1], cl_dist[0])
     ax.set_ylim(P_min - pad, P_max + pad)
     ax.set_xlabel('Distance from Inlet (mm)', fontweight='bold', labelpad=8)
     ax.set_ylabel('Pressure (mmHg)',          fontweight='bold', labelpad=8)
@@ -444,41 +521,11 @@ def animate_centerline_pressure(output_folder: Path, case_name: str,
     )
 
     out_mp4 = output_folder / f"{case_name}_pressureCenterline.mp4"
-    writer = manim.FFMpegWriter(fps=60, metadata=dict(title=case_name), bitrate=1800)
+    writer = manim.FFMpegWriter(fps=30, metadata=dict(title=case_name), bitrate=1800)
     anim.save(str(out_mp4), writer=writer, dpi=150)
     #print(f"Saved animation  ->  {out_mp4}")
     plt.close(fig)
 
-
-def plot_velocity_at_node(output_folder: Path, case_name: str, vel_mag: np.ndarray, Q_in: np.ndarray, node_id: int):
-    """
-    Plot velocity magnitude at a single probe node vs inlet flowrate.
-    Saves a PNG to output_folder.
-    """
-    #Q_min = plot_params.get("Q_min", Q_in.min())
-    #Q_max = plot_params.get("Q_max", Q_in.max())
-
-    font_size = 14
-    plt.rc('font',   size=font_size)
-    plt.rc('axes',   titlesize=font_size)
-    plt.rc('xtick',  labelsize=font_size)
-    plt.rc('ytick',  labelsize=font_size)
-    plt.rc('legend', fontsize=font_size - 2)
-    plt.rc('axes',   labelsize=font_size)
-
-    fig, ax = plt.subplots(figsize=(8, 6))
-    fig.suptitle(f'{case_name}: Velocity at Node {node_id}', fontweight='bold')
-
-    ax.plot(Q_in, vel_mag, linewidth=2, color='red')
-    ax.set_xlabel('Inlet Flow Rate (mL/s)',   fontweight='bold', labelpad=10)
-    ax.set_ylabel('Velocity Magnitude (m/s)', fontweight='bold', labelpad=10)
-    #ax.set_xlim([Q_min, Q_max])
-    ax.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    out_png = output_folder / f"{case_name}_velocity_node{node_id}.png"
-    plt.savefig(out_png, dpi=150)
-    plt.close(fig)
 
 # ======================================================================================================
 # MAIN
@@ -493,7 +540,7 @@ def parse_args():
     ap.add_argument("--centerline_csv",    required=True,              help="CSV file with centerline point coordinates (Points:0/1/2)")
     ap.add_argument("--inlet_point_id",    type=int,   required=True,  help="Row index into centerline CSV for the inlet point  [centerline CSV index, NOT a volume mesh node ID]")
     ap.add_argument("--outlet_point_id",   type=int,   required=True,  help="Row index into centerline CSV for the outlet point [centerline CSV index, NOT a volume mesh node ID]")
-    ap.add_argument("--probe_node_id",     type=int,   required=True,  help="Volume mesh node ID for velocity probe point       [from mesh.vtu, NOT a centerline CSV index]")
+    ap.add_argument("--probe_node_ids",    type=int,   nargs='+', required=True, help="One or more volume mesh node IDs for probe points [from mesh.vtu, NOT centerline CSV indices]. E.g.: --probe_node_ids 100 500 9853")
     
     ap.add_argument("--density",           type=float, default=1057,   help="Blood density [kg/m3] (default: 1057)")
     ap.add_argument("--period_seconds",    type=float, default=0.915,  help="Flow period in seconds (default: 0.915)")
@@ -511,7 +558,7 @@ def main():
 
     input_folder  = Path(args.input_folder)
     mesh_folder   = Path(args.mesh_folder)
-    output_folder = Path(args.output_folder)/f"cy6_saveFreq{args.save_freq}"
+    output_folder = Path(args.output_folder)/f"cy6_saveFreq{args.save_freq}_stride{args.frame_stride}"
     output_folder.mkdir(parents=True, exist_ok=True)
 
     print("=" * 120)
@@ -605,15 +652,24 @@ def main():
     plot_centerline_pressure_3d(output_folder, args.case_name, pressures_all, Q_in, cl_dist, frame_stride=args.frame_stride)
 
 
-    # ------------------- Velocity at probe node --------------------------------------------------
-    # NOTE: probe_node_id is a volume mesh node index (from mesh.vtu / ParaView)
-    #       It is NOT a row index from the centerline CSV.
-    probe_node_id = args.probe_node_id
-    print(f"\nPlotting velocity at a probing node through time {probe_node_id} ...")
-    velocity_mag = read_velocity_timeseries_at_node_in_parallel(CFD_h5_files, probe_node_id, args.n_process)
-    plot_velocity_at_node(output_folder, args.case_name, velocity_mag, Q_in, probe_node_id)
+    # ------------------- Plot: Pressure + velocity at probe nodes --------------------------------------
+    # NOTE: probe_node_ids are volume mesh node indices (from mesh.vtu / ParaView),
+    #       NOT row indices from the centerline CSV.
+    
+    print(f"\nPlotting hemodynamics for {len(args.probe_node_ids)} probe points ...")
+    output_folder_probes = output_folder / "probes"
+    output_folder_probes.mkdir(parents=True, exist_ok=True)
+    probe_node_ids = args.probe_node_ids
 
+    print("\nProbe nodes (volume mesh node IDs and their coordinates [mm]):")
+    for nid in probe_node_ids:
+        coord = vol_coords[nid]
+        print(f"  node {nid:8d}: ({coord[0]:.3f}, {coord[1]:.3f}, {coord[2]:.3f})")
 
+    probe_pressures, probe_velocities = read_probe_timeseries_in_parallel(CFD_h5_files, probe_node_ids, args.density, args.n_process)
+
+    for i, node_id in enumerate(probe_node_ids):
+        plot_probe_node_hemodynamics(output_folder_probes, args.case_name, Q_in, probe_pressures[i, :], probe_velocities[i, :], node_id, plot_params, node_order=i + 1)
 
 
 if __name__ == '__main__':

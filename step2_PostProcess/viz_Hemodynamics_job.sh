@@ -50,11 +50,11 @@ python "$SCRIPT" \
     --centerline_csv    "$CENTERLINE" \
     --inlet_point_id    1333          \
     --outlet_point_id   0             \
-    --probe_node_id     567045          \
+    --probe_node_ids    1681132 1068720 1681490 1607863 1262065 1645307 1422305 1376921 1570007 1078027 \
     --save_freq         5             \
     --flowrate_min      2.0           \
     --flowrate_max      10.0          \
-    --frame_stride      10
+    --frame_stride      50
 
 
 # ------------------------------ Run directly from terminal -----------------------------------------------------------
@@ -73,3 +73,5 @@ python "$SCRIPT" \
 
 
 echo "Job finished: $(date)"
+
+
