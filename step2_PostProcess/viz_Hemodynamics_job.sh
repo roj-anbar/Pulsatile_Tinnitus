@@ -23,7 +23,7 @@ set -euo pipefail
 echo "Job started: $(date)"
 
 # ---------------------------------- Define Paths -----------------------------------------------------------------------
-CASE=PTSeg028_base_0p64
+CASE=PTSeg106_base_0p64
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE
 MESH_FOLDER="$BASE_DIR/step1_CFD/data"
 CENTERLINE="$MESH_FOLDER/${CASE}_centerline_points.csv"
@@ -48,9 +48,9 @@ python "$SCRIPT" \
     --mesh_folder       "$MESH_FOLDER"\
     --output_folder     "$OUTPUT"     \
     --centerline_csv    "$CENTERLINE" \
-    --inlet_point_id    1333          \
-    --outlet_point_id   0             \
-    --probe_node_ids    1681132 1068720 1681490 1607863 1262065 1645307 1422305 1376921 1570007 1078027 \
+    --inlet_point_id    0             \
+    --outlet_point_id   458           \
+    --probe_node_ids    106000        \
     --save_freq         5             \
     --flowrate_min      2.0           \
     --flowrate_max      10.0          \
@@ -70,6 +70,11 @@ python "$SCRIPT" \
 #     --flowrate_min      2.0           \
 #     --flowrate_max      10.0          \
 #     --frame_stride      20
+
+
+#-------------------------- Probe points ------------------------------------------
+#CASE A: 1681132 1068720 1681490 1607863 1262065 1645307 1422305 1376921 1570007 1078027
+#Case C: 
 
 
 echo "Job finished: $(date)"
