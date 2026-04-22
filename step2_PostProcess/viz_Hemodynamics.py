@@ -78,6 +78,7 @@ import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as manim
+from matplotlib.collections import LineCollection
 import multiprocessing as mp
 from multiprocessing import sharedctypes
 from pathlib import Path
@@ -266,6 +267,34 @@ def read_probe_timeseries_in_parallel(h5_files: list, node_ids: list, density: f
     pressures = _view_shared_array(shared_p).copy().reshape(n_nodes, n_snapshots)
     vel_mags  = _view_shared_array(shared_v).copy().reshape(n_nodes, n_snapshots)
     return pressures, vel_mags
+
+def read_velocity_at_nodes_single_snapshot(h5_file: Path, node_ids: list) -> np.ndarray:
+    """Read velocity magnitude [m/s] at the given volume mesh node IDs from one HDF5 snapshot."""
+    with h5py.File(h5_file, 'r') as h5:
+        u = np.array(h5['Solution']['u'])   # (n_vol_nodes, 3)
+    node_ids_arr = np.array(node_ids)
+    return np.linalg.norm(u[node_ids_arr, :], axis=1)   # (n_nodes,)
+
+
+def save_centerline_hemodynamics_snapshot(output_folder: Path, case_name: str, h5_files: list,
+                                          pressures_all: np.ndarray, centerline_node_ids: list,
+                                          centerline_coords: np.ndarray, cl_dist: np.ndarray,
+                                          Q_in: np.ndarray, target_Q: float = 5.58):
+    """
+    Save centerline pressure [Pa] and velocity magnitude [m/s] at the snapshot nearest to target_Q [mL/s] as a CSV file.
+    Columns: x_mm, y_mm, z_mm, cl_dist_mm, pressure_pa, velocity_mag_ms
+    """
+    t_idx    = int(np.argmin(np.abs(Q_in - target_Q)))
+    Q_actual = float(Q_in[t_idx])
+    print(f"\nSaving centerline snapshot: target Q={target_Q} mL/s  ->  snapshot {t_idx}, Q={Q_actual:.4f} mL/s")
+
+    pressure_pa     = pressures_all[:, t_idx]
+    velocity_mag_ms = read_velocity_at_nodes_single_snapshot(h5_files[t_idx], centerline_node_ids)
+
+    data = np.column_stack([centerline_coords, cl_dist, pressure_pa, velocity_mag_ms])
+    header = f"Q_actual={Q_actual:.4f} mL/s\nx_mm,y_mm,z_mm,cl_dist_mm,pressure_pa,velocity_mag_ms"
+    out_csv = output_folder / f"{case_name}_centerline_hemodynamics_Qin{target_Q:.2f}mLs.csv"
+    np.savetxt(out_csv, data, delimiter=",", header=header, comments="# ")
 
 
 
@@ -461,6 +490,7 @@ def plot_centerline_pressure_3d(output_folder: Path, case_name: str,
     plt.close(fig)
 
 
+
 def animate_centerline_pressure(output_folder: Path, case_name: str,
                                 pressures_all: np.ndarray, Q_in: np.ndarray,
                                 cl_dist: np.ndarray, frame_stride: int):
@@ -488,9 +518,18 @@ def animate_centerline_pressure(output_folder: Path, case_name: str,
     plt.rc('xtick',  labelsize=font_size)
     plt.rc('ytick',  labelsize=font_size)
 
+    norm = plt.Normalize(vmin=cl_dist.min(), vmax=cl_dist.max())
+
     fig, ax = plt.subplots(figsize=(8, 6))
-    (line,)  = ax.plot([], [], linewidth=2.5, color='blue')
-    ax.set_xlim(cl_dist[-1], cl_dist[0])
+
+    # --- line version ---
+    # (line,)  = ax.plot([], [], linewidth=2.5, color='blue')
+
+    # --- scatter version: each point colored by distance from inlet (same cmap as plot_centerline_geometry) ---
+    scat = ax.scatter(cl_dist, P_mmHg[:, 0], c=cl_dist, cmap='gnuplot2_r', norm=norm, s=2, linewidths=1)
+    #fig.colorbar(scat, ax=ax, label='Distance from Inlet (mm)', shrink=0.8)
+
+    ax.set_xlim(0, np.max(cl_dist))
     ax.set_ylim(P_min - pad, P_max + pad)
     ax.set_xlabel('Distance from Inlet (mm)', fontweight='bold', labelpad=8)
     ax.set_ylabel('Pressure (mmHg)',          fontweight='bold', labelpad=8)
@@ -498,30 +537,25 @@ def animate_centerline_pressure(output_folder: Path, case_name: str,
     title_obj = ax.set_title('')
     fig.tight_layout(rect=[0, 0, 1, 0.93])
 
-    def _init():
-        line.set_data([], [])
-        title_obj.set_text('')
-        return line, title_obj
-
     def _update(anim_frame):
         t_idx = frame_indices[anim_frame]
-        line.set_data(cl_dist, P_mmHg[:, t_idx])
+        # line.set_data(cl_dist, P_mmHg[:, t_idx])
+        scat.set_offsets(np.column_stack([cl_dist, P_mmHg[:, t_idx]]))
         title_obj.set_text(
             f'{case_name}  |  Q_inlet = {Q_in[t_idx]:.2f} mL/s  '
             f'(snapshot {t_idx} / {n_snapshots - 1})'
         )
-        return line, title_obj
+        return scat, title_obj
 
     anim = manim.FuncAnimation(
         fig, _update,
         frames   = len(frame_indices),
-        init_func= _init,
-        blit     = True,
+        blit     = False,
         interval = 100,
     )
 
     out_mp4 = output_folder / f"{case_name}_pressureCenterline.mp4"
-    writer = manim.FFMpegWriter(fps=30, metadata=dict(title=case_name), bitrate=1800)
+    writer = manim.FFMpegWriter(fps=10, metadata=dict(title=case_name), bitrate=1800)
     anim.save(str(out_mp4), writer=writer, dpi=150)
     #print(f"Saved animation  ->  {out_mp4}")
     plt.close(fig)
@@ -591,7 +625,7 @@ def main():
 
     # Map ALL centerline points to nearest volume nodes 
     print(f"Mapping all {len(centerline_coords)} centerline points to volume mesh nodes ...")
-    all_vol_node_ids = find_nearest_volume_nodes(vol_coords, centerline_coords)
+    centerline_node_ids = find_nearest_volume_nodes(vol_coords, centerline_coords)
     cl_dist = compute_centerline_distances(centerline_coords, args.inlet_point_id)
     print(f"Centerline length: {cl_dist[-1]:.1f} mm\n")
 
@@ -608,7 +642,7 @@ def main():
         print(f"Parsed timesteps_per_cycle = {timesteps_per_cyc} from filename.\n")
 
     # Read pressure time series at ALL centerline nodes 
-    pressures_all = read_pressure_timeseries_at_nodes_in_parallel(CFD_h5_files, all_vol_node_ids, args.density, args.n_process)   # (n_cl_points, n_snapshots) [Pa]
+    pressures_all = read_pressure_timeseries_at_nodes_in_parallel(CFD_h5_files, centerline_node_ids, args.density, args.n_process)   # (n_cl_points, n_snapshots) [Pa]
 
     # Build inlet flowrate array (Q = 2*t, ramp-specific) 
     n_snapshots = len(CFD_h5_files)
@@ -616,6 +650,11 @@ def main():
     time_array  = np.arange(n_snapshots) * dt                               # [s]
     Q_in        = 2.0 * time_array                                          # [mL/s]
 
+
+    # ------------------- Save centerline snapshot at target Q -----------------------------------
+    save_centerline_hemodynamics_snapshot(output_folder_pressure, args.case_name, CFD_h5_files,
+                                          pressures_all, centerline_node_ids, centerline_coords, cl_dist,
+                                          Q_in, target_Q=5.58)
 
     # ------------------- Plot: 3D surface Centerline pressure over time --------------------------
     print(f"\nPlotting centerline geometry ...")
@@ -667,10 +706,10 @@ def main():
         coord = vol_coords[nid]
         print(f"  node {nid:8d}: ({coord[0]:.3f}, {coord[1]:.3f}, {coord[2]:.3f})")
 
-    # probe_pressures, probe_velocities = read_probe_timeseries_in_parallel(CFD_h5_files, probe_node_ids, args.density, args.n_process)
+    probe_pressures, probe_velocities = read_probe_timeseries_in_parallel(CFD_h5_files, probe_node_ids, args.density, args.n_process)
 
-    # for i, node_id in enumerate(probe_node_ids):
-    #     plot_probe_node_hemodynamics(output_folder_probes, args.case_name, Q_in, probe_pressures[i, :], probe_velocities[i, :], node_id, plot_params, node_order=i + 1)
+    for i, node_id in enumerate(probe_node_ids):
+        plot_probe_node_hemodynamics(output_folder_probes, args.case_name, Q_in, probe_pressures[i, :], probe_velocities[i, :], node_id, plot_params, node_order=i + 1)
 
 
 if __name__ == '__main__':
