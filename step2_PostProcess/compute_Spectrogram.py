@@ -778,14 +778,14 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
     Q_phases = np.full(3, np.nan) # Initialize Qphases as NaNs
 
     # PHASE 1: First rise in midFreq power
-    idx_nonzero_midFreq_power = np.where(spectral_metrics['mean_power_midFreq'] > 2)[0] # array of indices of positive midFreq powers
+    idx_nonzero_midFreq_power = np.where(spectral_metrics['mean_power_midFreq'] > 0.1)[0] # array of indices of positive midFreq powers
 
     if len(idx_nonzero_midFreq_power) > 0:
         Q_phases[0] = bins_Q[idx_nonzero_midFreq_power[0]] # first rise in power
 
 
     # PHASE 2: First rise in highFreq power
-    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 2)[0] # array of indices of positive highFreq powers
+    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 0.1)[0] # array of indices of positive highFreq powers
 
     if len(idx_nonzero_highFreq_power) > 0:
         Q_phases[1] = bins_Q[idx_nonzero_highFreq_power[0]] # first rise in power
@@ -846,8 +846,8 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
         ax[0].set_ylim([0, analysis_params['freq_max']])
 
     # Adding the colorbar
-    #cbar = fig.colorbar(spectrogram, ax=ax[0], orientation='vertical') #pad=0.5
-    #cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
+    cbar = fig.colorbar(spectrogram, ax=ax[0], orientation='vertical') #pad=0.5
+    cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
 
     # Set the limit for power colormap
     spectrogram.set_clim(analysis_params['SPL_db_min'], analysis_params['SPL_db_max'])
@@ -1174,10 +1174,10 @@ def parse_args():
     ap.add_argument("--cutoff_db",          type=float, default=0.0,      help="Minimum dB floor for visualization")
     ap.add_argument("--freq_low",           type=float, default=100,      help="Upper threshold for low-frequency band in Hz (default: 100 Hz)")
     ap.add_argument("--freq_mid",           type=float, default=1000,     help="Upper threshold for mid-frequency band in Hz (default: 1000 Hz)")
-    ap.add_argument("--freq_max",           type=float, default=5000,     help="Maximum frequency to filter spectrogram in Hz (default: 5000 Hz)")
+    ap.add_argument("--freq_max",           type=float, default=2000,     help="Maximum frequency to filter spectrogram in Hz (default: 5000 Hz)")
     ap.add_argument("--flowrate_min",       type=float, default=2.0,      help="Lower inlet flowrate limit for analysis window in mL/s (default: 2.0)")
-    ap.add_argument("--flowrate_max",       type=float, default=10.0,     help="Upper inlet flowrate limit for analysis window in mL/s (default: 2.0)")
-    ap.add_argument("--power_SPL_db_min",   type=float, default=40.0,     help="Lower SPL power limit for spectrogram colormap in dB (default: 40)")
+    ap.add_argument("--flowrate_max",       type=float, default=8.0,      help="Upper inlet flowrate limit for analysis window in mL/s (default: 2.0)")
+    ap.add_argument("--power_SPL_db_min",   type=float, default=20.0,     help="Lower SPL power limit for spectrogram colormap in dB (default: 40)")
     ap.add_argument("--power_SPL_db_max",   type=float, default=120.0,    help="Upper SPL power limit for spectrogram colormap in dB (default: 120)")
 
     return ap.parse_args()
