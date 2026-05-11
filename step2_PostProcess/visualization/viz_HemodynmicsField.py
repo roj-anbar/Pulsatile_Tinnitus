@@ -11,9 +11,9 @@
 #     save_freq and timesteps-per-cycle (parsed from filename if not provided).
 #   - Reads only that one snapshot (velocity field u); no other files are loaded.
 #   - Renders velocity streamlines with configurable colormap, seed node IDs, and line width.
-#   - Renders velocity magnitude contour on a user-specified slice plane.
+#   - Renders a 3D velocity magnitude isosurface at a user-specified isovalue (single color).
 #   - Renders Q-criterion isosurface (via PyVista's built-in compute_derivative filter)
-#     colored by velocity magnitude or Q itself.
+#     in a single color.
 #   - Overlays geometry surface edges on every figure for spatial reference.
 #   - Camera parameters (position, focal point, view-up, parallel scale) apply to all figures.
 #
@@ -37,9 +37,8 @@
 #           --stream_seed_ids   100 500 9853                 \
 #           --stream_colormap   jet                          \
 #           --stream_line_width 2.0                          \
-#           --vel_colormap      turbo                        \
-#           --vel_clim          0.0 1.5                      \
-#           --vel_slice_normal  0 1 0                        \
+#           --vel_isovalue      0.5                          \
+#           --vel_color         dodgerblue                   \
 #           --qcrit_values      5000 20000                   \
 #           --cam_position      0 0 500                      \
 #           --cam_focal_point   0 0 0                        \
@@ -65,17 +64,13 @@
 #   --stream_max_time    Maximum streamline integration time            (default: 1.0)
 #   --stream_tube_radius Tube radius [mesh units]; 0 = render as lines  (default: 0)
 #
-#   Velocity contour (planar slice):
-#   --vel_colormap       Colormap name            (default: jet)
-#   --vel_clim           Color limits [vmin vmax]
-#   --vel_slice_normal   Slice plane normal [nx ny nz]  (default: 0 0 1)
-#   --vel_slice_origin   Slice plane origin [x y z]     (default: mesh centroid)
+#   Velocity magnitude isosurface:
+#   --vel_isovalue       Isosurface value [m/s]   (default: 0.5)
+#   --vel_color          Surface color            (default: dodgerblue)
 #
-#   Q-criterion:
-#   --qcrit_colormap     Colormap name            (default: plasma)
+#   Q-criterion isosurface:
 #   --qcrit_values       Isosurface value(s) [1/s2]  (default: 1000)
-#   --qcrit_clim         Color limits [vmin vmax]
-#   --qcrit_color_by     velocity_magnitude | Q_criterion  (default: velocity_magnitude)
+#   --qcrit_color        Surface color            (default: crimson)
 #
 #   Camera (shared across all three figures):
 #   --cam_position       [x y z]
@@ -88,7 +83,7 @@
 #
 # OUTPUTS:
 #   - <case_name>_streamlines_<snapshot_label>.png
-#   - <case_name>_velocityContour_<snapshot_label>.png
+#   - <case_name>_velocityIsosurface_<snapshot_label>.png
 #   - <case_name>_Qcriterion_<snapshot_label>.png
 #
 # NOTES:
@@ -339,37 +334,29 @@ def render_streamlines(grid: pv.UnstructuredGrid,
 
 
 # ======================================================================================================
-# FIGURE 2: VELOCITY MAGNITUDE CONTOUR (PLANAR SLICE)
+# FIGURE 2: VELOCITY MAGNITUDE ISOSURFACE
 # ======================================================================================================
 
-def render_velocity_contour(grid: pv.UnstructuredGrid,
-                             slice_normal: list,
-                             slice_origin: list,
-                             colormap: str,
-                             clim: list,
-                             cam_params: dict,
-                             output_path: Path,
-                             title: str,
-                             window_size: list):
-    """Render velocity magnitude on a planar slice through the domain."""
-    origin = slice_origin if slice_origin is not None else grid.center
-
-    print("  Computing velocity slice ...")
-    slc = grid.slice(normal=slice_normal, origin=origin)
+def render_velocity_isosurface(grid: pv.UnstructuredGrid,
+                               isovalue: float,
+                               color: str,
+                               cam_params: dict,
+                               output_path: Path,
+                               title: str,
+                               window_size: list):
+    """Render the |u| = isovalue isosurface in a single color."""
+    print(f"  Extracting velocity isosurface at |u| = {isovalue} m/s ...")
+    iso = grid.contour(isosurfaces=[isovalue], scalars='velocity_magnitude')
 
     pl = make_plotter(window_size)
     add_surface_edges(pl, grid)
 
-    mesh_kwargs = dict(
-        scalars='velocity_magnitude',
-        cmap=colormap,
-        show_scalar_bar=True,
-        scalar_bar_args=_scalar_bar_args('Velocity (m/s)'),
-    )
-    if clim is not None:
-        mesh_kwargs['clim'] = clim
+    if iso.n_points > 0:
+        pl.add_mesh(iso, color=color, show_scalar_bar=False)
+    else:
+        print(f"  Warning: no isosurface at |u| = {isovalue} m/s.  "
+              "Adjust --vel_isovalue (velocity range printed above).")
 
-    pl.add_mesh(slc, **mesh_kwargs)
     pl.add_title(title, color='black', font_size=10)
     apply_camera(pl, cam_params)
     save_screenshot(pl, output_path)
@@ -381,31 +368,20 @@ def render_velocity_contour(grid: pv.UnstructuredGrid,
 
 def render_qcriterion(grid: pv.UnstructuredGrid,
                        qcrit_values: list,
-                       colormap: str,
-                       clim: list,
-                       color_by: str,
+                       color: str,
                        cam_params: dict,
                        output_path: Path,
                        title: str,
                        window_size: list):
-    """Render Q-criterion isosurface(s) colored by velocity magnitude or Q itself."""
-    print("  Extracting Q-criterion isosurface ...")
+    """Render Q-criterion isosurface(s) in a single color."""
+    print(f"  Extracting Q-criterion isosurface at Q = {qcrit_values} [1/s2] ...")
     iso = grid.contour(isosurfaces=qcrit_values, scalars='Q_criterion')
 
     pl = make_plotter(window_size)
     add_surface_edges(pl, grid)
 
     if iso.n_points > 0:
-        cbar_title = 'Velocity (m/s)' if color_by == 'velocity_magnitude' else 'Q-criterion (1/s2)'
-        mesh_kwargs = dict(
-            scalars=color_by,
-            cmap=colormap,
-            show_scalar_bar=True,
-            scalar_bar_args=_scalar_bar_args(cbar_title),
-        )
-        if clim is not None:
-            mesh_kwargs['clim'] = clim
-        pl.add_mesh(iso, **mesh_kwargs)
+        pl.add_mesh(iso, color=color, show_scalar_bar=False)
     else:
         print(f"  Warning: no isosurface found at Q = {qcrit_values}.  "
               "Adjust --qcrit_values (Q range printed above).")
@@ -450,26 +426,17 @@ def parse_args():
     ap.add_argument('--stream_tube_radius', type=float, default=0.0,
                     help="Tube radius [mesh units]; 0 = render as lines (default: 0)")
 
-    # ---- Velocity contour ----
-    ap.add_argument('--vel_colormap',     default='jet',
-                    help="Colormap for velocity magnitude contour (default: jet)")
-    ap.add_argument('--vel_clim',         type=float, nargs=2, default=None,
-                    help="Color limits [vmin vmax] for velocity contour")
-    ap.add_argument('--vel_slice_normal', type=float, nargs=3, default=[0.0, 0.0, 1.0],
-                    help="Slice plane normal vector (default: 0 0 1)")
-    ap.add_argument('--vel_slice_origin', type=float, nargs=3, default=None,
-                    help="Slice plane origin [x y z] (default: mesh centroid)")
+    # ---- Velocity magnitude isosurface ----
+    ap.add_argument('--vel_isovalue', type=float, default=0.5,
+                    help="Velocity magnitude isosurface value [m/s] (default: 0.5)")
+    ap.add_argument('--vel_color',    default='dodgerblue',
+                    help="Isosurface color (default: dodgerblue)")
 
-    # ---- Q-criterion ----
-    ap.add_argument('--qcrit_colormap',  default='plasma',
-                    help="Colormap for Q-criterion isosurface (default: plasma)")
-    ap.add_argument('--qcrit_values',    type=float, nargs='+', default=[1000.0],
+    # ---- Q-criterion isosurface ----
+    ap.add_argument('--qcrit_values', type=float, nargs='+', default=[1000.0],
                     help="Q-criterion isosurface value(s) [1/s2] (default: 1000)")
-    ap.add_argument('--qcrit_clim',      type=float, nargs=2, default=None,
-                    help="Color limits [vmin vmax] for Q-criterion figure")
-    ap.add_argument('--qcrit_color_by',  default='velocity_magnitude',
-                    choices=['velocity_magnitude', 'Q_criterion'],
-                    help="Field to color Q-criterion isosurface (default: velocity_magnitude)")
+    ap.add_argument('--qcrit_color',  default='crimson',
+                    help="Isosurface color (default: crimson)")
 
     # ---- Camera (shared across all figures) ----
     ap.add_argument('--cam_position',       type=float, nargs=3, default=None, help="Camera position [x y z]")
@@ -572,19 +539,17 @@ def main():
         window_size = args.window_size,
     )
 
-    # ---- Figure 2: Velocity contour ----
-    print("\nRendering velocity magnitude contour ...")
-    out_vel = output_folder / f"{args.case_name}_velocityContour_{snapshot_label}.png"
-    render_velocity_contour(
+    # ---- Figure 2: Velocity magnitude isosurface ----
+    print("\nRendering velocity magnitude isosurface ...")
+    out_vel = output_folder / f"{args.case_name}_velocityIsosurface_{snapshot_label}.png"
+    render_velocity_isosurface(
         grid,
-        slice_normal = args.vel_slice_normal,
-        slice_origin = args.vel_slice_origin,
-        colormap     = args.vel_colormap,
-        clim         = args.vel_clim,
-        cam_params   = cam_params,
-        output_path  = out_vel,
-        title        = f"{args.case_name}  --  Velocity Magnitude  |  t = {actual_time:.4f} s",
-        window_size  = args.window_size,
+        isovalue    = args.vel_isovalue,
+        color       = args.vel_color,
+        cam_params  = cam_params,
+        output_path = out_vel,
+        title       = f"{args.case_name}  --  |u| = {args.vel_isovalue} m/s  |  t = {actual_time:.4f} s",
+        window_size = args.window_size,
     )
 
     # ---- Figure 3: Q-criterion ----
@@ -593,9 +558,7 @@ def main():
     render_qcriterion(
         grid,
         qcrit_values = args.qcrit_values,
-        colormap     = args.qcrit_colormap,
-        clim         = args.qcrit_clim,
-        color_by     = args.qcrit_color_by,
+        color        = args.qcrit_color,
         cam_params   = cam_params,
         output_path  = out_qcrit,
         title        = f"{args.case_name}  --  Q-criterion  |  t = {actual_time:.4f} s",
