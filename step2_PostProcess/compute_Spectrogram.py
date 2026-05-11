@@ -85,6 +85,7 @@ import re   # for text manupulation
 import vtk
 import numpy as np
 from scipy.signal import stft, find_peaks
+from scipy.ndimage import uniform_filter1d #for cleaning signal
 import pyvista as pv
 import matplotlib.pyplot as plt
 
@@ -532,10 +533,15 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
     #cutoff_db     = STFT_params.get("cutoff_db")
     #cutoff_freq   = STFT_params.get("cutoff_freq")
 
-    signal      = var_array
+    # test: cut signal at Q=8
+    #Q_cut       = analysis_params.get("Q_max")  # ml/s 
+    signal      = var_array #var_array[:, :int(Q_cut / 2 * sampling_rate)]
     n_points    = signal.shape[0]
     n_snapshots = signal.shape[1] # total number of snapshots
 
+    # Remove slowly-varying baseline (ramp mean) before STFT
+    #baseline = uniform_filter1d(signal, size=window_length, axis=1, mode='nearest')
+    #signal = signal - baseline
 
     # If window_length is not defined, divide the signal by 10 by default 
     if window_length is None: window_length = shift_bit_length(int(n_snapshots / 10))
@@ -779,27 +785,27 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
 
     # PHASE 1: First rise in midFreq power
     idx_nonzero_midFreq_power = np.where(spectral_metrics['mean_power_midFreq'] > 0.1)[0] # array of indices of positive midFreq powers
+    #idx_nonzero_spectral_centroid = np.where(spectral_metrics['centroid_freq'] > 1)[0]  # array of indices of positive spectral centroid
 
     if len(idx_nonzero_midFreq_power) > 0:
-        Q_phases[0] = bins_Q[idx_nonzero_midFreq_power[0]] # first rise in power
-
+        Q_phases[0] = bins_Q[idx_nonzero_midFreq_power[0]]      # first rise in midFreq power
+        #Q_phases[0] = bins_Q[idx_nonzero_spectral_centroid[0]]  # first rise in centroid
 
     # PHASE 2: First rise in highFreq power
-    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 0.1)[0] # array of indices of positive highFreq powers
+    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 2)[0] # array of indices of positive highFreq powers
 
     if len(idx_nonzero_highFreq_power) > 0:
         Q_phases[1] = bins_Q[idx_nonzero_highFreq_power[0]] # first rise in power
 
-    
+
     # PHASE 3: Sustained centroid freq above f_low
-    centroid_above_lowFreq = spectral_metrics['centroid_freq'] > f_low
-    idx_centroid_below_lowFreq = np.where(~centroid_above_lowFreq)[0]
+    # centroid_above_lowFreq = spectral_metrics['centroid_freq'] > f_low
+    # idx_centroid_below_lowFreq = np.where(~centroid_above_lowFreq)[0]
 
-
-    if centroid_above_lowFreq[-1]:  # centroid stays above f_low until end
-        start = idx_centroid_below_lowFreq[-1] + 1
-        idx_phase3 = start - 1
-        Q_phases[2] = bins_Q[idx_phase3]
+    # if centroid_above_lowFreq[-1]:  # centroid stays above f_low until end
+    #     start = idx_centroid_below_lowFreq[-1] + 1
+    #     idx_phase3 = start - 1
+    #     Q_phases[2] = bins_Q[idx_phase3]
 
 
     return Q_phases, spectral_metrics
@@ -829,28 +835,28 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     plt.rc('axes',   labelsize=18)     # fontsize of the x and y labels
 
 
-    fig, ax = plt.subplots(1,3, figsize=(24,8))
+    fig, ax = plt.subplots(3,1, figsize=(8,18))
     fig.suptitle(plot_title, fontweight='bold', y=0.99)             # y adds distance to the title's location
-    #ax.set_title(plot_title,fontweight='bold', pad=20)
 
 
     # ------------------------ Subplot 0: Spectrogram ----------------------------
     spectrogram = ax[0].pcolormesh(bins_Q, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
-        
+    # Set the limit for power colormap
+    spectrogram.set_clim(analysis_params['SPL_db_min'], analysis_params['SPL_db_max'])
+
+
     ax[0].set_ylabel('Frequency (Hz)',   fontweight='bold', labelpad=10)
 
     # Set different y limits based on the case
     if 'PTSeg043' in case_name:
         ax[0].set_ylim([0, analysis_params['freq_mid']])
     else:
-        ax[0].set_ylim([0, analysis_params['freq_max']])
+        ax[0].set_ylim([0, 3000]) #analysis_params['freq_max']])
 
     # Adding the colorbar
     cbar = fig.colorbar(spectrogram, ax=ax[0], orientation='vertical') #pad=0.5
     cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
 
-    # Set the limit for power colormap
-    spectrogram.set_clim(analysis_params['SPL_db_min'], analysis_params['SPL_db_max'])
 
     # ------------------------ Subplot 1: Mean power ----------------------------
     ax[1].plot(bins_Q, spectral_metrics['mean_power_lowFreq'],  label='low-freq',  linewidth = 4, color=(160/255,230/255,245/255)) #RGB:'#A6CEE3'
@@ -859,7 +865,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
 
     ax[1].set_ylim([-1, analysis_params['SPL_db_max']])
     ax[1].set_ylabel('Mean SPL power (dB)', fontweight='bold', labelpad=10)
-    ax[1].legend(loc = 'upper left', fontsize=font_size)
+    #ax[1].legend(loc = 'upper left', fontsize=font_size)
 
     # ------------------------ Subplot 2: Spectral Centroid ----------------------------
     ax[2].plot(bins_Q, spectral_metrics['centroid_freq'], linewidth = 4, color='black')
@@ -870,7 +876,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
 
     #------- Common x-axis settings
     for a in ax:
-        a.set_xlim([analysis_params['Q_min'], analysis_params['Q_max']])
+        a.set_xlim([analysis_params['Q_min'], analysis_params['Q_cut']])
         #a.set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
     ax[2].set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
 
@@ -995,7 +1001,10 @@ def compute_and_save_spectrogram_for_all_ROIs(
             print(f"Found {len(ROI_point_indices)} unique mesh points in total in the specified region. \n")
 
             # Calculate average spectrogram for all the ROIs combined
-            spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = spec_quantity_array_ROI_multi, STFT_params = STFT_params)
+            spectrogram_data = calculate_mean_spectrogram(
+                                var_name= spec_quantity,
+                                var_array = spec_quantity_array_ROI_multi,
+                                STFT_params = STFT_params)
             
             # Construct the title: use region_shortname from CSV if available, else fall back to ROI ID range
             region_name = ROI_params.get("region_shortname")
@@ -1056,7 +1065,10 @@ def compute_and_save_spectrogram_for_all_ROIs(
                 spectrogram_title = f'{case_name}_win{window_length}_{ROI_id}' 
                 
                 # Calculate average spectrogram for each ROI
-                spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = spec_quantity_array_ROI, STFT_params = STFT_params)
+                spectrogram_data = calculate_mean_spectrogram(
+                                    var_name = spec_quantity,
+                                    var_array = spec_quantity_array_ROI,
+                                    STFT_params = STFT_params)
                 
                 # Save full spectrogram data
                 spec_output_npz = Path(output_folder_files) / f"{spectrogram_title}.npz"
@@ -1105,7 +1117,10 @@ def compute_and_save_spectrogram_for_all_ROIs(
         # Construct title
         spectrogram_title = f'{case_name}_specP_win{window_length}' 
         
-        spectrogram_data = calculate_mean_spectrogram(var_name = spec_quantity, var_array = spec_quantity_array_ROI, STFT_params = STFT_params)
+        spectrogram_data = calculate_mean_spectrogram(
+                            var_name = spec_quantity,
+                            var_array = spec_quantity_array_ROI,
+                            STFT_params = STFT_params)
 
         # Save full spectrogram data
         spec_output_npz = Path(output_folder_files) / f"{spectrogram_title}.npz"
@@ -1166,7 +1181,7 @@ def parse_args():
     ap.add_argument("--n_fft",            type=int,   default=None,     help="FFT length (bins)")
     ap.add_argument("--overlap_fraction", type=float, default=0.9,      help="Overlap fraction between consequent windows [0,1] (default: 0.9)")
     ap.add_argument("--window_type",      type=str,   default='hann',   choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT (default: hann)")
-    ap.add_argument("--pad_mode",         type=str,   default='cycle',  choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts (default: cycle)")
+    ap.add_argument("--pad_mode",         type=str,   default='even',   choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts (default: even)")
     ap.add_argument("--detrend",          type=str,   default='linear', help="Detrend option for STFT: 'linear', 'constant', or False (default: linear)")
 
 
@@ -1174,9 +1189,10 @@ def parse_args():
     ap.add_argument("--cutoff_db",          type=float, default=0.0,      help="Minimum dB floor for visualization")
     ap.add_argument("--freq_low",           type=float, default=100,      help="Upper threshold for low-frequency band in Hz (default: 100 Hz)")
     ap.add_argument("--freq_mid",           type=float, default=1000,     help="Upper threshold for mid-frequency band in Hz (default: 1000 Hz)")
-    ap.add_argument("--freq_max",           type=float, default=2000,     help="Maximum frequency to filter spectrogram in Hz (default: 5000 Hz)")
+    ap.add_argument("--freq_max",           type=float, default=5000,     help="Maximum frequency to filter spectrogram in Hz (default: 5000 Hz)")
     ap.add_argument("--flowrate_min",       type=float, default=2.0,      help="Lower inlet flowrate limit for analysis window in mL/s (default: 2.0)")
-    ap.add_argument("--flowrate_max",       type=float, default=8.0,      help="Upper inlet flowrate limit for analysis window in mL/s (default: 2.0)")
+    ap.add_argument("--flowrate_max",       type=float, default=10.0,      help="Upper inlet flowrate limit for analysis window in mL/s (default: 10.0)")
+    ap.add_argument("--flowrate_cut",       type=float, default=8.0,      help="Upper inlet flowrate limit for figures in mL/s (default: 8.0)")
     ap.add_argument("--power_SPL_db_min",   type=float, default=20.0,     help="Lower SPL power limit for spectrogram colormap in dB (default: 40)")
     ap.add_argument("--power_SPL_db_max",   type=float, default=120.0,    help="Upper SPL power limit for spectrogram colormap in dB (default: 120)")
 
@@ -1229,6 +1245,7 @@ def main():
         "freq_max":   args.freq_max,
         "Q_min":      args.flowrate_min,
         "Q_max":      args.flowrate_max,
+        "Q_cut":      args.flowrate_cut,
         "SPL_db_min": args.power_SPL_db_min,
         "SPL_db_max": args.power_SPL_db_max}
 
