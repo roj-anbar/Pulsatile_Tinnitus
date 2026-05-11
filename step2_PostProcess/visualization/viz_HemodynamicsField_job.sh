@@ -29,7 +29,7 @@ MESH_FOLDER="$BASE_DIR/step1_CFD/data"
 INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq5"
 OUTPUT="$BASE_DIR/step2_PostProcess/HemodynamicsField"
 
-SCRIPT="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/viz_HemodynmicsField.py"
+SCRIPT="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/visualization/viz_HemodynmicsField.py"
 
 # --------------------------------- Load Modules ------------------------------------------------------------------------
 module load StdEnv/2023 gcc/12.3 python/3.12.4
@@ -45,25 +45,37 @@ export DISPLAY=""
 
 # ------------------------------ Run Script ----------------------------------------------------------------------------
 python "$SCRIPT"                     \
-    --mesh_folder       "$MESH_FOLDER"   \
-    --input_folder      "$INPUT"         \
-    --output_folder     "$OUTPUT"        \
     --case_name         "$CASE"          \
+    --input_folder      "$INPUT"         \
+    --mesh_folder       "$MESH_FOLDER"   \
+    --output_folder     "$OUTPUT"        \
     --target_time       2.79             \
     --save_freq         5                \
     --stream_seed_ids   100 500 9853     \
     --vel_isovalue      0.5              \
     --qcrit_values      5000             \
-    --cam_position      0 0 500          \
-    --cam_focal_point   0 0 0            \
-    --cam_view_up       0 1 0            \
-    --cam_parallel_scale 50              
-
+    --cam_position      -285 -33.8 102   \
+    --cam_focal_point   20.6 -35.1 -2.8            \
+    --cam_view_up       0.32 0.04 0.94            \
+    --cam_parallel_scale 101              
 
 #---------------------- For running directly from commandline use below ---------------------------
 # Note1: You HAVE to load the modules first from terminal then run below
 # Note2: You HAVE to comment this part if submitting this file through sbatch
 
-
+python viz_HemodynmicsField.py                     \
+    --case_name         "PTSeg028_base_0p64"          \
+    --input_folder      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq5/"         \
+    --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data"   \
+    --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step2_PostProcess/Hemodynamics/Field"        \
+    --target_time       4             \
+    --save_freq         5                \
+    --stream_seed_ids   100 500 9853     \
+    --vel_isovalue      0.5              \
+    --qcrit_values      5000             \
+    --cam_position      -285 -33.8 102   \
+    --cam_focal_point   20.6 -35.1 -2.8            \
+    --cam_view_up       0.32 0.04 0.94            \
+    --cam_parallel_scale 101        
 
 echo "Job finished: $(date)"

@@ -242,17 +242,30 @@ def make_plotter(window_size: list) -> pv.Plotter:
 
 
 def apply_camera(plotter: pv.Plotter, cam_params: dict):
-    """Set camera position, focal point, view-up, and optional parallel scale."""
+    """Set camera position, focal point, view-up, and optional parallel scale.
+
+    If none of the params are provided, falls back to PyVista's reset_camera()
+    which auto-fits the view to the full mesh bounds.
+    """
+    any_set = False
     if cam_params.get('position') is not None:
         plotter.camera.position = tuple(cam_params['position'])
+        any_set = True
     if cam_params.get('focal_point') is not None:
         plotter.camera.focal_point = tuple(cam_params['focal_point'])
+        any_set = True
     if cam_params.get('view_up') is not None:
         plotter.camera.up = tuple(cam_params['view_up'])
+        any_set = True
     if cam_params.get('parallel_scale') is not None:
         plotter.camera.parallel_projection = True
         plotter.camera.parallel_scale = cam_params['parallel_scale']
-    plotter.camera_set = True   # prevent auto reset_camera()
+        any_set = True
+
+    if any_set:
+        plotter.camera_set = True   # prevent auto reset_camera() from overriding user params
+    else:
+        plotter.reset_camera()      # auto-fit to mesh bounds when no camera params given
 
 
 def add_surface_edges(plotter: pv.Plotter, grid: pv.UnstructuredGrid,
@@ -459,19 +472,14 @@ def parse_args():
                     help="Field to color Q-criterion isosurface (default: velocity_magnitude)")
 
     # ---- Camera (shared across all figures) ----
-    ap.add_argument('--cam_position',       type=float, nargs=3, default=None,
-                    help="Camera position [x y z]")
-    ap.add_argument('--cam_focal_point',    type=float, nargs=3, default=None,
-                    help="Camera focal point [x y z]")
-    ap.add_argument('--cam_view_up',        type=float, nargs=3, default=None,
-                    help="Camera view-up vector [x y z]")
-    ap.add_argument('--cam_parallel_scale', type=float, default=None,
-                    help="Enable parallel projection at this scale")
+    ap.add_argument('--cam_position',       type=float, nargs=3, default=None, help="Camera position [x y z]")
+    ap.add_argument('--cam_focal_point',    type=float, nargs=3, default=None, help="Camera focal point [x y z]")
+    ap.add_argument('--cam_view_up',        type=float, nargs=3, default=None, help="Camera view-up vector [x y z]")
+    ap.add_argument('--cam_parallel_scale', type=float,          default=None, help="Enable parallel projection at this scale")
 
 
     # ---- Output ----
-    ap.add_argument('--window_size', type=int, nargs=2, default=[1920, 1080],
-                    help="Render window size [W H] (default: 1920 1080)")
+    ap.add_argument('--window_size', type=int, nargs=2, default=[1920, 1080], help="Render window size [W H] (default: 1920 1080)")
 
     return ap.parse_args()
 
