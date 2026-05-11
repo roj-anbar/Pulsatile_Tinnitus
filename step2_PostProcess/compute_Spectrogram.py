@@ -835,7 +835,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     plt.rc('axes',   labelsize=18)     # fontsize of the x and y labels
 
 
-    fig, ax = plt.subplots(3,1, figsize=(8,18))
+    fig, ax = plt.subplots(1,3, figsize=(20,6))       #(8,18) #(20,6)
     fig.suptitle(plot_title, fontweight='bold', y=0.99)             # y adds distance to the title's location
 
 
@@ -849,27 +849,27 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
 
     # Set different y limits based on the case
     if 'PTSeg043' in case_name:
-        ax[0].set_ylim([0, analysis_params['freq_mid']])
+        ax[0].set_ylim([0, analysis_params['freq_mid']/2])
     else:
         ax[0].set_ylim([0, 3000]) #analysis_params['freq_max']])
 
     # Adding the colorbar
-    cbar = fig.colorbar(spectrogram, ax=ax[0], orientation='vertical') #pad=0.5
-    cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
+    #cbar = fig.colorbar(spectrogram, ax=ax[0], orientation='vertical') #pad=0.5
+    #cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
 
 
     # ------------------------ Subplot 1: Mean power ----------------------------
-    ax[1].plot(bins_Q, spectral_metrics['mean_power_lowFreq'],  label='low-freq',  linewidth = 4, color=(160/255,230/255,245/255)) #RGB:'#A6CEE3'
-    ax[1].plot(bins_Q, spectral_metrics['mean_power_midFreq'],  label='mid-freq',  linewidth = 4, color='deepskyblue')
-    ax[1].plot(bins_Q, spectral_metrics['mean_power_highFreq'], label='high-freq', linewidth = 4, color='mediumblue')
+    ax[1].plot(bins_Q, spectral_metrics['mean_power_lowFreq'],  label='low-freq',  linewidth = 4, color='tab:green') #(160/255,230/255,245/255)) #RGB:'#A6CEE3'
+    ax[1].plot(bins_Q, spectral_metrics['mean_power_midFreq'],  label='mid-freq',  linewidth = 4, color='tab:blue') #deepskyblue
+    ax[1].plot(bins_Q, spectral_metrics['mean_power_highFreq'], label='high-freq', linewidth = 4, color='tab:red') #'mediumblue'
 
     ax[1].set_ylim([-1, analysis_params['SPL_db_max']])
     ax[1].set_ylabel('Mean SPL power (dB)', fontweight='bold', labelpad=10)
-    #ax[1].legend(loc = 'upper left', fontsize=font_size)
+    ax[1].legend(loc = 'upper left', fontsize=font_size)
 
     # ------------------------ Subplot 2: Spectral Centroid ----------------------------
     ax[2].plot(bins_Q, spectral_metrics['centroid_freq'], linewidth = 4, color='black')
-    ax[2].set_ylim([-1, 500])
+    ax[2].set_ylim([-1, 300])
     ax[2].set_ylabel('Spectral Centroid (Hz)', fontweight='bold', labelpad=10)
 
 
@@ -878,7 +878,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     for a in ax:
         a.set_xlim([analysis_params['Q_min'], analysis_params['Q_cut']])
         #a.set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
-    ax[2].set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
+    #ax[2].set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
 
     #--------- Adding phase lines 
     if flag_plot_phases:
@@ -1193,7 +1193,7 @@ def parse_args():
     ap.add_argument("--flowrate_min",       type=float, default=2.0,      help="Lower inlet flowrate limit for analysis window in mL/s (default: 2.0)")
     ap.add_argument("--flowrate_max",       type=float, default=10.0,      help="Upper inlet flowrate limit for analysis window in mL/s (default: 10.0)")
     ap.add_argument("--flowrate_cut",       type=float, default=8.0,      help="Upper inlet flowrate limit for figures in mL/s (default: 8.0)")
-    ap.add_argument("--power_SPL_db_min",   type=float, default=20.0,     help="Lower SPL power limit for spectrogram colormap in dB (default: 40)")
+    ap.add_argument("--power_SPL_db_min",   type=float, default=20.0,     help="Lower SPL power limit for spectrogram colormap in dB (default: 20)")
     ap.add_argument("--power_SPL_db_max",   type=float, default=120.0,    help="Upper SPL power limit for spectrogram colormap in dB (default: 120)")
 
     return ap.parse_args()
