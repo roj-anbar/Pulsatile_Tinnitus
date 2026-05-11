@@ -282,19 +282,19 @@ def save_centerline_hemodynamics_snapshot(output_folder: Path, case_name: str, h
                                           Q_in: np.ndarray, target_Q: float = 5.58):
     """
     Save centerline pressure [Pa] and velocity magnitude [m/s] at the snapshot nearest to target_Q [mL/s] as a CSV file.
-    Columns: x_mm, y_mm, z_mm, cl_dist_mm, pressure_pa, velocity_mag_ms
+    Columns: x_mm, y_mm, z_mm, cl_dist_mm, pressure_mmHg, velocity_mag_ms
     """
     t_idx    = int(np.argmin(np.abs(Q_in - target_Q)))
     Q_actual = float(Q_in[t_idx])
     print(f"\nSaving centerline snapshot: target Q={target_Q} mL/s  ->  snapshot {t_idx}, Q={Q_actual:.4f} mL/s")
 
-    pressure_pa     = pressures_all[:, t_idx]
+    pressure_mmHg     = pressures_all[:, t_idx] / 133.3
     velocity_mag_ms = read_velocity_at_nodes_single_snapshot(h5_files[t_idx], centerline_node_ids)
 
-    data = np.column_stack([centerline_coords, cl_dist, pressure_pa, velocity_mag_ms])
-    header = f"Q_actual={Q_actual:.4f} mL/s\nx_mm,y_mm,z_mm,cl_dist_mm,pressure_pa,velocity_mag_ms"
+    data = np.column_stack([centerline_coords, cl_dist, pressure_mmHg, velocity_mag_ms])
+    header = f"Q_actual={Q_actual:.4f} mL/s\nx_mm,y_mm,z_mm,cl_dist_mm,pressure_mmHg,velocity_mag_ms"
     out_csv = output_folder / f"{case_name}_centerline_hemodynamics_Qin{target_Q:.2f}mLs.csv"
-    np.savetxt(out_csv, data, delimiter=",", header=header, comments="# ")
+    np.savetxt(out_csv, data, delimiter=",", header=header, comments="# ", fmt="%.6f")
 
 
 
