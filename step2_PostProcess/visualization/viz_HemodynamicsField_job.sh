@@ -40,8 +40,6 @@ mkdir -p "$OUTPUT"
 mkdir -p "$SCRATCH/.config/mpl"
 export MPLCONFIGDIR=$SCRATCH/.config/mpl
 
-# Suppress VTK/PyVista display (required for off-screen rendering on compute nodes)
-export DISPLAY=""
 
 # ------------------------------ Run Script ----------------------------------------------------------------------------
 python "$SCRIPT"                     \
@@ -52,8 +50,8 @@ python "$SCRIPT"                     \
     --target_time       2.79             \
     --save_freq         5                \
     --stream_seed_ids   100 500 9853     \
-    --vel_isovalue      0.5              \
-    --qcrit_values      5000             \
+    --velocity_isovalue      0.5              \
+    --qcri_isovalue      5000             \
     --cam_position      -285 -33.8 102   \
     --cam_focal_point   20.6 -35.1 -2.8            \
     --cam_view_up       0.32 0.04 0.94            \
@@ -67,12 +65,12 @@ python viz_HemodynmicsField.py                     \
     --case_name         "PTSeg028_base_0p64"          \
     --input_folder      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq5/"         \
     --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data"   \
-    --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step2_PostProcess/Hemodynamics/Field"        \
+    --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/Hemodynamics/Field"        \
     --target_time       4             \
     --save_freq         5                \
     --stream_seed_ids   100 500 9853     \
-    --vel_isovalue      0.5              \
-    --qcrit_values      5000             \
+    --velocity_isovalue      0.5              \
+    --qcri_isovalue      5000             \
     --cam_position      -285 -33.8 102   \
     --cam_focal_point   20.6 -35.1 -2.8            \
     --cam_view_up       0.32 0.04 0.94            \
