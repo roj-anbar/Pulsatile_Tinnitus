@@ -212,7 +212,7 @@ def attach_fields(grid: pv.UnstructuredGrid, u: np.ndarray) -> pv.UnstructuredGr
 # Q-CRITERION
 # ======================================================================================================
 
-def compute_q_criterion(grid: pv.UnstructuredGrid) -> np.ndarray:
+def compute_qcriterion(grid: pv.UnstructuredGrid) -> np.ndarray:
     """
     Compute Q-criterion [1/s2] using PyVista's built-in compute_derivative filter.
 
@@ -220,7 +220,7 @@ def compute_q_criterion(grid: pv.UnstructuredGrid) -> np.ndarray:
     gradient du_i/dx_j has units [1/s] and Q is in [1/s2].
     """
     grid_m = grid.copy()
-    grid_m.points = grid.points * 1e-3    # mm -> m
+    #grid_m.points = grid.points * 1e-3    # mm -> m
 
     result = grid_m.compute_derivative(scalars='velocity', qcriterion=True)
     return result['qcriterion']
@@ -264,14 +264,11 @@ def apply_camera(plotter: pv.Plotter, cam_params: dict):
         plotter.reset_camera()      # auto-fit to mesh bounds when no camera params given
 
 
-def add_geometry_outline(plotter: pv.Plotter, grid: pv.UnstructuredGrid):
-    """Overlay the camera-view silhouette outline of the geometry.
-
-    Must be called AFTER apply_camera() so the silhouette uses the correct camera position.
-    """
+def add_geometry_outline(plotter: pv.Plotter, grid: pv.UnstructuredGrid,
+                         color: str = 'black', line_width: float = 1.5, opacity: float = 0.9):
+    """Overlay the silhouette outline of the geometry (surface is invisible; only the outline is drawn)."""
     surface = grid.extract_surface()
-    outline = surface.silhouette(camera=plotter.camera)
-    plotter.add_mesh(outline, color='black', line_width=1.5, opacity=0.9)
+    plotter.add_mesh(surface, opacity=0.0, silhouette=dict(color='black', line_width=1.5, opacity=0.9))
 
 
 def _scalar_bar_args(title: str) -> dict:
@@ -342,7 +339,6 @@ def render_streamlines(grid: pv.UnstructuredGrid,
 
 def render_velocity_isosurface(grid: pv.UnstructuredGrid,
                                isovalue: float,
-                               color: str,
                                cam_params: dict,
                                output_path: Path,
                                title: str,
@@ -356,7 +352,7 @@ def render_velocity_isosurface(grid: pv.UnstructuredGrid,
     add_geometry_outline(pl, grid)
 
     if iso.n_points > 0:
-        pl.add_mesh(iso, color=color, show_scalar_bar=False)
+        pl.add_mesh(iso, color='red', show_scalar_bar=False)
     else:
         print(f"  Warning: no isosurface at |u| = {isovalue} m/s.  "
               "Adjust --velocity_isovalue (velocity range printed above).")
@@ -371,7 +367,6 @@ def render_velocity_isosurface(grid: pv.UnstructuredGrid,
 
 def render_qcriterion(grid: pv.UnstructuredGrid,
                        qcri_isovalue: list,
-                       color: str,
                        cam_params: dict,
                        output_path: Path,
                        title: str,
@@ -385,7 +380,7 @@ def render_qcriterion(grid: pv.UnstructuredGrid,
     add_geometry_outline(pl, grid)
 
     if iso.n_points > 0:
-        pl.add_mesh(iso, color=color, show_scalar_bar=False)
+        pl.add_mesh(iso, color='cyan', show_scalar_bar=False)
     else:
         print(f"  Warning: no isosurface found at Q = {qcri_isovalue}.  "
               "Adjust --qcri_isovalue (Q range printed above).")
@@ -403,19 +398,16 @@ def parse_args():
         description="Visualize streamlines, velocity contour, and Q-criterion from one CFD snapshot.")
 
     # ---- Mesh & data ----
-    mesh_grp = ap.add_mutually_exclusive_group(required=True)
-    mesh_grp.add_argument('--mesh_folder', help="Folder with BSLSolver HDF5 mesh (Mesh/coordinates + Mesh/topology)")
-    mesh_grp.add_argument('--mesh_vtu',    help="Path to mesh VTU file (alternative to --mesh_folder)")
-    ap.add_argument('--input_folder',      required=True,             help="Folder with CFD HDF5 snapshots (*_curcyc_*up.h5)")
-    ap.add_argument('--output_folder',     required=True,             help="Output directory for PNG files")
-    ap.add_argument('--case_name',         required=True,             help="Case identifier used in filenames and figure titles")
-    ap.add_argument('--target_time',       type=float, required=True, help="Desired simulation time [s] to visualize")
-    
+    ap.add_argument('--mesh_folder',    required=True, help="Folder with BSLSolver HDF5 mesh (Mesh/coordinates + Mesh/topology)")
+    ap.add_argument('--input_folder',   required=True,             help="Folder with CFD HDF5 snapshots (*_curcyc_*up.h5)")
+    ap.add_argument('--output_folder',  required=True,             help="Output directory for PNG files")
+    ap.add_argument('--case_name',      required=True,             help="Case identifier used in filenames and figure titles")
+    ap.add_argument('--target_time',    type=float, required=True, help="Desired simulation time [s] to visualize")
+
     ap.add_argument('--save_freq',         type=int,   default=5,     help="Snapshot save frequency: every Nth timestep (default: 1)")
     ap.add_argument('--period_seconds',    type=float, default=0.915, help="Flow period [s] (default: 0.915)")
     ap.add_argument('--timesteps_per_cyc', type=int,   default=None,  help="Timesteps per cycle (parsed from filename if omitted)")
-    ap.add_argument('--snapshot_label',    default=None,
-                    help="Output label override (default: t<actual_time>s)")
+    ap.add_argument('--snapshot_label',    default=None, help="Output label override (default: t<actual_time>s)")
 
     # ---- Streamlines ----
     ap.add_argument('--stream_colormap',    default='jet',
@@ -431,14 +423,9 @@ def parse_args():
 
     # ---- Velocity magnitude isosurface ----
     ap.add_argument('--velocity_isovalue', type=float, default=0.5, help="Velocity magnitude isosurface value [m/s] (default: 0.5)")
-    ap.add_argument('--vel_color',    default='dodgerblue',
-                    help="Isosurface color (default: dodgerblue)")
 
     # ---- Q-criterion isosurface ----
-    ap.add_argument('--qcri_isovalue', type=float, nargs='+', default=[1000.0],
-                    help="Q-criterion isosurface value(s) [1/s2] (default: 1000)")
-    ap.add_argument('--qcrit_color',  default='crimson',
-                    help="Isosurface color (default: crimson)")
+    ap.add_argument('--qcri_isovalue', type=float, nargs='+', default=[1000.0], help="Q-criterion isosurface value(s) [1/s2] (default: 1000)")
 
     # ---- Camera (shared across all figures) ----
     ap.add_argument('--cam_position',       type=float, nargs=3, default=None, help="Camera position [x y z]")
@@ -484,35 +471,30 @@ def main():
     print(f"  Target time       : {args.target_time:.6f} s")
     print(f"  Resolved frame    : {frame_idx}  (0-based index in sorted snapshot list)")
     print(f"  Actual time       : {actual_time:.6f} s  (dt = {dt:.6f} s/frame)")
-    print(f"  Time error        : {abs(actual_time - args.target_time) * 1e3:.3f} ms")
+    #print(f"  Time error        : {abs(actual_time - args.target_time) * 1e3:.3f} ms")
     print(f"  Snapshot file     : {snapshot_file.name}\n")
 
     snapshot_label = args.snapshot_label or f"t{actual_time:.4f}s"
 
     # ---- Load mesh ----
-    if args.mesh_folder:
-        mesh_file = next(Path(args.mesh_folder).glob('*.h5'), None)
-        if mesh_file is None:
-            print(f"ERROR: no .h5 mesh file found in {args.mesh_folder}")
-            sys.exit(1)
-        print(f"Loading mesh from HDF5: {mesh_file.name} ...")
-        grid = load_mesh_from_h5(mesh_file)
-    else:
-        print(f"Loading mesh from VTU: {args.mesh_vtu} ...")
-        grid = pv.read(args.mesh_vtu)
-    print(f"  {grid.n_points} nodes, {grid.n_cells} cells\n")
+    mesh_file = next(Path(args.mesh_folder).glob('*.h5'), None)
+    if mesh_file is None:
+        print(f"ERROR: no .h5 mesh file found in {args.mesh_folder}")
+        sys.exit(1)
+    print(f"Loading mesh ...")
+    grid = load_mesh_from_h5(mesh_file)
+
 
     # ---- Load velocity snapshot ----
-    print(f"Loading velocity: {snapshot_file.name} ...")
+    print(f"Loading velocity ...")
     u = load_velocity_snapshot(snapshot_file)
     vel_mag = np.linalg.norm(u, axis=1)
-    print(f"  shape: {u.shape}")
-    print(f"  |u|  min={vel_mag.min():.4f}  max={vel_mag.max():.4f}  mean={vel_mag.mean():.4f}  [m/s]\n")
+    print(f"  Velocity magnitude:  min={vel_mag.min():.4f}  max={vel_mag.max():.4f} [m/s]\n")
     grid = attach_fields(grid, u)
 
     # ---- Compute Q-criterion ----
     print("Computing Q-criterion ...")
-    Q = compute_q_criterion(grid)
+    Q = compute_qcriterion(grid)
     grid['Q_criterion'] = Q
     print(f"  Q range: {Q.min():.3g}  to  {Q.max():.3g}  [1/s2]")
     print(f"  (positive Q = vortex-dominated; set --qcri_isovalue within this range)\n")
@@ -547,7 +529,6 @@ def main():
     render_velocity_isosurface(
         grid,
         isovalue    = args.velocity_isovalue,
-        color       = args.vel_color,
         cam_params  = cam_params,
         output_path = out_vel,
         title       = f"{args.case_name}  --  |u| = {args.velocity_isovalue} m/s  |  t = {actual_time:.4f} s",
@@ -557,15 +538,14 @@ def main():
     # ---- Figure 3: Q-criterion ----
     print("\nRendering Q-criterion isosurface ...")
     out_qcrit = output_folder / f"{args.case_name}_Qcriterion_{snapshot_label}.png"
-    # render_qcriterion(
-    #     grid,
-    #     qcri_isovalue = args.qcri_isovalue,
-    #     color        = args.qcrit_color,
-    #     cam_params   = cam_params,
-    #     output_path  = out_qcrit,
-    #     title        = f"{args.case_name}  --  Q-criterion  |  t = {actual_time:.4f} s",
-    #     window_size  = args.window_size,
-    # )
+    render_qcriterion(
+        grid,
+        qcri_isovalue = args.qcri_isovalue,
+        cam_params   = cam_params,
+        output_path  = out_qcrit,
+        title        = f"{args.case_name}  --  Q-criterion  |  t = {actual_time:.4f} s",
+        window_size  = args.window_size,
+    )
 
     print("\nDone.\n")
 
