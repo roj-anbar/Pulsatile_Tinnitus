@@ -835,8 +835,9 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     plt.rc('axes',   labelsize=18)     # fontsize of the x and y labels
 
 
-    fig, ax = plt.subplots(1,3, figsize=(20,6))       #(8,18) #(20,6)
-    fig.suptitle(plot_title, fontweight='bold', y=0.99)             # y adds distance to the title's location
+    fig, ax = plt.subplots(2, 1, figsize=(8, 10), sharex=True, gridspec_kw={'hspace': 0.05}) #(8,18) #(20,6)
+
+    #fig.suptitle(plot_title, fontweight='bold', y=0.99)             # y adds distance to the title's location
 
 
     # ------------------------ Subplot 0: Spectrogram ----------------------------
@@ -845,7 +846,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     spectrogram.set_clim(analysis_params['SPL_db_min'], analysis_params['SPL_db_max'])
 
 
-    ax[0].set_ylabel('Frequency (Hz)',   fontweight='bold', labelpad=10)
+    #ax[0].set_ylabel('Frequency (Hz)',   fontweight='bold', fontsize=font_size, labelpad=10)
 
     # Set different y limits based on the case
     if 'PTSeg043' in case_name:
@@ -864,13 +865,13 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     ax[1].plot(bins_Q, spectral_metrics['mean_power_highFreq'], label='high-freq', linewidth = 4, color='tab:red') #'mediumblue'
 
     ax[1].set_ylim([-1, analysis_params['SPL_db_max']])
-    ax[1].set_ylabel('Mean SPL power (dB)', fontweight='bold', labelpad=10)
-    ax[1].legend(loc = 'upper left', fontsize=font_size)
+    #ax[1].set_ylabel('Mean SPL power (dB)', fontweight='bold', labelpad=20, fontsize=font_size)
+    #ax[1].legend(loc = 'upper left', fontsize=font_size)
 
     # ------------------------ Subplot 2: Spectral Centroid ----------------------------
-    ax[2].plot(bins_Q, spectral_metrics['centroid_freq'], linewidth = 4, color='black')
-    ax[2].set_ylim([-1, 300])
-    ax[2].set_ylabel('Spectral Centroid (Hz)', fontweight='bold', labelpad=10)
+    # ax[2].plot(bins_Q, spectral_metrics['centroid_freq'], linewidth = 4, color='black')
+    # ax[2].set_ylim([-1, 300])
+    # ax[2].set_ylabel('Spectral Centroid (Hz)', fontweight='bold', fontsize=font_size, labelpad=10)
 
 
 
@@ -878,7 +879,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     for a in ax:
         a.set_xlim([analysis_params['Q_min'], analysis_params['Q_cut']])
         #a.set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
-    #ax[2].set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
+    #ax[2].set_xlabel('Flow rate (mL/s)', fontweight='bold', fontsize=font_size, labelpad=10)
 
     #--------- Adding phase lines 
     if flag_plot_phases:
@@ -886,7 +887,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
             if not np.isnan(Qphase):
                 print(f'Inlet flowrate of onset Phase {phase} = {Qphase:.2f} mL/s')
                 for a in ax:
-                    a.axvline(Qphase, color="silver", linestyle="solid", linewidth=1.5, alpha=0.7)
+                    a.axvline(Qphase, color="silver", linestyle="solid", linewidth=2.5, alpha=0.7)
 
 
     #----- For customizing the colorbar and axis for figures ----
