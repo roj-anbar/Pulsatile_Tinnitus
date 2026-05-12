@@ -220,7 +220,7 @@ def compute_qcriterion(grid: pv.UnstructuredGrid) -> np.ndarray:
     gradient du_i/dx_j has units [1/s] and Q is in [1/s2].
     """
     grid_m = grid.copy()
-    #grid_m.points = grid.points * 1e-3    # mm -> m
+    grid_m.points = grid.points * 1e-3    # mm -> m
 
     result = grid_m.compute_derivative(scalars='velocity', qcriterion=True)
     return result['qcriterion']
@@ -234,6 +234,7 @@ def make_plotter(window_size: list) -> pv.Plotter:
     """Create an off-screen PyVista plotter with a white background."""
     pl = pv.Plotter(off_screen=True, window_size=window_size)
     pl.set_background('white')
+    pl.enable_anti_aliasing('ssaa')
     return pl
 
 
@@ -244,6 +245,7 @@ def apply_camera(plotter: pv.Plotter, cam_params: dict):
     which auto-fits the view to the full mesh bounds.
     """
     any_set = False
+    plotter.camera.parallel_projection = True
     if cam_params.get('position') is not None:
         plotter.camera.position = tuple(cam_params['position'])
         any_set = True
@@ -254,7 +256,6 @@ def apply_camera(plotter: pv.Plotter, cam_params: dict):
         plotter.camera.up = tuple(cam_params['view_up'])
         any_set = True
     if cam_params.get('parallel_scale') is not None:
-        plotter.camera.parallel_projection = True
         plotter.camera.parallel_scale = cam_params['parallel_scale']
         any_set = True
 
@@ -268,15 +269,15 @@ def add_geometry_outline(plotter: pv.Plotter, grid: pv.UnstructuredGrid,
                          color: str = 'black', line_width: float = 1.5, opacity: float = 0.9):
     """Overlay the silhouette outline of the geometry (surface is invisible; only the outline is drawn)."""
     surface = grid.extract_surface()
-    plotter.add_mesh(surface, opacity=0.0, silhouette=dict(color='black', line_width=1.5, opacity=0.9))
+    plotter.add_mesh(surface, color='white', opacity=0.1, silhouette=dict(color='silver', line_width=1, opacity=0.5), show_scalar_bar=False)
 
 
 def _scalar_bar_args(title: str) -> dict:
     return {'title': title, 'n_labels': 5, 'color': 'black', 'bold': True}
 
 
-def save_screenshot(plotter: pv.Plotter, output_path: Path):
-    plotter.screenshot(str(output_path))
+def save_screenshot(plotter: pv.Plotter, output_path: Path, scale=2):
+    plotter.screenshot(str(output_path), scale=scale) # renders at 2× window_size
     plotter.close()
 
 
@@ -286,50 +287,50 @@ def save_screenshot(plotter: pv.Plotter, output_path: Path):
 
 def render_streamlines(grid: pv.UnstructuredGrid,
                        seed_ids: list,
-                       colormap: str,
-                       line_width: float,
-                       max_steps: int,
-                       tube_radius: float,
                        cam_params: dict,
                        output_path: Path,
                        title: str,
                        window_size: list):
-    """
-    Render velocity streamlines seeded at specified volume mesh node IDs.
-
-    Seeds are the node coordinates at the given indices.
-    Streamlines are rendered as tubes if tube_radius > 0, otherwise as lines.
-    """
+    """Render velocity streamlines seeded at specified volume mesh node IDs as lines."""
     seed_points = grid.points[np.asarray(seed_ids, dtype=int)]
     source      = pv.PolyData(seed_points)
 
     print("  Computing streamlines ...")
-    streamlines = grid.streamlines_from_source(
-        source,
-        vectors='velocity',
-        max_steps=max_steps,
-        integration_direction='both',
-        initial_step_length=0.1,
-        step_unit='cl',
-        interpolator_type='p',
+    # streamlines = grid.streamlines_from_source(
+    #     source,
+    #     vectors='velocity',
+    #     max_steps=10000,
+    #     integration_direction='both',
+    #     initial_step_length=0.1,
+    #     step_unit='cl',
+    #     interpolator_type='point',
+    # )
+
+    streamlines = grid.streamlines(
+    vectors="velocity",             # Your vector array name
+    source_center=(30, -60, 13),    # 'Center' from ParaView
+    source_radius=10,               # 'Radius' from ParaView
+    n_points=1000,                  # 'Number of Points' from ParaView
+    initial_step_length=0.05,
+    interpolator_type='cell'	    # More robust than 'point' for complex unstructured meshes
     )
+
 
     pl = make_plotter(window_size)
     apply_camera(pl, cam_params)
     add_geometry_outline(pl, grid)
 
     if streamlines.n_points > 0:
-        render_mesh = streamlines.tube(radius=tube_radius) if tube_radius else streamlines
-        pl.add_mesh(render_mesh,
+        pl.add_mesh(streamlines,
                     scalars='velocity_magnitude',
-                    cmap=colormap,
-                    line_width=line_width,
+                    cmap='viridis',
+                    line_width=6,
                     show_scalar_bar=True,
                     scalar_bar_args=_scalar_bar_args('Velocity (m/s)'))
     else:
         print("  Warning: no streamlines generated. Check --stream_seed_ids and domain bounds.")
 
-    pl.add_title(title, color='black', font_size=10)
+    pl.add_title(title, color='black', font_size=20)
     save_screenshot(pl, output_path)
 
 
@@ -357,7 +358,7 @@ def render_velocity_isosurface(grid: pv.UnstructuredGrid,
         print(f"  Warning: no isosurface at |u| = {isovalue} m/s.  "
               "Adjust --velocity_isovalue (velocity range printed above).")
 
-    pl.add_title(title, color='black', font_size=10)
+    pl.add_title(title, color='black', font_size=20)
     save_screenshot(pl, output_path)
 
 
@@ -371,9 +372,15 @@ def render_qcriterion(grid: pv.UnstructuredGrid,
                        output_path: Path,
                        title: str,
                        window_size: list):
-    """Render Q-criterion isosurface(s) in a single color."""
-    print(f"  Extracting Q-criterion isosurface at Q = {qcri_isovalue} [1/s2] ...")
-    iso = grid.contour(isosurfaces=qcri_isovalue, scalars='Q_criterion')
+
+    print("Computing Qcriterion ...")
+    Q = compute_qcriterion(grid)
+    grid['Qcriterion'] = Q
+    print(f"  Q range: {Q.min():.3g}  to  {Q.max():.3g}  [1/s2]")
+
+    """Render Qcriterion isosurface(s) in a single color."""
+    print(f"  Extracting Qcriterion isosurface at Q = {qcri_isovalue} [1/s2] ...")
+    iso = grid.contour(isosurfaces=qcri_isovalue, scalars='Qcriterion')
 
     pl = make_plotter(window_size)
     apply_camera(pl, cam_params)
@@ -385,7 +392,20 @@ def render_qcriterion(grid: pv.UnstructuredGrid,
         print(f"  Warning: no isosurface found at Q = {qcri_isovalue}.  "
               "Adjust --qcri_isovalue (Q range printed above).")
 
-    pl.add_title(title, color='black', font_size=10)
+    pl.add_title(title, color='black', font_size=20)
+    save_screenshot(pl, output_path)
+
+def render_qcriterion_evolution(grid: pv.UnstructuredGrid,
+                       qcri_isovalue: list,
+                       frame_spacing: int,
+                       cam_params: dict,
+                       output_path: Path,
+                       title: str,
+                       window_size: list):
+
+    print("Computing Q-criterion evolution...")
+
+    pl.add_title(title, color='black', font_size=20)
     save_screenshot(pl, output_path)
 
 
@@ -410,22 +430,13 @@ def parse_args():
     ap.add_argument('--snapshot_label',    default=None, help="Output label override (default: t<actual_time>s)")
 
     # ---- Streamlines ----
-    ap.add_argument('--stream_colormap',    default='jet',
-                    help="Colormap for streamlines (default: jet)")
-    ap.add_argument('--stream_seed_ids',    type=int, nargs='+', default=[0],
-                    help="Volume mesh node IDs used as streamline seeds (default: 0)")
-    ap.add_argument('--stream_line_width',  type=float, default=2.0,
-                    help="Line width when rendering streamlines as lines (default: 2.0)")
-    ap.add_argument('--stream_max_steps',   type=int,   default=500,
-                    help="Maximum streamline integration steps (default: 500)")
-    ap.add_argument('--stream_tube_radius', type=float, default=0.0,
-                    help="Tube radius [mesh units]; 0 = render as lines (default: 0)")
+    ap.add_argument('--stream_seed_ids',    type=int, nargs='+', help="Volume mesh node IDs used as streamline seeds")
 
     # ---- Velocity magnitude isosurface ----
     ap.add_argument('--velocity_isovalue', type=float, default=0.5, help="Velocity magnitude isosurface value [m/s] (default: 0.5)")
 
     # ---- Q-criterion isosurface ----
-    ap.add_argument('--qcri_isovalue', type=float, nargs='+', default=[1000.0], help="Q-criterion isosurface value(s) [1/s2] (default: 1000)")
+    ap.add_argument('--qcri_isovalue',      type=float, default=1000.0, help="Q-criterion isosurface value(s) [1/s2] (default: 1000)")
 
     # ---- Camera (shared across all figures) ----
     ap.add_argument('--cam_position',       type=float, nargs=3, default=None, help="Camera position [x y z]")
@@ -460,7 +471,7 @@ def main():
     print("=" * 100 + "\n")
 
     # ---- Resolve snapshot from target time ----
-    print("Locating snapshot ...")
+    print("Finding snapshot file...")
     snapshot_file, frame_idx, actual_time, timesteps_per_cyc = find_snapshot_at_time(
         input_folder, args.target_time,
         save_freq         = args.save_freq,
@@ -492,13 +503,6 @@ def main():
     print(f"  Velocity magnitude:  min={vel_mag.min():.4f}  max={vel_mag.max():.4f} [m/s]\n")
     grid = attach_fields(grid, u)
 
-    # ---- Compute Q-criterion ----
-    print("Computing Q-criterion ...")
-    Q = compute_qcriterion(grid)
-    grid['Q_criterion'] = Q
-    print(f"  Q range: {Q.min():.3g}  to  {Q.max():.3g}  [1/s2]")
-    print(f"  (positive Q = vortex-dominated; set --qcri_isovalue within this range)\n")
-
     # ---- Shared parameter dicts ----
     cam_params = {
         'position':       args.cam_position,
@@ -509,23 +513,19 @@ def main():
 
     # ---- Figure 1: Streamlines ----
     print("Rendering streamlines ...")
-    out_stream = output_folder / f"{args.case_name}_streamlines_{snapshot_label}.png"
-    # render_streamlines(
-    #     grid,
-    #     seed_ids    = args.stream_seed_ids,
-    #     colormap    = args.stream_colormap,
-    #     line_width  = args.stream_line_width,
-    #     max_steps   = args.stream_max_steps,
-    #     tube_radius = args.stream_tube_radius if args.stream_tube_radius > 0 else None,
-    #     cam_params  = cam_params,
-    #     output_path = out_stream,
-    #     title       = f"{args.case_name}  --  Velocity Streamlines  |  t = {actual_time:.4f} s",
-    #     window_size = args.window_size,
-    # )
+    out_stream = output_folder / f"{args.case_name}_{snapshot_label}_streamlines.png"
+    render_streamlines(
+        grid,
+        seed_ids    = args.stream_seed_ids,
+        cam_params  = cam_params,
+        output_path = out_stream,
+        title       = f"{args.case_name}  --  Velocity Streamlines  |  t = {actual_time:.4f} s",
+        window_size = args.window_size,
+    )
 
     # ---- Figure 2: Velocity magnitude isosurface ----
     print("\nRendering velocity magnitude isosurface ...")
-    out_vel = output_folder / f"{args.case_name}_velocityIsosurface_{snapshot_label}.png"
+    out_vel = output_folder / f"{args.case_name}_{snapshot_label}_velocityIso{args.velocity_isovalue}.png"
     render_velocity_isosurface(
         grid,
         isovalue    = args.velocity_isovalue,
@@ -535,9 +535,9 @@ def main():
         window_size = args.window_size,
     )
 
-    # ---- Figure 3: Q-criterion ----
-    print("\nRendering Q-criterion isosurface ...")
-    out_qcrit = output_folder / f"{args.case_name}_Qcriterion_{snapshot_label}.png"
+    # ---- Figure 3: Qcriterion ----
+    print("\nRendering Qcriterion isosurface ...")
+    out_qcrit = output_folder / f"{args.case_name}_{snapshot_label}_QcriIso{args.qcri_isovalue}.png"
     render_qcriterion(
         grid,
         qcri_isovalue = args.qcri_isovalue,
