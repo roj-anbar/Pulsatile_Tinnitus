@@ -53,7 +53,7 @@ python "$SCRIPT"                            \
     --target_flowrate   5.06                \
     --save_freq         5                   \
     --velocity_isovalue 0.5                 \
-    --qcri_isovalue     80000                \
+    --qcri_isovalue     70000                \
     --frame_spacing     0
 
 
@@ -65,15 +65,15 @@ python "$SCRIPT"                            \
 # Note2: You HAVE to comment this part if submitting this file through sbatch
 
 python viz_HemodynmicsField.py                          \
-    --case_name         "PTSeg028_base_0p64"            \
-    --input_folder      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq5/" \
-    --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data"   \
-    --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/Hemodynamics/Field" \
-    --config_file       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/configs/PTSeg028_base_0p64_viz_config.yaml" \
-    --target_flowrate   5.05                             \
+    --case_name         "PTSeg106_base_0p64"            \
+    --input_folder      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/results/PTSeg106_base_0p64_ts10000_cy6_saveFreq5/" \
+    --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data"   \
+    --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess/Hemodynamics/Field" \
+    --config_file       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess/configs/PTSeg106_base_0p64_viz_config.yaml" \
+    --target_flowrate   6.2                             \
     --save_freq         5                                \
     --velocity_isovalue 0.5                              \
-    --qcri_isovalue     50000                            \
+    --qcri_isovalue     70000                            \
     --frame_spacing     10
 
 

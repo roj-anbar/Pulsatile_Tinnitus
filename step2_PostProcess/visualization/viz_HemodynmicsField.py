@@ -213,6 +213,8 @@ def make_plotter(window_size: list) -> pv.Plotter:
     pl = pv.Plotter(off_screen=True, window_size=window_size)
     pl.set_background('white')
     pl.enable_anti_aliasing('ssaa')
+    pl.enable_depth_peeling()   #improves rendering of translucent geometry
+
     return pl
 
 
@@ -266,6 +268,7 @@ def save_screenshot(plotter: pv.Plotter, output_path: Path, scale: int = 2):
 
 def render_streamlines(grid: pv.UnstructuredGrid,
                        seed_coord: list,
+                       seed_radius: float,
                        cam_params: dict,
                        output_path: Path,
                        title: str,
@@ -276,8 +279,8 @@ def render_streamlines(grid: pv.UnstructuredGrid,
     streamlines = grid.streamlines(
         vectors='velocity',
         source_center=seed_coord,
-        source_radius=4,
-        n_points=100,
+        source_radius=seed_radius,
+        n_points=120,
         initial_step_length=0.05,
         min_step_length=0.01,
         max_step_length=0.2,
@@ -295,7 +298,7 @@ def render_streamlines(grid: pv.UnstructuredGrid,
 
     if streamlines.n_points > 0:
         # Render streamlines as tubes
-        tubes = streamlines.tube(radius=0.15)   # radius in mesh units (mm)
+        tubes = streamlines.tube(radius=0.1)   # radius in mesh units (mm)
 
         # Clamp colorscale to jet velocity range — don't let slow recirculation dominate
         vel_max = 2             # from your max (m/s) — or compute: streamlines['velocity_magnitude'].max()
@@ -362,7 +365,8 @@ def render_velocity_isosurface(grid: pv.UnstructuredGrid,
 # ======================================================================================================
 
 # Colors for past / center / future frames in the Q-criterion overlay
-_QCRI_FRAME_COLORS = {-1: 'indigo', 0: 'magenta', 1: 'yellow'}
+
+_QCRI_FRAME_COLORS = {-1: '#440154', 0: '#E31A8C', 1: '#FF8C00'} #(68, 1, 84) (227, 26, 140) (255, 140, 0)
 
 
 def render_qcriterion(frames: list,
@@ -387,9 +391,10 @@ def render_qcriterion(frames: list,
         g = grid.copy()
         g['Qcriterion'] = Q
         print(f"    Q range: {Q.min():.3g}  to  {Q.max():.3g}  [1/s2]")
-        iso = g.contour(isosurfaces=qcri_isovalue, scalars='Qcriterion')
-        if iso.n_points > 0:
-            pl.add_mesh(iso, color=_QCRI_FRAME_COLORS[rel_pos], specular=1.0, specular_power=50, ambient=0.2, opacity = 0.8, smooth_shading=True, show_scalar_bar=False)
+        isosurface = g.contour(isosurfaces=qcri_isovalue, scalars='Qcriterion')
+        isosurface = isosurface.smooth(n_iter=50, relaxation_factor=0.5) # to smooth the isosurfaces
+        if isosurface.n_points > 0:
+            pl.add_mesh(isosurface, color=_QCRI_FRAME_COLORS[rel_pos], smooth_shading=True, specular=0.5, specular_power=20, ambient=0.2, opacity = 0.5, show_scalar_bar=False)
         else:
             print(f"    Warning: no isosurface at Q = {qcri_isovalue} for t = {t_val:.4f} s.")
 
@@ -422,7 +427,6 @@ def parse_args():
     ap.add_argument('--output_folder',  required=True, help="Output directory for PNG files")
     ap.add_argument('--case_name',      required=True, help="Case identifier used in filenames and figure titles")
 
-    # ---- Snapshot selection (CLI) ----
 
     # ---- CFD cycle parameters (config) ----
     ap.add_argument('--period_seconds',    type=float, default=None, help="Flow period [s]")
@@ -437,6 +441,7 @@ def parse_args():
 
     # ---- Streamline seed (config) ----
     ap.add_argument('--stream_seed_coord', type=float, nargs=3, default=None, help="Seed point [x y z] for streamline sphere source")
+    ap.add_argument('--stream_seed_radius', type=float,         default=None, help="Radius of seed point cloud (in mesh units)")
 
     # ---- Camera (config) ----
     ap.add_argument('--cam_position',       type=float, nargs=3, default=None, help="Camera position [x y z]")
@@ -534,6 +539,7 @@ def main():
         render_streamlines(
             grid,
             seed_coord  = args.stream_seed_coord,
+            seed_radius = args.stream_seed_radius,
             cam_params  = cam_params,
             output_path = out_stream,
             title       = f"{args.case_name}  --  Velocity Streamlines  |  Flowrate = {flowrate:.2f} mL/s  |  t = {actual_time:.2f} s",
