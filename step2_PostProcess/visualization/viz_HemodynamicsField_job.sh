@@ -50,10 +50,10 @@ python "$SCRIPT"                            \
     --mesh_folder       "$MESH_FOLDER"      \
     --output_folder     "$OUTPUT"           \
     --config_file       "$CONFIG"           \
-    --target_time       2.53                \
+    --target_flowrate   5.06                \
     --save_freq         5                   \
     --velocity_isovalue 0.5                 \
-    --qcri_isovalue     8000                \
+    --qcri_isovalue     80000                \
     --frame_spacing     0
 
 
@@ -70,11 +70,11 @@ python viz_HemodynmicsField.py                          \
     --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data"   \
     --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/Hemodynamics/Field" \
     --config_file       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/configs/PTSeg028_base_0p64_viz_config.yaml" \
-    --target_time       3.00                             \
+    --target_flowrate   5.05                             \
     --save_freq         5                                \
     --velocity_isovalue 0.5                              \
-    --qcri_isovalue     10000                            \
-    --frame_spacing     20
+    --qcri_isovalue     50000                            \
+    --frame_spacing     10
 
 
 echo "Job finished: $(date)"
