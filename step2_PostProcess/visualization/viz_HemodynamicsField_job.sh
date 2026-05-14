@@ -35,6 +35,7 @@ SCRIPT="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/visu
 # --------------------------------- Load Modules ------------------------------------------------------------------------
 module load StdEnv/2023 gcc/12.3 python/3.12.4
 source $HOME/virtual_envs/pyvista36/bin/activate
+module load vtk/9.3.0
 
 # ------------------------------ Export Directories --------------------------------------------------------------------
 mkdir -p "$OUTPUT"
@@ -43,30 +44,37 @@ export MPLCONFIGDIR=$SCRATCH/.config/mpl
 
 
 # ------------------------------ Run Script ----------------------------------------------------------------------------
-python "$SCRIPT"                        \
-    --input_folder  "$INPUT"            \
-    --mesh_folder   "$MESH_FOLDER"      \
-    --output_folder "$OUTPUT"           \
-    --case_name     "$CASE"             \
-    --config_file   "$CONFIG"           \
-    --target_time   2.53                \
-    --save_freq     5                   \
-    --velocity_isovalue 0.5             \
-    --qcri_isovalue     8000
+python "$SCRIPT"                            \
+    --case_name         "$CASE"             \
+    --input_folder      "$INPUT"            \
+    --mesh_folder       "$MESH_FOLDER"      \
+    --output_folder     "$OUTPUT"           \
+    --config_file       "$CONFIG"           \
+    --target_time       2.53                \
+    --save_freq         5                   \
+    --velocity_isovalue 0.5                 \
+    --qcri_isovalue     8000                \
+    --frame_spacing     0
+
+
+
+
 
 #---------------------- For running directly from commandline use below ---------------------------
 # Note1: You HAVE to load the modules first from terminal then run below
 # Note2: You HAVE to comment this part if submitting this file through sbatch
 
-python viz_HemodynmicsField.py                      \
-    --input_folder  "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq5/" \
-    --mesh_folder   "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data"   \
-    --output_folder "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/Hemodynamics/Field" \
-    --config_file   "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/configs/PTSeg028_base_0p64_viz_config.yaml" \
-    --case_name     "PTSeg028_base_0p64"             \
-    --target_time   2.53                             \
-    --save_freq     5                                \
-    --velocity_isovalue 0.5                          \
-    --qcri_isovalue     10000
+python viz_HemodynmicsField.py                          \
+    --case_name         "PTSeg028_base_0p64"            \
+    --input_folder      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq5/" \
+    --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data"   \
+    --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/Hemodynamics/Field" \
+    --config_file       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/configs/PTSeg028_base_0p64_viz_config.yaml" \
+    --target_time       3.00                             \
+    --save_freq         5                                \
+    --velocity_isovalue 0.5                              \
+    --qcri_isovalue     10000                            \
+    --frame_spacing     20
+
 
 echo "Job finished: $(date)"

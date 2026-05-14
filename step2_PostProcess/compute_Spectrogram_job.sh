@@ -33,13 +33,13 @@ set -euo pipefail
 echo "Job started: $(date)"
 
 # ---------------------------------- Define Paths -------------------------------------------------------------------------------
-CASE=PTSeg043_noLabbe_base                                             # Case name
-BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE             # Parent directory of the case
-MESH_FOLDER="$BASE_DIR/step1_CFD/data"                              # Path to mesh data folder containing the h5 mesh
-CENTERLINE="$MESH_FOLDER/${CASE}_centerline_points.csv"                    # Path to centerline csv file used to construct ROIs
-INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq1"   # Path to CFD results folder containing timeseries HDF5 files
-OUTPUT="$BASE_DIR/step2_PostProcess"                                # Path to saving spectrogram files
-SPECTROGRAM_REGIONS="$OUTPUT/configs/${CASE}_spectrogram_regions.csv"       # Path to spectrogram regions csv file used to generate regional specs
+CASE=PTSeg043_noLabbe_base                                              # Case name
+BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE                 # Parent directory of the case
+MESH_FOLDER="$BASE_DIR/step1_CFD/data"                                  # Path to mesh data folder containing the h5 mesh
+CENTERLINE="$MESH_FOLDER/${CASE}_centerline_points.csv"                 # Path to centerline csv file used to construct ROIs
+INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq1"       # Path to CFD results folder containing timeseries HDF5 files
+OUTPUT="$BASE_DIR/step2_PostProcess"                                    # Path to saving spectrogram files
+SPECTROGRAM_REGIONS="$OUTPUT/configs/${CASE}_spectrogram_regions.csv"   # Path to spectrogram regions csv file used to generate regional specs
 
 SCRIPT="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/compute_Spectrogram.py"
 

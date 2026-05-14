@@ -46,7 +46,6 @@
 #   --case_name          Case identifier used in filenames and figure titles   [REQUIRED]
 #   --target_time        Desired simulation time [s] to visualize              [REQUIRED]
 #   --save_freq          Snapshot save frequency: every Nth timestep           (default: 5)
-#   --snapshot_label     Optional output label override                        (default: t<actual_time>s)
 #   --velocity_isovalue  Velocity magnitude isosurface value [m/s]            (default: 0.5)
 #   --qcri_isovalue      Q-criterion isosurface value(s) [1/s2]               (default: 1000)
 #
@@ -61,9 +60,9 @@
 #   window_size          Render window [W H]
 #
 # OUTPUTS:
-#   - <case_name>_<snapshot_label>_streamlines.png
-#   - <case_name>_<snapshot_label>_velocityIso<value>.png
-#   - <case_name>_<snapshot_label>_QcriIso<value>.png
+#   - <case_name>_<figure_label>_streamlines.png
+#   - <case_name>_<figure_label>_velocityIso<value>.png
+#   - <case_name>_<figure_label>_QcriIso<value>.png
 #
 # NOTES:
 #   - Velocity in HDF5 is (N_nodes, 3) [m/s].  Mesh coordinates are in [mm].
@@ -117,7 +116,7 @@ def find_snapshot_at_time(input_folder: Path,
     Snapshots are sorted by the '_ts=<int>' counter in their filenames.
     dt per saved snapshot = save_freq * period_seconds / timesteps_per_cyc.
 
-    Returns (snapshot_file, frame_index, actual_time, timesteps_per_cyc).
+    Returns (snapshot_file, frame_index, actual_time, timesteps_per_cyc, h5_files).
     """
     h5_files = sorted(input_folder.glob('*_curcyc_*up.h5'), key=_extract_timestep)
     if not h5_files:
@@ -132,15 +131,17 @@ def find_snapshot_at_time(input_folder: Path,
     frame_idx   = int(np.argmin(np.abs(time_array - target_time)))
     actual_time = float(time_array[frame_idx])
 
-    return h5_files[frame_idx], frame_idx, actual_time, timesteps_per_cyc
+    return h5_files[frame_idx], frame_idx, actual_time, timesteps_per_cyc, h5_files
 
 
 # ======================================================================================================
 # MESH & DATA I/O
 # ======================================================================================================
 
-_VTK_TETRA = 10
-_VTK_HEXA  = 12
+# VTK cell type IDs used in the <DataArray Name="types"> section of .vtu files;
+# tells VTK how to interpret each cell's connectivity list.
+_VTK_TETRA = 10  # tetrahedron  (4-node 3D element)
+_VTK_HEXA  = 12  # hexahedron   (8-node brick/cube element)
 
 
 def load_mesh_from_h5(mesh_file: Path) -> pv.UnstructuredGrid:
@@ -269,35 +270,59 @@ def render_streamlines(grid: pv.UnstructuredGrid,
                        output_path: Path,
                        title: str,
                        window_size: list,
-                       plot_seed: bool = True):
+                       plot_seed_cloud: bool = True):
     """Render velocity streamlines from a sphere seed source as lines."""
     print("  Computing streamlines ...")
     streamlines = grid.streamlines(
         vectors='velocity',
         source_center=seed_coord,
-        source_radius=10,
-        n_points=1000,
+        source_radius=4,
+        n_points=80,
         initial_step_length=0.05,
-        interpolator_type='cell',   # more robust than 'point' for complex unstructured meshes
+        min_step_length=0.01,
+        max_step_length=0.2,
+        max_steps=1000,
+        terminal_speed=0.05,            # stop tracing when nearly stagnant 
+        interpolator_type='cell',       # more robust than 'point' for complex unstructured meshes
+        integrator_type=45,             # Runge-Kutta 4/5
+        integration_direction="forward",
     )
+    
 
     pl = make_plotter(window_size)
     apply_camera(pl, cam_params)
     add_geometry_outline(pl, grid)
 
     if streamlines.n_points > 0:
-        pl.add_mesh(streamlines,
-                    scalars='velocity_magnitude',
-                    cmap='viridis',
-                    line_width=6,
-                    show_scalar_bar=True,
-                    scalar_bar_args=_scalar_bar_args('Velocity (m/s)'))
-    else:
-        print("  Warning: no streamlines generated. Check stream_seed_coord and domain bounds.")
+        # Render streamlines as tubes
+        tubes = streamlines.tube(radius=0.4)   # radius in mesh units (mm)
 
-    if plot_seed:
-        seed_sphere = pv.Sphere(center=seed_coord, radius=10)
-        pl.add_mesh(seed_sphere, color='yellow', opacity=0.5, show_scalar_bar=False)
+        # Clamp colorscale to jet velocity range — don't let slow recirculation dominate
+        vel_max = 2             # from your max (m/s) — or compute: streamlines['velocity_magnitude'].max()
+
+        pl.add_mesh(tubes,
+                    scalars='velocity_magnitude',
+                    cmap='plasma',
+                    clim=[0, vel_max],
+                    specular=0.5,
+                    specular_power=30,
+                    smooth_shading=True,
+                    show_scalar_bar=True,
+                    scalar_bar_args=dict(
+                        title='Velocity (m/s)',
+                        n_labels=5,                 # number of colorbar ticks
+                        fmt='%.2f',                 # format colorbar ticks
+                        height=0.4,
+                        vertical=True,
+                        position_x=0.88,
+                        position_y=0.3,)
+        )
+    else:
+        print("  Warning: no streamlines generated. Check stream_seed_coord.")
+
+    if plot_seed_cloud:
+        seed_sphere = pv.Sphere(center=seed_coord, radius=5)
+        pl.add_mesh(seed_sphere, color='yellow', opacity=0.3, show_scalar_bar=False)
 
     pl.add_title(title, color='black', font_size=20)
     save_screenshot(pl, output_path)
@@ -322,7 +347,7 @@ def render_velocity_isosurface(grid: pv.UnstructuredGrid,
     add_geometry_outline(pl, grid)
 
     if iso.n_points > 0:
-        pl.add_mesh(iso, color='red', show_scalar_bar=False)
+        pl.add_mesh(iso, color='red', specular=1.0, specular_power=50, ambient=0.2, smooth_shading=True, show_scalar_bar=False)
     else:
         print(f"  Warning: no isosurface at |u| = {isovalue} m/s. "
               "Adjust --velocity_isovalue (velocity range printed above).")
@@ -335,31 +360,37 @@ def render_velocity_isosurface(grid: pv.UnstructuredGrid,
 # FIGURE 3: Q-CRITERION ISOSURFACE
 # ======================================================================================================
 
-def render_qcriterion(grid: pv.UnstructuredGrid,
+# Colors for past / center / future frames in the Q-criterion overlay
+_QCRI_FRAME_COLORS = {-1: 'yellow', 0: 'magenta', 1: 'indigo'}
+
+
+def render_qcriterion(frames: list,
                       qcri_isovalue,
                       cam_params: dict,
                       output_path: Path,
                       title: str,
                       window_size: list):
-    """Compute and render Q-criterion isosurface(s) in a single color."""
-    print("  Computing Q-criterion ...")
-    Q = compute_qcriterion(grid)
-    grid['Qcriterion'] = Q
-    print(f"  Q range: {Q.min():.3g}  to  {Q.max():.3g}  [1/s2]")
+    """Overlay Q-criterion isosurfaces from multiple timesteps.
 
-    isovalues = [qcri_isovalue] if isinstance(qcri_isovalue, (int, float)) else list(qcri_isovalue)
-    print(f"  Extracting isosurface at Q = {isovalues} [1/s2] ...")
-    iso = grid.contour(isosurfaces=isovalues, scalars='Qcriterion')
+    frames : list of (grid, time_float, rel_pos) where rel_pos is -1/0/+1
+             (past / center / future) and each grid has 'velocity' point data.
+    """
 
     pl = make_plotter(window_size)
     apply_camera(pl, cam_params)
-    add_geometry_outline(pl, grid)
+    add_geometry_outline(pl, frames[0][0])
 
-    if iso.n_points > 0:
-        pl.add_mesh(iso, color='cyan', show_scalar_bar=False)
-    else:
-        print(f"  Warning: no isosurface found at Q = {isovalues}. "
-              "Adjust --qcri_isovalue (Q range printed above).")
+    for grid, t_val, rel_pos in frames:
+        print(f"  Computing Q-criterion for t = {t_val:.4f} s ...")
+        Q = compute_qcriterion(grid)
+        g = grid.copy()
+        g['Qcriterion'] = Q
+        print(f"    Q range: {Q.min():.3g}  to  {Q.max():.3g}  [1/s2]")
+        iso = g.contour(isosurfaces=qcri_isovalue, scalars='Qcriterion')
+        if iso.n_points > 0:
+            pl.add_mesh(iso, color=_QCRI_FRAME_COLORS[rel_pos], opacity = 0.85, smooth_shading=True, show_scalar_bar=False)
+        else:
+            print(f"    Warning: no isosurface at Q = {qcri_isovalue} for t = {t_val:.4f} s.")
 
     pl.add_title(title, color='black', font_size=20)
     save_screenshot(pl, output_path)
@@ -389,7 +420,6 @@ def parse_args():
     ap.add_argument('--input_folder',   required=True, help="Folder with CFD HDF5 snapshots (*_curcyc_*up.h5)")
     ap.add_argument('--output_folder',  required=True, help="Output directory for PNG files")
     ap.add_argument('--case_name',      required=True, help="Case identifier used in filenames and figure titles")
-    ap.add_argument('--snapshot_label', default=None,  help="Output label override (default: t<actual_time>s)")
 
     # ---- Snapshot selection (CLI) ----
     ap.add_argument('--target_time', type=float, required=True, help="Desired simulation time [s] to visualize")
@@ -402,6 +432,7 @@ def parse_args():
     # ---- Isosurface values (CLI) ----
     ap.add_argument('--velocity_isovalue', type=float, default=0.5,    help="Velocity magnitude isosurface value [m/s] (default: 0.5)")
     ap.add_argument('--qcri_isovalue',     type=float, default=1000.0, help="Q-criterion isosurface value(s) [1/s2] (default: 1000)")
+    ap.add_argument('--frame_spacing',     type=int,   default=10,     help="Frame offset for Q-criterion overlay: plots target±frame_spacing (default: 10); use 0 for single timestep")
 
     # ---- Streamline seed (config) ----
     ap.add_argument('--stream_seed_coord', type=float, nargs=3, default=None, help="Seed point [x y z] for streamline sphere source")
@@ -449,7 +480,7 @@ def main():
 
     # ---- Resolve snapshot from target time ----
     print("Finding snapshot file ...")
-    snapshot_file, frame_idx, actual_time, timesteps_per_cyc = find_snapshot_at_time(
+    snapshot_file, frame_idx, actual_time, timesteps_per_cyc, h5_files = find_snapshot_at_time(
         input_folder, args.target_time,
         save_freq         = args.save_freq,
         period_seconds    = period,
@@ -462,7 +493,7 @@ def main():
     print(f"  Time error     : {abs(actual_time - args.target_time) * 1e3:.3f} ms")
     print(f"  Snapshot file  : {snapshot_file.name}\n")
 
-    snapshot_label = args.snapshot_label or f"t{actual_time:.4f}s"
+    figure_label = f"t{actual_time:.4f}s"
 
     # ---- Load mesh ----
     mesh_file = next(Path(args.mesh_folder).glob('*.h5'), None)
@@ -477,7 +508,7 @@ def main():
     print("Loading velocity ...")
     u = load_velocity_snapshot(snapshot_file)
     vel_mag = np.linalg.norm(u, axis=1)
-    print(f"  Velocity magnitude:  min={vel_mag.min():.4f}  max={vel_mag.max():.4f} [m/s]\n")
+    print(f"  Velocity magnitude:  max={vel_mag.max():.2f} [m/s]\n")
     grid = attach_fields(grid, u)
 
     # ---- Shared camera dict ----
@@ -488,39 +519,60 @@ def main():
         'parallel_scale': args.cam_parallel_scale,
     }
 
-    # ---- Figure 1: Streamlines ----
+    # -------------------------- Figure 1: Streamlines -----------------------------------
     print("Rendering streamlines ...")
-    out_stream = output_folder / f"{args.case_name}_{snapshot_label}_streamlines.png"
+    out_stream = output_folder / f"{args.case_name}_{figure_label}_streamlines.png"
     render_streamlines(
         grid,
         seed_coord  = args.stream_seed_coord,
         cam_params  = cam_params,
         output_path = out_stream,
-        title       = f"{args.case_name}  --  Velocity Streamlines  |  t = {actual_time:.4f} s",
+        title       = f"{args.case_name}  --  Velocity Streamlines  |  t = {actual_time:.2f} s  |  Flowrate = {actual_time*2:.2f} mL/s",
         window_size = window_size,
     )
 
-    # ---- Figure 2: Velocity magnitude isosurface ----
+    # -------------------- Figure 2: Velocity isosurface --------------------------------
     print("\nRendering velocity magnitude isosurface ...")
-    out_vel = output_folder / f"{args.case_name}_{snapshot_label}_velocityIso{args.velocity_isovalue}.png"
+    out_vel = output_folder / f"{args.case_name}_{figure_label}_velocityIso{args.velocity_isovalue}.png"
     render_velocity_isosurface(
         grid,
         isovalue    = args.velocity_isovalue,
         cam_params  = cam_params,
         output_path = out_vel,
-        title       = f"{args.case_name}  --  |u| = {args.velocity_isovalue} m/s  |  t = {actual_time:.4f} s",
+        title       = f"{args.case_name}  --  |u| = {args.velocity_isovalue} m/s  |   t = {actual_time:.2f} s  |  Flowrate = {actual_time*2:.2f} mL/s",
         window_size = window_size,
     )
 
-    # ---- Figure 3: Q-criterion ----
+    # --------------------- Figure 3: Q-criterion (3 overlaid timesteps) ----------------
     print("\nRendering Q-criterion isosurface ...")
-    out_qcrit = output_folder / f"{args.case_name}_{snapshot_label}_QcriIso{args.qcri_isovalue}.png"
+    spacing  = args.frame_spacing
+    n_frames = len(h5_files)
+    # Find indices of neighboring frames
+    neighbor_indices = sorted({frame_idx - spacing, frame_idx, frame_idx + spacing})
+
+    # Sanity check
+    if neighbor_indices[0] < 0 or neighbor_indices[-1] > n_frames:
+        print(f"  Note: frame_spacing={spacing} hits boundary; overlaying {len(neighbor_indices)} frame(s).")
+
+    qcri_frames = []
+    for fidx in neighbor_indices:
+        t_f = fidx * dt
+        rel = 0 if fidx == frame_idx else (-1 if fidx < frame_idx else 1) # relation of frame to target frame
+        if fidx == frame_idx:
+            g = grid                          # reuse already-loaded velocity
+        else:
+            g = grid.copy()
+            attach_fields(g, load_velocity_snapshot(h5_files[fidx]))
+        qcri_frames.append((g, t_f, rel))
+
+
+    out_qcrit = output_folder / f"{args.case_name}_{figure_label}_Qcri{args.qcri_isovalue:.0f}_frSpace{spacing}.png"
     render_qcriterion(
-        grid,
+        qcri_frames,
         qcri_isovalue = args.qcri_isovalue,
         cam_params    = cam_params,
         output_path   = out_qcrit,
-        title         = f"{args.case_name}  --  Q-criterion  |  t = {actual_time:.4f} s",
+        title         = f"{args.case_name}  --  Q-criterion  |  t = {actual_time:.2f} s  |  Flowrate = {actual_time*2:.2f} mL/s",
         window_size   = window_size,
     )
 
