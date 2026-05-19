@@ -1,0 +1,21 @@
+# viz_config.yaml
+# Case-specific visualization parameters for PTSeg028_base_0p64.
+# Loaded by viz_HemodynmicsField.py via --config. CLI args override any value here.
+
+# ---- CFD cycle parameters ----
+period_seconds:    0.915
+timesteps_per_cyc: 10000
+
+# ---- Streamline seed (sphere source) ----
+stream_seed_coord: [24, -52, -596]
+stream_seed_radius: 4
+
+# ---- Camera (shared across all figures) ----
+cam_position:       [-269, 54.5, -414]  #zoomed: [-263, 66.9, -409.8]
+cam_focal_point:    [27, -23.6, -588]   #zoomed: [33, -11.2, -583.8]
+cam_view_up:        [0.48, -0.12, 0.87] 
+cam_parallel_scale: 16                  #zoomed: 5
+
+# ---- Output ----
+window_size: [1920, 1080]
+

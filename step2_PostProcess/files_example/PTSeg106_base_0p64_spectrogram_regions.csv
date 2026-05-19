@@ -1,0 +1,7 @@
+region_fullname,region_shortname,ROI_start_center_id,ROI_end_center_id,ROI_stride,ROI_radius
+SuperiorSagittalSinus,1_SSS,100,456,4,10
+TransverseSinus,2_TS,1300,1450,4,8
+TransverseSinusStenosis,3_TSS,1200,1270,4,8
+PostStenoticRegion,4_PSR,1108,1188,2,10
+SigmoidSinus,5_SS,990,1085,4,8
+JugularBulb,6_JB,825,890,2,12
