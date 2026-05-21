@@ -835,7 +835,8 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     plt.rc('axes',   labelsize=18)     # fontsize of the x and y labels
 
 
-    fig, ax = plt.subplots(2, 1, figsize=(8, 10), sharex=True, gridspec_kw={'hspace': 0.05}) #(8,18) #(20,6)
+    fig, ax = plt.subplots(1, 3, figsize=(20, 6)) #(8,18) #(20,6)
+    #fig, ax = plt.subplots(3, 1, figsize=(8, 18), sharex=True, gridspec_kw={'hspace': 0.05})
 
     #fig.suptitle(plot_title, fontweight='bold', y=0.99)             # y adds distance to the title's location
 

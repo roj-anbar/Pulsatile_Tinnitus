@@ -23,7 +23,7 @@ set -euo pipefail
 echo "Job started: $(date)"
 
 # ---------------------------------- Define Paths -----------------------------------------------------------------------
-CASE=PTSeg028_base_0p64
+CASE=PTSeg043_noLabbe_base
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE
 MESH_FOLDER="$BASE_DIR/step1_CFD/data"
 INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq5"
@@ -50,14 +50,11 @@ python "$SCRIPT"                            \
     --mesh_folder       "$MESH_FOLDER"      \
     --output_folder     "$OUTPUT"           \
     --config_file       "$CONFIG"           \
-    --target_flowrate   5.06                \
+    --target_flowrate   2.00 7.70 8.00  \
     --save_freq         5                   \
     --velocity_isovalue 0.5                 \
-    --qcri_isovalue     70000                \
-    --frame_spacing     0
-
-
-
+    --qcri_isovalue     50000                \
+    --frame_spacing     10
 
 
 #---------------------- For running directly from commandline use below ---------------------------
@@ -65,16 +62,23 @@ python "$SCRIPT"                            \
 # Note2: You HAVE to comment this part if submitting this file through sbatch
 
 python viz_HemodynmicsField.py                          \
-    --case_name         "PTSeg106_base_0p64"            \
-    --input_folder      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/results/PTSeg106_base_0p64_ts10000_cy6_saveFreq5/" \
-    --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data"   \
-    --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess/Hemodynamics/Field" \
-    --config_file       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess/configs/PTSeg106_base_0p64_viz_config.yaml" \
-    --target_flowrate   6.2                             \
+    --case_name         "PTSeg043_noLabbe_base"            \
+    --input_folder      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/results/PTSeg043_noLabbe_base_ts10000_cy6_saveFreq5/" \
+    --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data"   \
+    --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step2_PostProcess/Hemodynamics/Field0" \
+    --config_file       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step2_PostProcess/configs/PTSeg043_noLabbe_base_viz_config.yaml" \
+    --target_flowrate   7.70                            \
     --save_freq         5                                \
     --velocity_isovalue 0.5                              \
-    --qcri_isovalue     70000                            \
-    --frame_spacing     10
+    --qcri_isovalue     50000                            \
+    --frame_spacing     10                               \
+    --cam_parallel_scale 6              \
+    # --cam_position      -335 -52.5 161                     \
+    # --cam_focal_point   20.5 -13.6 2.2                    \
+
+
+
 
 
 echo "Job finished: $(date)"
+

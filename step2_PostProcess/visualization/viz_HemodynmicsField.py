@@ -1,6 +1,6 @@
 # -----------------------------------------------------------------------------------------------------------------------
 # viz_HemodynamicsField.py
-# Visualizes velocity streamlines, velocity magnitude isosurface, and Q-criterion
+# Visualizes velocity streamlines, velocity magnitude isosurface, and Qcriterion
 # isosurface from a single CFD snapshot resolved by target simulation time.
 #
 # __author__: Rojin Anbarafshan <rojin.anbar@gmail.com>
@@ -12,7 +12,7 @@
 #   - Reads only that one snapshot (velocity field u); no other files are loaded.
 #   - Renders velocity streamlines seeded from a sphere source (center + radius).
 #   - Renders a 3D velocity magnitude isosurface at a user-specified isovalue (single color).
-#   - Renders Q-criterion isosurface (via PyVista's built-in compute_derivative filter)
+#   - Renders Qcriterion isosurface (via PyVista's built-in compute_derivative filter)
 #     in a single color.
 #   - Overlays geometry silhouette outline on every figure for spatial reference.
 #   - Camera parameters (position, focal point, view-up, parallel scale) apply to all figures.
@@ -47,7 +47,7 @@
 #   --target_time        Desired simulation time [s] to visualize              [REQUIRED]
 #   --save_freq          Snapshot save frequency: every Nth timestep           (default: 5)
 #   --velocity_isovalue  Velocity magnitude isosurface value [m/s]            (default: 0.5)
-#   --qcri_isovalue      Q-criterion isosurface value(s) [1/s2]               (default: 1000)
+#   --qcri_isovalue      Qcriterion isosurface value(s) [1/s2]               (default: 1000)
 #
 # INPUTS (config file — case-specific, rarely change):
 #   period_seconds       Flow period [s]
@@ -66,7 +66,7 @@
 #
 # NOTES:
 #   - Velocity in HDF5 is (N_nodes, 3) [m/s].  Mesh coordinates are in [mm].
-#   - Coordinates are converted mm -> m before Q-criterion computation so that
+#   - Coordinates are converted mm -> m before Qcriterion computation so that
 #     Q has physical units of [1/s2].
 #
 # Copyright (C) 2026 University of Toronto, Biomedical Simulation Lab.
@@ -187,12 +187,12 @@ def attach_fields(grid: pv.UnstructuredGrid, u: np.ndarray) -> pv.UnstructuredGr
 
 
 # ======================================================================================================
-# Q-CRITERION
+# QCRITERION
 # ======================================================================================================
 
 def compute_qcriterion(grid: pv.UnstructuredGrid) -> np.ndarray:
     """
-    Compute Q-criterion [1/s2] using PyVista's built-in compute_derivative filter.
+    Compute Qcriterion [1/s2] using PyVista's built-in compute_derivative filter.
 
     Converts coordinates mm -> m before differentiation so that the velocity
     gradient du_i/dx_j has units [1/s] and Q is in [1/s2].
@@ -284,7 +284,7 @@ def render_streamlines(grid: pv.UnstructuredGrid,
         initial_step_length=0.05,
         min_step_length=0.01,
         max_step_length=0.2,
-        max_steps=20000,
+        max_steps=50000,
         terminal_speed=0.05,            # stop tracing when nearly stagnant 
         interpolator_type='cell',       # more robust than 'point' for complex unstructured meshes
         integrator_type=45,             # Runge-Kutta 4/5
@@ -316,10 +316,11 @@ def render_streamlines(grid: pv.UnstructuredGrid,
                         title='Velocity (m/s)',
                         n_labels=5,                 # number of colorbar ticks
                         fmt='%.2f',                 # format colorbar ticks
-                        #height=0.4,
-                        #vertical=True,
-                        #position_x=0.88,
-                        #position_y=0.3,
+                        height=0.15,
+                        width=0.02,
+                        vertical=True,
+                        position_x=0.95,
+                        position_y=0.8,
                         )
         )
     else:
@@ -329,7 +330,7 @@ def render_streamlines(grid: pv.UnstructuredGrid,
         seed_sphere = pv.Sphere(center=seed_coord, radius=5)
         pl.add_mesh(seed_sphere, color='yellow', opacity=0.3, show_scalar_bar=False)
 
-    pl.add_title(title, color='black', font_size=16)
+    #pl.add_title(title, color='black', font_size=16)
     save_screenshot(pl, output_path)
 
 
@@ -356,18 +357,18 @@ def render_velocity_isosurface(grid: pv.UnstructuredGrid,
         print(f"  Warning: no isosurface at |u| = {isovalue} m/s. "
               "Adjust --velocity_isovalue (velocity range printed above).")
 
-    pl.add_title(title, color='black', font_size=20)
+    #pl.add_title(title, color='black', font_size=20)
     save_screenshot(pl, output_path)
 
 
 # ======================================================================================================
-# FIGURE 3: Q-CRITERION ISOSURFACE
+# FIGURE 3: QCRITERION ISOSURFACE
 # ======================================================================================================
 
-# Colors for past / center / future frames in the Q-criterion overlay
+# Colors for past / center / future frames in the Qcriterion overlay
 
-_QCRI_FRAME_COLORS = {-1: '#440154', 0: '#E31A8C', 1: '#FF8C00'} #(68, 1, 84) (227, 26, 140) (255, 140, 0)
-
+_QCRI_FRAME_COLORS = {-1: '#440154', 0: '#E31A8C', 1: "#FFCC00"}  #FF8C00
+_QCRI_FRAME_OPACITY = {-1: 0.95, 0: 0.6, 1: 0.4} #-1: 0.5, 0: 0.4, 1: 0.3   -1: 0.95, 0: 0.6, 1: 0.4
 
 def render_qcriterion(frames: list,
                       qcri_isovalue,
@@ -375,7 +376,7 @@ def render_qcriterion(frames: list,
                       output_path: Path,
                       title: str,
                       window_size: list):
-    """Overlay Q-criterion isosurfaces from multiple timesteps.
+    """Overlay Qcriterion isosurfaces from multiple timesteps.
 
     frames : list of (grid, time_float, rel_pos) where rel_pos is -1/0/+1
              (past / center / future) and each grid has 'velocity' point data.
@@ -385,8 +386,8 @@ def render_qcriterion(frames: list,
     apply_camera(pl, cam_params)
     add_geometry_outline(pl, frames[0][0])
 
-    for grid, t_val, rel_pos in frames:
-        print(f"  Computing Q-criterion for t = {t_val:.4f} s ...")
+    for grid, t_val, rel_pos in reversed(frames):
+        print(f"  Computing Qcriterion for t = {t_val:.4f} s ...")
         Q = compute_qcriterion(grid)
         g = grid.copy()
         g['Qcriterion'] = Q
@@ -394,11 +395,11 @@ def render_qcriterion(frames: list,
         isosurface = g.contour(isosurfaces=qcri_isovalue, scalars='Qcriterion')
         isosurface = isosurface.smooth(n_iter=50, relaxation_factor=0.5) # to smooth the isosurfaces
         if isosurface.n_points > 0:
-            pl.add_mesh(isosurface, color=_QCRI_FRAME_COLORS[rel_pos], smooth_shading=True, specular=0.5, specular_power=20, ambient=0.2, opacity = 0.5, show_scalar_bar=False)
+            pl.add_mesh(isosurface, color=_QCRI_FRAME_COLORS[rel_pos], smooth_shading=True, specular=0.5, specular_power=20, ambient=0.2, opacity = _QCRI_FRAME_OPACITY[rel_pos], show_scalar_bar=False)
         else:
             print(f"    Warning: no isosurface at Q = {qcri_isovalue} for t = {t_val:.4f} s.")
 
-    pl.add_title(title, color='black', font_size=16)
+    #pl.add_title(title, color='black', font_size=16)
     save_screenshot(pl, output_path)
 
 
@@ -415,7 +416,7 @@ def parse_args():
     pre_args, _ = pre.parse_known_args()
 
     ap = argparse.ArgumentParser(
-        description="Visualize streamlines, velocity contour, and Q-criterion from one CFD snapshot.")
+        description="Visualize streamlines, velocity contour, and Qcriterion from one CFD snapshot.")
 
     # ---- Config file ----
     ap.add_argument('--config_file', default=None,
@@ -431,17 +432,17 @@ def parse_args():
     # ---- CFD cycle parameters (config) ----
     ap.add_argument('--period_seconds',    type=float, default=None, help="Flow period [s]")
     ap.add_argument('--timesteps_per_cyc', type=int,   default=None, help="Timesteps per cycle (parsed from filename if omitted)")
-    ap.add_argument('--save_freq',       type=int,   default=5, help="Snapshot save frequency: every Nth timestep (default: 5)")
+    ap.add_argument('--save_freq',         type=int,   default=5, help="Snapshot save frequency: every Nth timestep (default: 5)")
 
     # ---- Isosurface values (CLI) ----
     ap.add_argument('--velocity_isovalue', type=float, default=0.5,    help="Velocity magnitude isosurface value [m/s] (default: 0.5)")
-    ap.add_argument('--qcri_isovalue',     type=float, default=1000.0, help="Q-criterion isosurface value(s) [1/s2] (default: 1000)")
-    ap.add_argument('--frame_spacing',     type=int,   default=10,     help="Frame offset for Q-criterion overlay: plots target±frame_spacing (default: 10); use 0 for single timestep")
-    ap.add_argument('--target_flowrate', type=float, nargs='+', default=None, help="Target flowrate(s) [mL/s]. Accepts one or more values.")
+    ap.add_argument('--qcri_isovalue',     type=float, default=1000.0, help="Qcriterion isosurface value(s) [1/s2] (default: 1000)")
+    ap.add_argument('--frame_spacing',     type=int,   default=10,     help="Frame offset for Qcriterion overlay: plots target±frame_spacing (default: 10); use 0 for single timestep")
+    ap.add_argument('--target_flowrate',   type=float, nargs='+', default=None, help="Target flowrate(s) [mL/s]. Accepts one or more values.")
 
     # ---- Streamline seed (config) ----
-    ap.add_argument('--stream_seed_coord', type=float, nargs=3, default=None, help="Seed point [x y z] for streamline sphere source")
-    ap.add_argument('--stream_seed_radius', type=float,         default=None, help="Radius of seed point cloud (in mesh units)")
+    ap.add_argument('--stream_seed_coord',  type=float, nargs=3, default=None, help="Seed point [x y z] for streamline sphere source")
+    ap.add_argument('--stream_seed_radius', type=float,          default=None, help="Radius of seed point cloud (in mesh units)")
 
     # ---- Camera (config) ----
     ap.add_argument('--cam_position',       type=float, nargs=3, default=None, help="Camera position [x y z]")
@@ -498,7 +499,6 @@ def main():
         sys.exit(1)
     print(f"Loading mesh ...")
     grid = load_mesh_from_h5(mesh_file)
-    print(f"  {grid.n_points} nodes, {grid.n_cells} cells\n")
 
     # ---- Shared camera dict ----
     cam_params = {
@@ -511,7 +511,7 @@ def main():
     # ---- Loop over target times ----
     for target_time, flowrate in run_configs:
         print(f"\n{'─' * 80}")
-        print(f"Processing flowrate = {flowrate:.4f} mL/s  →  target_time = {target_time:.6f} s ...")
+        print(f"Processing flowrate = {flowrate:.4f} mL/s  ...")
 
         snapshot_file, frame_idx, actual_time, timesteps_per_cyc, h5_files = find_snapshot_at_time(
             input_folder, target_time,
@@ -520,9 +520,9 @@ def main():
             timesteps_per_cyc = args.timesteps_per_cyc,
         )
         dt = args.save_freq * period / timesteps_per_cyc
-        print(f"  Target time    : {target_time:.6f} s")
+        print(f"  Target time    : {target_time:.4f} s")
         print(f"  Resolved frame : {frame_idx}  (0-based index in sorted snapshot list)")
-        print(f"  Actual time    : {actual_time:.6f} s  (dt = {dt:.6f} s/frame)")
+        print(f"  Actual time    : {actual_time:.4f} s  (dt = {dt:.4f} s/frame)")
         print(f"  Time error     : {abs(actual_time - target_time) * 1e3:.3f} ms")
         print(f"  Snapshot file  : {snapshot_file.name}\n")
 
@@ -535,31 +535,31 @@ def main():
 
         # ----------------------------- Figure 1: Streamlines --------------------------
         print("Rendering streamlines ...")
-        out_stream = output_folder / f"{args.case_name}_Qin{flowrate:.2f}mLs_streamlines.png"
+        out_stream = output_folder / f"{args.case_name}_Qin{flowrate:.3f}mLs_streamlines.png"
         render_streamlines(
             grid,
             seed_coord  = args.stream_seed_coord,
             seed_radius = args.stream_seed_radius,
             cam_params  = cam_params,
             output_path = out_stream,
-            title       = f"{args.case_name}  --  Velocity Streamlines  |  Flowrate = {flowrate:.2f} mL/s  |  t = {actual_time:.2f} s",
+            title       = f"{args.case_name}  --  Velocity Streamlines  |  Flowrate = {flowrate:.3f} mL/s  |  t = {actual_time:.4f} s",
             window_size = window_size,
         )
 
         # --------------------------- Figure 2: Velocity isosurface ---------------------
         print("\nRendering velocity isosurface ...")
-        out_vel = output_folder / f"{args.case_name}_Qin{flowrate:.2f}mLs_velocityIso{args.velocity_isovalue}.png"
+        out_vel = output_folder / f"{args.case_name}_Qin{flowrate:.3f}mLs_velocityIso{args.velocity_isovalue}.png"
         render_velocity_isosurface(
             grid,
             isovalue    = args.velocity_isovalue,
             cam_params  = cam_params,
             output_path = out_vel,
-            title       = f"{args.case_name}  --  |u| = {args.velocity_isovalue} m/s  |  Flowrate = {flowrate:.2f} mL/s |  t = {actual_time:.2f} s  ",
+            title       = f"{args.case_name}  --  |u| = {args.velocity_isovalue} m/s  |  Flowrate = {flowrate:.3f} mL/s |  t = {actual_time:.4f} s  ",
             window_size = window_size,
         )
 
-        # ---------------------------- Figure 3: Q-criterion ----------------------------
-        print("\nRendering Q-criterion isosurface ...")
+        # ---------------------------- Figure 3: Qcriterion ----------------------------
+        print("\nRendering Qcriterion isosurface ...")
         spacing  = args.frame_spacing
         n_frames = len(h5_files)
         neighbor_indices = sorted({frame_idx - spacing, frame_idx, frame_idx + spacing})
@@ -578,13 +578,13 @@ def main():
                 attach_fields(g, load_velocity_snapshot(h5_files[fidx]))
             qcri_frames.append((g, t_f, rel))
 
-        out_qcrit = output_folder / f"{args.case_name}_Qin{flowrate:.2f}mLs_Qcri{args.qcri_isovalue:.0f}_frSpace{spacing}.png"
+        out_qcrit = output_folder / f"{args.case_name}_Qin{flowrate:.3f}mLs_Qcri{args.qcri_isovalue:.0f}_frSpace{spacing}.png"
         render_qcriterion(
             qcri_frames,
             qcri_isovalue = args.qcri_isovalue,
             cam_params    = cam_params,
             output_path   = out_qcrit,
-            title         = f"{args.case_name}  --  Q-criterion  |  Flowrate = {flowrate:.2f} mL/s  |  t = {actual_time:.2f} s  ",
+            title         = f"{args.case_name}  --  Qcriterion  |  Flowrate = {flowrate:.3f} mL/s  |  t = {actual_time:.4f} s  ",
             window_size   = window_size,
         )
 
