@@ -60,7 +60,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pyvista as pv
-
+pv.start_xvfb()        # start virtual X11 framebuffer for headless rendering on compute nodes
 
 # ======================================================================================================
 # REGION COLOR DEFINITIONS

@@ -26,28 +26,33 @@
 # Copyright (C) 2026 University of Toronto, Biomedical Simulation Lab.
 #-----------------------------------------------------------------------------------------------------------------------
 
+#SBATCH --partition=debug
 #SBATCH --nodes=1
+#SBATCH --ntasks-per-node=100
 #SBATCH --time=00:20:00
 #SBATCH --job-name PT_VizRegions
 #SBATCH --output=PT_VizRegions_%j.txt
 
-
 set -euo pipefail
+echo "Job started: $(date)"
 
 # ---------------------------------- Define Paths -----------------------------------------------------------------------
-CASE=PTSeg028_base_0p64                                                          # Case name
-BASE_DIR=/Users/rojin/Dropbox/My_Projects/Study1_PTRamp/cases/$CASE                          # Parent directory of the case
-MESH_STL="$BASE_DIR/step0_PreProcess/mesh/${CASE}.stl"                           # Path to STL mesh surface file
-CENTERLINE_CSV="$BASE_DIR/step1_CFD/data/${CASE}_centerline_points.csv"          # Path to centerline CSV
-REGIONS_CSV="$BASE_DIR/step2_PostProcess/${CASE}_spectrogram_regions_test.csv"        # Path to spectrogram regions CSV
-OUTPUT_PNG="$BASE_DIR/step2_PostProcess/Visualization/${CASE}_spec_regions.png"  # Path to output PNG
+CASE=PTSeg028_base_0p64                                                             # Case name
+BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE                             # Parent directory of the case
+MESH_STL="$BASE_DIR/step1_CFD/data/${CASE}.h5"                                      # Path to STL mesh surface file
+CENTERLINE_CSV="$BASE_DIR/step1_CFD/data/${CASE}_centerline_points.csv"             # Path to centerline CSV
+REGIONS_CSV="$BASE_DIR/step2_PostProcess/configs/${CASE}_spectrogram_regions2.csv"  # Path to spectrogram regions CSV
+OUTPUT_PNG="$BASE_DIR/step2_PostProcess/Visualization/${CASE}_spec_regions.png"     # Path to output PNG
 
-SCRIPT="/Users/rojin/Library/CloudStorage/OneDrive-UniversityofToronto/Education/PhD/My_Projects/Study1_PTRamp/Scripts/step2_PostProcess/viz_SpectrogramRegions.py"
+SCRIPT="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/visualization/viz_SpectrogramRegions.py"
 
+# --------------------------------- Load Modules ------------------------------------------------------------------------
+module load StdEnv/2023 gcc/12.3 python/3.12.4
+source $HOME/virtual_envs/pyvista36/bin/activate
+module load vtk/9.3.0
 
 # --------------------------------- Create Output Directories -----------------------------------------------------------
 mkdir -p "$(dirname "$OUTPUT_PNG")"
-
 
 
 
