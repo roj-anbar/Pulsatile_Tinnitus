@@ -41,8 +41,8 @@ CASE=PTSeg028_base_0p64                                                         
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE                             # Parent directory of the case
 MESH_STL="$BASE_DIR/step1_CFD/data/${CASE}.h5"                                      # Path to STL mesh surface file
 CENTERLINE_CSV="$BASE_DIR/step1_CFD/data/${CASE}_centerline_points.csv"             # Path to centerline CSV
-REGIONS_CSV="$BASE_DIR/step2_PostProcess/configs/${CASE}_spectrogram_regions2.csv"  # Path to spectrogram regions CSV
-OUTPUT_PNG="$BASE_DIR/step2_PostProcess/Visualization/${CASE}_spec_regions.png"     # Path to output PNG
+REGIONS_CSV="$BASE_DIR/step2_PostProcess/configs/${CASE}_spectrogram_regions.csv"  # Path to spectrogram regions CSV
+OUTPUT_PNG="$BASE_DIR/step2_PostProcess/Spectrogram_wallpressure/${CASE}_spec_regions.png"     # Path to output PNG
 
 SCRIPT="/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/visualization/viz_SpectrogramRegions.py"
 
