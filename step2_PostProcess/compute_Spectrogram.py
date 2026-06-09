@@ -835,10 +835,10 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     plt.rc('axes',   labelsize=18)     # fontsize of the x and y labels
 
 
-    fig, ax = plt.subplots(1, 3, figsize=(20, 5)) #(8,18) #(20,6)
-    #fig, ax = plt.subplots(3, 1, figsize=(8, 18), sharex=True, gridspec_kw={'hspace': 0.05})
+    #fig, ax = plt.subplots(1, 3, figsize=(20, 5)) #(8,18) #(20,6)
+    fig, ax = plt.subplots(3, 1, figsize=(8, 16), sharex=True) #, gridspec_kw={'hspace': 0.05})
 
-    #fig.suptitle(plot_title, fontweight='bold', y=0.99)             # y adds distance to the title's location
+    fig.suptitle(plot_title, fontweight='bold', y=0.99)             # y adds distance to the title's location
 
 
     # ------------------------ Subplot 0: Spectrogram ----------------------------
@@ -879,8 +879,9 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     #------- Common x-axis settings
     for a in ax:
         a.set_xlim([analysis_params['Q_min'], analysis_params['Q_cut']])
+        a.tick_params(direction='in')
         #a.set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
-    #ax[2].set_xlabel('Flow rate (mL/s)', fontweight='bold', fontsize=font_size, labelpad=10)
+    ax[2].set_xlabel('Flow rate (mL/s)', fontweight='bold', fontsize=font_size, labelpad=10)
 
     #--------- Adding phase lines 
     if flag_plot_phases:
@@ -888,7 +889,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
             if not np.isnan(Qphase):
                 print(f'Inlet flowrate of onset Phase {phase} = {Qphase:.2f} mL/s')
                 for a in ax:
-                    a.axvline(Qphase, color="silver", linestyle="solid", linewidth=2.5, alpha=0.7)
+                    a.axvline(Qphase, color="darkgray", linestyle="dashed", linewidth=3, zorder = 5, alpha=0.8)
 
 
     #----- For customizing the colorbar and axis for figures ----
