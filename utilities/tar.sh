@@ -14,6 +14,9 @@
 # The job might not show as completed but the files have been extracted.
 
 
+#-----To see the content of the tar file without extracting
+#tar -tf archive.tar
+
 #------To untar a tarred case
 #tar --use-compress-program=pigz -xvf /project/rrg-steinman-ab/ahaleyyy/DPQ/cases/tarred_cases/case_A/PTSeg028_base_0p512.tar.gz -C $PROJECT/BSL_cases/PT_cases/AnnaH_cases/Study2_DPQ
 #echo "Completed untarring case"
