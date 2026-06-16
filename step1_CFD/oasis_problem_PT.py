@@ -816,7 +816,7 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
         R_in                  = np.sqrt(inout_area[inlet_id] / np.pi)       # inlet radius (mm)
         Re_ins[inlet_id]      = u_mean_in * (2*R_in) / NS_parameters["nu"]
     Q_ins_sum = sum(Q_ins.values())
-    if mpi_rank == 0:
+    if mpi_rank == 0 and tstep % 10 == 0:
         print(f'Q_ins (mL/s): {Q_ins_sum:.4f}, umax_in (m/s): {umax_ins[id_in[0]]:.4f}, Reynolds_in: {Re_ins[id_in[0]]:.1f} \n')
 
 
