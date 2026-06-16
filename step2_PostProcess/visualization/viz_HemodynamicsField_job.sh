@@ -65,18 +65,17 @@ python viz_HemodynmicsField.py                          \
     --case_name         "PTSeg043_noLabbe_base"            \
     --input_folder      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/results/PTSeg043_noLabbe_base_ts10000_cy6_saveFreq5/" \
     --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data"   \
-    --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step2_PostProcess/Hemodynamics/Field0" \
+    --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step2_PostProcess/Hemodynamics/Field" \
     --config_file       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step2_PostProcess/configs/PTSeg043_noLabbe_base_viz_config.yaml" \
-    --target_flowrate   7.70                            \
+    --target_flowrate   8                            \
     --save_freq         5                                \
     --velocity_isovalue 0.5                              \
     --qcri_isovalue     50000                            \
     --frame_spacing     10                               \
-    --cam_parallel_scale 6              \
-    # --cam_position      -335 -52.5 161                     \
-    # --cam_focal_point   20.5 -13.6 2.2                    \
-
-
+    --cam_parallel_scale 8                              \
+#    --cam_position      349.3 47.96 -694.79             \
+#    --cam_focal_point   18.9 -19.1 -593.1                    \
+#    --cam_view_up       0.24 0.23 0.94
 
 
 

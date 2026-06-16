@@ -386,7 +386,7 @@ def render_qcriterion(frames: list,
     apply_camera(pl, cam_params)
     add_geometry_outline(pl, frames[0][0])
 
-    for grid, t_val, rel_pos in reversed(frames):
+    for grid, t_val, rel_pos in frames:
         print(f"  Computing Qcriterion for t = {t_val:.4f} s ...")
         Q = compute_qcriterion(grid)
         g = grid.copy()
