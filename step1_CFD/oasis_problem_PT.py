@@ -22,20 +22,22 @@
 #   - period               : waveform period [ms]
 #   - timesteps            : time steps per cycle
 #   - cycles               : number of cycles
-#   - viscosity (nu)       : kinematic viscosity [mm^2/ms] (≡ m^2/s in consistent units)
+#   - viscosity_mu_Pas     : dynamic viscosity [Pa·s]     (default: 0.0037)
+#   - density_kgm3         : fluid density [kg/m³]        (default: 1057)
 #   - uOrder               : velocity polynomial order for FE
 #   - save_frequency       : save every N steps
 #   - checkpoint           : write restart every N steps
 #   - inlet_BC_type        : type of the inlet boundary condition --> choose from: {'pulsatile', 'ramp', 'custom'} (default is 'pulsatile')
 #
 # Optional
-#   - restart_folder       : previous results folder to restart from
-#   - zero_pressure_outlets: set True to force 0-pressure at outlets
-#   - include_gravity, flat_profile_at_intlet_bc (typo kept for compatibility)
+#   - restart_folder           : path to a previous results folder to restart from
+#   - zero_pressure_outlets    : set True to enforce p=0 at all outlets (default: False)
+#   - save_first_cycle         : set True to also save the spin-up cycle (default: False)
+#   - flat_profile_at_intlet_bc: set True for plug/flat inlet profile (default: False)
 #
 # OUTPUTS:
-#   - Results written under ./results/{case_fullname}.
-#   - Per-step HDF5 + XDMF via BSLSolver.common.h5io.
+#   - Results written under ./results/{case_fullname}/
+#   - Per-step velocity and pressure in HDF5 + XDMF format via BSLSolver.common.h5io
 #
 # NOTES:
 #   - Units in comments follow Oasis code: mm, ms, mL/s (consistent with FEniCS fields).
@@ -85,7 +87,6 @@ max_wtime_before_kill = (23.5*60*60)
 
 
 # ---------------------------------------- Utilities Functions -----------------------------------------------------
-
 def mpi_comm():
     return MPI.comm_world
 
@@ -404,7 +405,6 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
     h5stdio.init(NS_parameters['results_folder'], case_fullname+'_curcyc_%%d_t=%%0%d.4f_ts=%%0%dd_up.h5'%(f+4,g))
 
 
-
 # --------------------------------------- Mesh ----------------------------------------------------------
 def mesh(mesh_path, **NS_namespace):
     """Oasis function to create the mesh."""
@@ -535,7 +535,7 @@ def flow_waveform(Qmean, cycles, period, time_steps, FC):
 def poiseuille_inlet_velocity(mesh, ds_inlet, Q_inflow, **NS_namespace):
     """
     Build Poiseuille expressions aligned with the inlet's average normal.
-    Q_inflow in mL/s (consistent legacy units).
+    Q_inflow in mL/s (consistent units).
     """
 
     dim = mesh.geometry().dim()
@@ -562,24 +562,14 @@ def poiseuille_inlet_velocity(mesh, ds_inlet, Q_inflow, **NS_namespace):
     # Normalize average normals -> normal: unit vector representing the average outward normal of the inlet patch
     normal = n_avg/n_len
 
-
     ### 2. Compute other parameters
     n0, n1, n2 = normal[0], normal[1], normal[2]
     c0, c1, c2 = center[0], center[1], center[2] #[mm]
     R = np.sqrt(area/np.pi) #[mm]
 
-    # umax calculated based on input flowrate
-    u_max  = 2.0 * Q_inflow / area        #[m/s] == [mm/ms] == [ml/s / mm^2]
-    Reynolds = u_max*2*R/NS_parameters["nu"]
-    
-
     dt = NS_parameters['dt']
-    max_dt = 0.5*mesh.hmin()/u_max  # based on CFL = 0.5
-
     if mpi_rank == 0:
-        print(f"Starting simulations for dt = {dt} [ms]")
-        print(f"Suggested timestep [ms] = {max_dt:0.6f}\n")
-
+        print(f"Starting simulations for dt [ms] = {dt}")
         print (f"Inlet properties: \n"
             f"R [mm]        =   {R:.4f} \n"
             f"Area [mm2]    =   {area:.4f} \n"
@@ -908,7 +898,6 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
         h5stdio.Save(current_cycle, t, tstep, Q_ins, Q_outs, NS_parameters, 'Step-%06d' % tstep, q_)
         if mpi_rank == 0:
             h5stdio.SaveXDMF(os.path.join(NS_parameters['results_folder'], NS_parameters['case_fullname'] + '.xdmf'))
-
 
 
 def theend_hook(stop, newfolder, results_folder, **NS_namespace):
