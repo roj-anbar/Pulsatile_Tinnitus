@@ -770,15 +770,16 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
 
     # Update the current cycles
     current_cycle = int(tstep / timesteps)
-
+    
+    # Calculate worst-case CFL across all velocity components and all MPI ranks
+    # USe norm('linf') to get absolute value so negative/reverse-flow velocities are captured too
+    max_u = max(u_[i].vector().norm('linf') for i in range(mesh.geometry().dim()))
+    CFL = NS_parameters['dt'] * max_u / mesh.hmin()
+    
     if mpi_rank == 0:
-        # Calculate CFL
-        max_u = max(u_[0].vector().get_local().max(), u_[1].vector().get_local().max())
-        CFL = NS_parameters['dt']*max_u/mesh.hmin()
-        print (f'For cycle= {current_cycle},   tstep= {tstep},  current time (ms)= {t:.4f}')
-        print (f"worst CFL number is: {CFL:.4f}") 
-
-
+        #max_u = max(u_[0].vector().get_local().max(), u_[1].vector().get_local().max())
+        #CFL = NS_parameters['dt']*max_u/mesh.hmin()
+        print(f"cycle= {current_cycle}  tstep= {tstep}  t(ms)= {t:.2f}:        CFL= {CFL:.4f}")
 
     #fd = subdomain_data # used in commented-out area assembly lines below
 
@@ -801,11 +802,11 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
     if tstep < 3: return
 
     # In-Going Flux & pressure
-    flux_in = {}
-    Q_ins = {}
+    flux_in     = {}
+    Q_ins       = {}
     pressure_in = {}
-    umax_ins = {}
-    Re_ins = {}
+    umax_ins    = {}
+    Re_ins      = {}
     for inlet_id in id_in:
         #inout_area[inlet_id] = abs( assemble(1.0*ds(inlet_id, domain=mesh, subdomain_data=fd)) )
         pressure_in[inlet_id] = -assemble(p_*dS[inlet_id]) / inout_area[inlet_id]
@@ -817,7 +818,7 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
         Re_ins[inlet_id]      = u_mean_in * (2*R_in) / NS_parameters["nu"]
     Q_ins_sum = sum(Q_ins.values())
     if mpi_rank == 0 and tstep % 10 == 0:
-        print(f'Q_ins (mL/s): {Q_ins_sum:.4f}, umax_in (m/s): {umax_ins[id_in[0]]:.4f}, Reynolds_in: {Re_ins[id_in[0]]:.1f} \n')
+        print(f'Q_ins(mL/s)= {Q_ins_sum:.4f}, umax_in(m/s)= {umax_ins[id_in[0]]:.4f}, Reynolds_in= {Re_ins[id_in[0]]:.1f} \n')
 
 
 
