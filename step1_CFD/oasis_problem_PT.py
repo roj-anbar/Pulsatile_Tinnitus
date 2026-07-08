@@ -635,13 +635,13 @@ def create_bcs(u_, p_, p_1, t, NS_expressions, V, Q, area_ratio, mesh, subdomain
     bc_inlet_u = [[],[],[]]
 
     for i in range(id_in_count):
-        fcs_i_filename = fcs[i].split(':')[-1]
+
         tmp_a, tmp_c, tmp_r, tmp_n = Womersley.compute_boundary_geometry_acrn(mesh, dS[id_in[i]], normals)
         
         # Create the inlet flow based on the flow type given by user
         if NS_parameters['inlet_BC_type'] == 'pulsatile': #if fcs_i_filename[0:3] == 'FC_':
-            if mpi_rank == 0:
-                print ('- loading inflow wave form:', fcs_i_filename)
+            fcs_i_filename = fcs[i].split(':')[-1]
+            if mpi_rank == 0: print ('- loading inflow wave form:', fcs_i_filename)
             inlet_i = Womersley.make_womersley_bcs_2(NS_namespace["period"], Q_means[i], fcs_i_filename, mesh, nu, tmp_a, tmp_c, tmp_r, tmp_n, velocity_degree, flat_profile_at_intlet_bc)
         
 
@@ -816,6 +816,7 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
         umax_ins[inlet_id]    = 2*u_mean_in                                 # m/s
         R_in                  = np.sqrt(inout_area[inlet_id] / np.pi)       # inlet radius (mm)
         Re_ins[inlet_id]      = u_mean_in * (2*R_in) / NS_parameters["nu"]
+
     Q_ins_sum = sum(Q_ins.values())
     if mpi_rank == 0 and tstep % 10 == 0:
         print(f'Q_ins(mL/s)= {Q_ins_sum:.4f}, umax_in(m/s)= {umax_ins[id_in[0]]:.4f}, Reynolds_in= {Re_ins[id_in[0]]:.1f} \n')
