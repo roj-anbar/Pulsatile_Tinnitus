@@ -792,7 +792,7 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
         #Q_phases[0] = bins_Q[idx_nonzero_spectral_centroid[0]]  # first rise in centroid
 
     # PHASE 2: First rise in highFreq power
-    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 0.1)[0] # array of indices of positive highFreq powers
+    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 2)[0] # array of indices of positive highFreq powers
 
     if len(idx_nonzero_highFreq_power) > 0:
         Q_phases[1] = bins_Q[idx_nonzero_highFreq_power[0]] # first rise in power
@@ -834,8 +834,10 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     plt.rc('legend', fontsize=font_size)    # fontsize of the legend
     plt.rc('axes',   labelsize=18)     # fontsize of the x and y labels
 
+    # For horizontal plotting:
+    #fig, ax = plt.subplots(1, 3, figsize=(18, 6)) #(20,5)
 
-    #fig, ax = plt.subplots(1, 3, figsize=(20, 5)) #(8,18) #(20,6)
+    # For vertical plotting:
     fig, ax = plt.subplots(3, 1, figsize=(8, 16), sharex=True) #, gridspec_kw={'hspace': 0.05})
 
     fig.suptitle(plot_title, fontweight='bold', y=0.99)             # y adds distance to the title's location
@@ -866,13 +868,13 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     ax[1].plot(bins_Q, spectral_metrics['mean_power_highFreq'], label='high-freq', linewidth = 4, color='tab:red') #'mediumblue'
 
     ax[1].set_ylim([-1, analysis_params['SPL_db_max']])
-    ax[1].set_ylabel('Mean SPL power (dB)', fontweight='bold', labelpad=20, fontsize=font_size)
+    ax[1].set_ylabel('Mean SPL (dB)', fontweight='bold', labelpad=20, fontsize=font_size)
     #ax[1].legend(loc = 'upper left', fontsize=font_size)
 
     # ------------------------ Subplot 2: Spectral Centroid ----------------------------
     ax[2].plot(bins_Q, spectral_metrics['centroid_freq'], linewidth = 4, color='black')
     ax[2].set_ylim([-1, 300])
-    ax[2].set_ylabel('Spectral Centroid (Hz)', fontweight='bold', fontsize=font_size, labelpad=10)
+    ax[2].set_ylabel('Centroid (Hz)', fontweight='bold', fontsize=font_size, labelpad=10)
 
 
 
@@ -889,7 +891,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
             if not np.isnan(Qphase):
                 print(f'Inlet flowrate of onset Phase {phase} = {Qphase:.2f} mL/s')
                 for a in ax:
-                    a.axvline(Qphase, color="darkgray", linestyle="dashed", linewidth=3, zorder = 5, alpha=0.8)
+                    a.axvline(Qphase, color="darkgray", linestyle="solid", linewidth=3, zorder = 5, alpha=0.8)
 
 
     #----- For customizing the colorbar and axis for figures ----
@@ -1289,7 +1291,20 @@ def main():
 
         # Assemble variable array
         if args.spec_quantity == 'wallpressure':
-            spec_quantity_array = read_wallpressure_from_h5_files_parallel(CFD_h5_files, surf_mesh, args.n_process, args.density) 
+            spec_quantity_array = read_wallpressure_from_h5_files_parallel(CFD_h5_files, surf_mesh, args.n_process, args.density)
+
+            # [TEST] subtract mean inlet pressure (Mesh/ID_1 nodes) from all wall nodes before FFT
+            with h5py.File(mesh_file, 'r') as h5:
+                inlet_pids = np.array(h5['Mesh/ID_1/pointIds'])
+            wall_pids = surf_mesh.point_data['vtkOriginalPtIds']
+            inlet_wall_idx = np.where(np.isin(wall_pids, inlet_pids))[0]
+          
+            mean_inlet_pressure = spec_quantity_array[inlet_wall_idx, :].mean(axis=0)  # (n_times,)
+            spec_quantity_array = spec_quantity_array - mean_inlet_pressure[None, :]
+            print(f"[TEST] Subtracted mean pressure of {len(inlet_wall_idx)} inlet wall nodes from all {spec_quantity_array.shape[0]} wall nodes.")
+
+
+
         elif args.spec_quantity == 'velocity':
             raise ValueError(f'Not implemented yet for velocity spectrograms!')
 

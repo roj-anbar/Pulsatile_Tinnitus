@@ -121,12 +121,12 @@ python "$SCRIPT" \
 #     --spec_quantity         "wallpressure" \
 #     --window_length         2732 \
 #     --ROI_type              "cylinder" \
-#     --ROI_start_center_id   1110 \
-#     --ROI_end_center_id     1112 \
-#     --ROI_radius            10 \
-#     --ROI_stride            4 \
+#     --ROI_start_center_id   825 \
+#     --ROI_end_center_id     890 \
+#     --ROI_radius            12 \
+#     --ROI_stride            2 \
 #     --flag_multi_ROI        
-#     --flag_save_ROI
+#    --flag_save_ROI
 
 #    --spec_regions_csv      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/configs/PTSeg028_base_0p64_spectrogram_regions.csv" \
 

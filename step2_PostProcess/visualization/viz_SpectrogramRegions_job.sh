@@ -37,7 +37,7 @@ set -euo pipefail
 echo "Job started: $(date)"
 
 # ---------------------------------- Define Paths -----------------------------------------------------------------------
-CASE=PTSeg028_base_0p64                                                             # Case name
+CASE=PTSeg043_noLabbe_base                                                           # Case name
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE                             # Parent directory of the case
 MESH_STL="$BASE_DIR/step1_CFD/data/${CASE}.h5"                                      # Path to HDF5 mesh surface file
 CENTERLINE_CSV="$BASE_DIR/step1_CFD/data/${CASE}_centerline_points.csv"             # Path to centerline CSV
