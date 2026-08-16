@@ -8,19 +8,22 @@
 #
 # PURPOSE:
 #   - Discovers all HDF5 snapshots in temporal order and renders them as a video.
-#   - Each video frame contains three side-by-side panels sharing the same camera:
-#       Panel 0 – Velocity magnitude isosurface (solid color)
-#       Panel 1 – Velocity streamlines (colored by magnitude, annotated with time)
-#       Panel 2 – Q-criterion isosurface (single color)
-#   - Outputs a single .mp4 file via PyVista's movie writer (ffmpeg backend).
+#   - Each video frame contains three stacked rows sharing the same camera:
+#       Row 0 – Velocity magnitude isosurface (solid color)
+#       Row 1 – Velocity streamlines (colored by magnitude, annotated with time)
+#       Row 2 – Q-criterion isosurface (single color)
+#   - Frames are rendered in parallel (one process per frame) using multiprocessing,
+#     then stitched into MP4 with ffmpeg.
 #
 # REQUIREMENTS:
-#   - h5py, numpy, pyvista, pyyaml, imageio[ffmpeg]
+#   - h5py, numpy, pyvista, pyyaml
+#   - ffmpeg in PATH (e.g. module load ffmpeg on Trillium)
 #   - On Trillium: virtual environment called "pyvista36"
 #
 # EXECUTION:
 #   - Run directly on a login/debug node:
 #       > module load StdEnv/2023 gcc/12.3 python/3.12.4
+#       > module load ffmpeg
 #       > source $HOME/virtual_envs/pyvista36/bin/activate
 #
 # EXAMPLE CLI:
@@ -32,9 +35,10 @@
 #           --case_name          PTSeg028_base_0p64              \
 #           --save_freq          5                               \
 #           --velocity_isovalue  0.5                             \
-#           --qcri_isovalue      50000                            \
+#           --qcri_isovalue      50000                           \
 #           --vel_max            2.0                             \
-#           --framerate          100
+#           --framerate          100                             \
+#           --n_workers          192
 #
 # INPUTS (CLI — change per run):
 #   --config_file             Path to YAML config file with case-specific defaults  [optional]
@@ -43,13 +47,16 @@
 #   --output_folder           Output directory for the video                        [REQUIRED]
 #   --case_name               Case identifier used in the output filename           [REQUIRED]
 #   --velocity_isovalue       Velocity magnitude isosurface value [m/s]            (default: 0.5)
-#   --qcri_isovalue           Q-criterion isosurface value [1/s²]                  (default: 50000)
+#   --qcri_isovalue           Q-criterion isosurface value [1/s2]                  (default: 1000)
 #   --vel_max                 Streamline colormap upper bound [m/s]                 (default: 2.0)
-#   --framerate               Output video frame rate [fps]                         (default: 24)
+#   --framerate               Output video frame rate [fps]                         (default: 60)
 #   --start_frame             First snapshot index, 0-based inclusive               (default: 0)
 #   --end_frame               Last snapshot index, 0-based exclusive                (default: all)
+#   --frame_stride            Render every Nth snapshot                             (default: 1)
+#   --n_workers               Number of parallel worker processes                   (default: all CPUs)
+#   --keep_frames             Keep per-frame PNG files after stitching              (default: delete)
 #
-# INPUTS (config file — case-specific, rarely change):
+# INPUTS (config file -- case-specific, rarely change):
 #   period_seconds       Flow period [s]
 #   timesteps_per_cyc    Timesteps per cycle (parsed from filename if omitted)
 #   save_freq            Snapshot save frequency
@@ -59,23 +66,28 @@
 #   cam_focal_point      [x y z]
 #   cam_view_up          [x y z]
 #   cam_parallel_scale   Enables parallel (orthographic) projection at this scale
-#   window_size          Render window [W H] — total across all 3 panels
+#   window_size          Render window [W H] -- total across all 3 panels
 #
 # OUTPUTS:
 #   - <output_folder>/<case_name>_hemodynamics_video.mp4
+#   - <output_folder>/<case_name>_frames/frame_XXXXXX.png  (deleted unless --keep_frames)
 #
 # NOTES:
-#   - Streamlines are recomputed per frame — expect long runtimes for large datasets.
-#   - Coordinates are converted mm -> m before Q-criterion so Q has units [1/s²].
-#   - window_size is the total render window; each panel occupies one third of the width.
+#   - Each worker process loads the mesh independently and renders one frame to PNG.
+#   - Coordinates are converted mm -> m before Q-criterion so Q has units [1/s2].
+#   - window_size is the total render window; each panel occupies one third of the height.
 #
 # Copyright (C) 2026 University of Toronto, Biomedical Simulation Lab.
 # -----------------------------------------------------------------------------------------------------------------------
 
 import re
 import sys
+import shutil
 import argparse
+import subprocess
+import multiprocessing as mp
 import numpy as np
+import imageio
 import pyvista as pv
 pv.start_xvfb()        # start virtual X11 framebuffer for headless rendering on compute nodes
 from pathlib import Path
@@ -130,34 +142,32 @@ def get_all_snapshots(input_folder: Path, timesteps_per_cyc=None):
 # MULTI-PANEL PLOTTER FACTORY
 # ======================================================================================================
 
-def make_multi_plotter(window_size: list) -> pv.Plotter:
-    """Create a 3-panel (1×3) off-screen plotter with white background."""
-    pl = pv.Plotter(shape=(1, 3), off_screen=True, window_size=window_size, border=False)
-    for col in range(3):
-        pl.subplot(0, col)
-        pl.set_background('white')
-        pl.enable_anti_aliasing('ssaa')
-        pl.enable_depth_peeling()
+def make_panel_plotter(window_size: list) -> pv.Plotter:
+    """Create a single off-screen plotter for one panel with white background."""
+    pl = pv.Plotter(off_screen=True, window_size=window_size)
+    pl.set_background('white')
+    pl.enable_anti_aliasing('ssaa')
+    pl.enable_depth_peeling()
     return pl
 
 
 # ======================================================================================================
 # PANEL RENDERING FUNCTIONS
 # Each function adds actors to the *currently active* subplot of the plotter.
-# Call pl.subplot(0, col) before invoking, then apply_camera(pl, cam_params) after.
+# Call pl.subplot(row, 0) before invoking, then apply_camera(pl, cam_params) after.
 # ======================================================================================================
 
 def add_velocity_iso_panel(pl: pv.Plotter, grid: pv.UnstructuredGrid, isovalue: float):
     """Render velocity magnitude isosurface into the active subplot."""
-    add_geometry_outline(pl, grid)
     iso = grid.contour(isosurfaces=[isovalue], scalars='velocity_magnitude')
     if iso.n_points > 0:
         pl.add_mesh(iso, color='red', specular=1.0, specular_power=50,
                     ambient=0.1, smooth_shading=True, show_scalar_bar=False)
     else:
         print(f'    [VelocityIso] No surface at |u| = {isovalue} m/s')
-    pl.add_text(f'|u| = {isovalue} m/s', position='upper_left',
-                font_size=10, color='black')
+    add_geometry_outline(pl, grid)
+    pl.add_text('Velocity Isosurface', position='upper_left', font_size=20, color='black')
+    pl.add_text(f'isovalue = {isovalue} m/s', position='lower_right', font_size=14, color='black')
 
 
 def add_streamlines_panel(pl: pv.Plotter, grid: pv.UnstructuredGrid,
@@ -173,13 +183,12 @@ def add_streamlines_panel(pl: pv.Plotter, grid: pv.UnstructuredGrid,
         initial_step_length=0.05,
         min_step_length=0.01,
         max_step_length=0.2,
-        max_steps=50000,
+        max_steps=10000,
         terminal_speed=0.05,
-        interpolator_type='cell',
+        interpolator_type='point',
         integrator_type=45,
         integration_direction='forward',
     )
-    add_geometry_outline(pl, grid)
     if streamlines.n_points > 0:
         tubes = streamlines.tube(radius=0.1)
         pl.add_mesh(tubes,
@@ -192,19 +201,21 @@ def add_streamlines_panel(pl: pv.Plotter, grid: pv.UnstructuredGrid,
                     scalar_bar_args=dict(
                         title='Velocity (m/s)',
                         n_labels=5, fmt='%.2f',
-                        height=0.15, width=0.02,
-                        vertical=True,
-                        position_x=0.95, position_y=0.8,
+                        height=0.05, width=0.2,
+                        vertical=False,
+                        position_x=0.95, position_y=0.2,
+                        title_font_size=20,
+                        label_font_size=20,
                     ))
     else:
-        print('    [Streamlines] No streamlines generated — check seed coord/radius.')
+        print('    [Streamlines] No streamlines generated -- check seed coord/radius.')
+    add_geometry_outline(pl, grid)
     if plot_seed_cloud:
         seed_sphere = pv.Sphere(center=seed_coord, radius=5)
         pl.add_mesh(seed_sphere, color='yellow', opacity=0.3, show_scalar_bar=False)
-    label = 'Streamlines'
-    if t_label is not None:
-        label += f'\nt = {t_label:.4f} s'
-    pl.add_text(label, position='upper_left', font_size=10, color='black')
+    pl.add_text('Streamlines', position='upper_left', font_size=20, color='black')
+    #if t_label is not None:
+    #    pl.add_text(f't = {t_label:.4f} s', position='lower_right', font_size=14, color='black')
 
 
 def add_qcriterion_panel(pl: pv.Plotter, grid: pv.UnstructuredGrid, isovalue: float):
@@ -212,18 +223,97 @@ def add_qcriterion_panel(pl: pv.Plotter, grid: pv.UnstructuredGrid, isovalue: fl
     Q = compute_qcriterion(grid)
     g = grid.copy()
     g['Qcriterion'] = Q
-    print(f'    [Q-criterion]  range: {Q.min():.3g} to {Q.max():.3g} [1/s²]')
     iso = g.contour(isosurfaces=[isovalue], scalars='Qcriterion')
     if iso.n_points > 0:
-        iso = iso.smooth(n_iter=50, relaxation_factor=0.5)
-        pl.add_mesh(iso, color='#E31A8C', smooth_shading=True,
+        pl.add_mesh(iso, color='#FF6A00', smooth_shading=True,
                     specular=0.5, specular_power=20, ambient=0.2,
                     opacity=0.95, show_scalar_bar=False)
     else:
-        print(f'    [Q-criterion]  No surface at Q = {isovalue} [1/s²]')
+        print(f'    [Q-criterion]  No surface at Q = {isovalue} [1/s2]')
     add_geometry_outline(pl, grid)
-    pl.add_text(f'Q = {isovalue:.0f} 1/s²', position='upper_left',
-                font_size=10, color='black')
+    pl.add_text('Q-Criterion', position='upper_left', font_size=20, color='black')
+    pl.add_text(f'Q = {isovalue:.0f} 1/s2', position='lower_right', font_size=14, color='black')
+
+
+# ======================================================================================================
+# PARALLEL FRAME WORKER
+# Must be a module-level function (not nested) for multiprocessing to find it after fork.
+# Each panel is rendered with its own independent plotter, then stacked vertically.
+# ======================================================================================================
+
+def render_frame_worker(task: dict) -> int:
+    """Render one video frame to a PNG file. Returns frame index for progress tracking."""
+
+    frame_i           = task['frame_i']
+    t                 = task['t']
+    snapshot_file     = Path(task['snapshot_file'])
+    mesh_file         = Path(task['mesh_file'])
+    cam_params        = task['cam_params']
+    velocity_isovalue = task['velocity_isovalue']
+    qcri_isovalue     = task['qcri_isovalue']
+    vel_max           = task['vel_max']
+    seed_coord        = task['stream_seed_coord']
+    seed_radius       = task['stream_seed_radius']
+    window_size       = task['window_size']
+    output_png        = Path(task['output_png'])
+
+    grid = load_mesh_from_h5(mesh_file)
+    u    = load_velocity_snapshot(snapshot_file)
+    attach_fields(grid, u)
+
+    flowrate = 2.0 * t   # Qin [mL/s] = 2 * t [s]
+    panels   = []
+
+    # --- Panel 0: Velocity isosurface ---
+    pl = make_panel_plotter(window_size)
+    add_velocity_iso_panel(pl, grid, velocity_isovalue)
+    apply_camera(pl, cam_params)
+    pl.add_text(f'Case A', position='upper_left', font_size=35, color='black') #, bold=True)
+    pl.add_text(f'Flow rate = {flowrate:.2f} mL/s', position='upper_right', font_size=30, color='black') #, bold=True)
+    panels.append(pl.screenshot(return_img=True))
+    pl.close()
+
+    # --- Panel 1: Streamlines ---
+    pl = make_panel_plotter(window_size)
+    add_streamlines_panel(pl, grid,
+                          seed_coord=seed_coord, seed_radius=seed_radius,
+                          vel_max=vel_max, t_label=t)
+    apply_camera(pl, cam_params)
+    panels.append(pl.screenshot(return_img=True))
+    pl.close()
+
+    # --- Panel 2: Q-criterion ---
+    pl = make_panel_plotter(window_size)
+    add_qcriterion_panel(pl, grid, qcri_isovalue)
+    apply_camera(pl, cam_params)
+    panels.append(pl.screenshot(return_img=True))
+    pl.close()
+
+    # Stack panels vertically and save combined frame
+    combined = np.vstack(panels)
+    imageio.imwrite(str(output_png), combined)
+
+    return frame_i
+
+
+# ======================================================================================================
+# VIDEO STITCHING
+# ======================================================================================================
+
+def stitch_video(frames_dir: Path, out_video: Path, framerate: int):
+    """Stitch sequentially-numbered PNG frames into an MP4 using ffmpeg."""
+    cmd = [
+        'ffmpeg', '-y',
+        '-framerate', str(framerate),
+        '-i', str(frames_dir / 'frame_%06d.png'),
+        '-c:v', 'libx264',
+        '-pix_fmt', 'yuv420p',
+        '-crf', '18',
+        str(out_video),
+    ]
+    print('Stitching frames into video ...')
+    print('  ' + ' '.join(cmd))
+    subprocess.run(cmd, check=True)
 
 
 # ======================================================================================================
@@ -257,7 +347,7 @@ def parse_args():
 
     # ---- Isosurface values ----
     ap.add_argument('--velocity_isovalue', type=float, default=0.5,    help='Velocity magnitude isosurface [m/s] (default: 0.5)')
-    ap.add_argument('--qcri_isovalue',     type=float, default=1000.0, help='Q-criterion isosurface [1/s²] (default: 1000)')
+    ap.add_argument('--qcri_isovalue',     type=float, default=1000.0, help='Q-criterion isosurface [1/s2] (default: 1000)')
     ap.add_argument('--vel_max',           type=float, default=2.0,    help='Streamline colormap upper bound [m/s] (default: 2.0)')
 
     # ---- Streamline seed ----
@@ -265,10 +355,12 @@ def parse_args():
     ap.add_argument('--stream_seed_radius', type=float,          default=None, help='Seed sphere radius (mesh units, mm)')
 
     # ---- Video options ----
-    ap.add_argument('--start_frame', type=int, default=0,    help='First snapshot index, 0-based inclusive (default: 0)')
-    ap.add_argument('--end_frame',    type=int, default=None, help='Last snapshot index, 0-based exclusive (default: all frames)')
-    ap.add_argument('--framerate',   type=int, default=60,   help='Output video frame rate [fps] (default: 60)')
-    ap.add_argument('--frame_stride', type=int, default=1,    help='Use every Nth snapshot; skips N-1 frames between each video frame (default: 1 = no skipping)')
+    ap.add_argument('--framerate',    type=int,  default=60,   help='Output video frame rate [fps] (default: 60)')
+    ap.add_argument('--start_frame',  type=int,  default=0,    help='First snapshot index, 0-based inclusive (default: 0)')
+    ap.add_argument('--end_frame',    type=int,  default=None, help='Last snapshot index, 0-based exclusive (default: all frames)')
+    ap.add_argument('--frame_stride', type=int,  default=1,    help='Render every Nth snapshot (default: 1 = no skipping)')
+    ap.add_argument('--n_workers',    type=int,  default=None, help='Parallel worker processes (default: all available CPUs)')
+    ap.add_argument('--keep_frames',  action='store_true',     help='Keep per-frame PNG files after stitching (default: delete)')
 
     # ---- Camera ----
     ap.add_argument('--cam_position',       type=float, nargs=3, default=None, help='Camera position [x y z]')
@@ -278,7 +370,7 @@ def parse_args():
 
     # ---- Output ----
     ap.add_argument('--window_size', type=int, nargs=2, default=None,
-                    help='Total render window size [W H] across all 3 panels (default: [2880, 960])')
+                    help='Per-panel render window size [W H]; panels are stacked vertically (default: [1280, 720])')
 
     if pre_args.config_file:
         with open(pre_args.config_file) as f:
@@ -299,7 +391,7 @@ def main():
     output_folder = Path(args.output_folder)
     output_folder.mkdir(parents=True, exist_ok=True)
 
-    window_size = args.window_size if args.window_size is not None else [2880, 960]
+    window_size = args.window_size if args.window_size is not None else [1280, 720]
     period      = args.period_seconds if args.period_seconds is not None else 0.915
 
     print('=' * 100)
@@ -309,7 +401,7 @@ def main():
     print(f'  Output folder    : {output_folder}')
     print(f'  Case name        : {args.case_name}')
     print(f'  Velocity isovalue: {args.velocity_isovalue} m/s')
-    print(f'  Q-criterion iso  : {args.qcri_isovalue} 1/s²')
+    print(f'  Q-criterion iso  : {args.qcri_isovalue} 1/s2')
     print(f'  Vel colormap max : {args.vel_max} m/s')
     print(f'  Frame rate       : {args.framerate} fps')
     print(f'  Window size      : {window_size}')
@@ -320,13 +412,11 @@ def main():
         print('ERROR: --stream_seed_coord and --stream_seed_radius are required.')
         sys.exit(1)
 
-    # ---- Load mesh once (shared across all frames) ----
+    # ---- Discover mesh file ----
     mesh_file = next(Path(args.mesh_folder).glob('*.h5'), None)
     if mesh_file is None:
         print(f'ERROR: no .h5 mesh file found in {args.mesh_folder}')
         sys.exit(1)
-    print('Loading mesh ...')
-    grid = load_mesh_from_h5(mesh_file)
 
     # ---- Discover all snapshots ----
     h5_files, timesteps_per_cyc = get_all_snapshots(input_folder, args.timesteps_per_cyc)
@@ -337,12 +427,16 @@ def main():
     frames   = h5_files[start:end:stride]
     n_frames = len(frames)
 
-    print(f'Snapshots found  : {len(h5_files)}')
-    print(f'Rendering frames : [{start}, {end})  stride={stride}  ({n_frames} frames)')
-    print(f'dt per video frame: {dt * stride:.4f} s  (save_freq={args.save_freq}, ts_per_cyc={timesteps_per_cyc}, stride={stride})')
-    print(f'Video duration   : {n_frames / args.framerate:.1f} s at {args.framerate} fps\n')
+    n_workers = args.n_workers if args.n_workers is not None else mp.cpu_count()
+    n_workers = min(n_workers, n_frames)
 
-    # ---- Shared camera dict ----
+    print(f'Snapshots found   : {len(h5_files)}')
+    print(f'Rendering frames  : [{start}, {end})  stride={stride}  ({n_frames} frames)')
+    print(f'dt per video frame: {dt * stride:.4f} s')
+    print(f'Video duration    : {n_frames / args.framerate:.1f} s at {args.framerate} fps')
+    print(f'Workers           : {n_workers}\n')
+
+    # ---- Camera dict ----
     cam_params = {
         'position':       args.cam_position,
         'focal_point':    args.cam_focal_point,
@@ -350,52 +444,56 @@ def main():
         'parallel_scale': args.cam_parallel_scale,
     }
 
-    # ---- Output path ----
-    out_video = output_folder / f'{args.case_name}_hemodynamics_video.mp4'
-    print(f'Output video     : {out_video}\n')
+    # ---- Frames directory (holds per-frame PNGs in order) ----
+    frames_dir = output_folder / f'{args.case_name}_frames'
+    frames_dir.mkdir(parents=True, exist_ok=True)
 
-    # ---- Create plotter and open movie writer ----
-    pl = make_multi_plotter(window_size)
-    pl.open_movie(str(out_video), framerate=args.framerate, quality=5)
-
-    # ---- Frame loop ----
+    # ---- Build task list ----
+    task_list = []
     for i, snapshot_file in enumerate(frames):
         global_frame_idx = start + i * stride
         t = global_frame_idx * dt
-        print(f'\n  Frame {i + 1:04d}/{n_frames}  |  t = {t:.4f} s  |  {snapshot_file.name}')
+        task_list.append({
+            'frame_i':            i,
+            't':                  t,
+            'snapshot_file':      str(snapshot_file),
+            'mesh_file':          str(mesh_file),
+            'cam_params':         cam_params,
+            'velocity_isovalue':  args.velocity_isovalue,
+            'qcri_isovalue':      args.qcri_isovalue,
+            'vel_max':            args.vel_max,
+            'stream_seed_coord':  args.stream_seed_coord,
+            'stream_seed_radius': args.stream_seed_radius,
+            'window_size':        window_size,
+            'output_png':         str(frames_dir / f'frame_{i:06d}.png'),
+        })
 
-        u = load_velocity_snapshot(snapshot_file)
-        vel_mag = np.linalg.norm(u, axis=1)
-        print(f'    vel max = {vel_mag.max():.3f} m/s')
-        attach_fields(grid, u)
+    # ---- Parallel rendering ----
+    print(f'Rendering {n_frames} frames with {n_workers} parallel workers ...')
+    with mp.Pool(processes=n_workers) as pool:
+        for done_i in pool.imap_unordered(render_frame_worker, task_list):
+            print(f'  Done frame {done_i + 1:04d}/{n_frames}', flush=True)
 
-        pl.clear()   # remove all actors from all renderers (background/camera preserved)
+    # ---- Stitch into MP4 ----
+    end_label = end if args.end_frame is not None else 'end'
+    out_video = output_folder / (
+        f'{args.case_name}'
+        f'_fr{start}-{end_label}'
+        f'_stride{stride}'
+        f'_fps{args.framerate}'
+        f'_hemodynamics_video.mp4'
+    )
+    stitch_video(frames_dir, out_video, args.framerate)
 
-        # --- Panel 0: Velocity isosurface ---
-        pl.subplot(0, 0)
-        add_velocity_iso_panel(pl, grid, args.velocity_isovalue)
-        apply_camera(pl, cam_params)
+    # ---- Clean up frames directory unless requested to keep ----
+    if not args.keep_frames:
+        shutil.rmtree(frames_dir)
+        print(f'  Frames directory removed: {frames_dir}')
 
-        # --- Panel 1: Streamlines (time label shown here as the center panel) ---
-        pl.subplot(0, 1)
-        add_streamlines_panel(pl, grid,
-                              seed_coord=args.stream_seed_coord,
-                              seed_radius=args.stream_seed_radius,
-                              vel_max=args.vel_max,
-                              t_label=t)
-        apply_camera(pl, cam_params)
-
-        # --- Panel 2: Q-criterion ---
-        pl.subplot(0, 2)
-        add_qcriterion_panel(pl, grid, args.qcri_isovalue)
-        apply_camera(pl, cam_params)
-
-        pl.write_frame()
-
-    pl.close()
     print(f'\nVideo saved: {out_video}')
     print('Done.\n')
 
 
 if __name__ == '__main__':
+    mp.set_start_method('fork', force=True)   # workers inherit parent's loaded VTK/pyvista — no re-import needed
     main()
