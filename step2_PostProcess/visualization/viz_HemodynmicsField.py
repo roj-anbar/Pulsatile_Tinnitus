@@ -47,7 +47,7 @@
 #   --target_time        Desired simulation time [s] to visualize              [REQUIRED]
 #   --save_freq          Snapshot save frequency: every Nth timestep           (default: 5)
 #   --velocity_isovalue  Velocity magnitude isosurface value [m/s]            (default: 0.5)
-#   --qcri_isovalue      Qcriterion isosurface value(s) [1/s2]               (default: 1000)
+#   --qcri_isovalue      Qcriterion isosurface value(s) [1/s2]               (default: 50000)
 #
 # INPUTS (config file — case-specific, rarely change):
 #   period_seconds       Flow period [s]
