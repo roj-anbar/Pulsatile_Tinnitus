@@ -12,9 +12,9 @@
 # Copyright (C) 2026 University of Toronto, Biomedical Simulation Lab.
 #-----------------------------------------------------------------------------------------------------------------------
 
-#SBATCH --partition=debug
+#SBATCH --partition=compute
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=100
+#SBATCH --ntasks-per-node=192
 #SBATCH --time=01:00:00
 #SBATCH --job-name PT_HemodynamicsVideo
 #SBATCH --output=PT_HemodynamicsVideo_%j.txt
@@ -23,7 +23,7 @@ set -euo pipefail
 echo "Job started: $(date)"
 
 # ---------------------------------- Define Paths -----------------------------------------------------------------------
-CASE=PTSeg028_0p64_base
+CASE=PTSeg043_noLabbe_base
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE
 MESH_FOLDER="$BASE_DIR/step1_CFD/data"
 INPUT="$BASE_DIR/step1_CFD/results/${CASE}_ts10000_cy6_saveFreq5"
@@ -56,31 +56,30 @@ python "$SCRIPT"                            \
     --velocity_isovalue 0.5                 \
     --qcri_isovalue     50000               \
     --vel_max           2.0                 \
-    --start_frame       5000                \
-    --end_frame         5100                \
-    --framerate         1                  \
-    --frame_stride      20                 \
-    --n_workers         $SLURM_NTASKS
+    --start_frame       2185                \
+    --end_frame         8740                \
+    --framerate         100                  \
+    --frame_stride      4                 \
 
 
 #---------------------- For running directly from commandline use below ---------------------------
 # Note1: You HAVE to load the modules first from terminal then run below
 # Note2: You HAVE to comment this part if submitting this file through sbatch
 
-python viz_HemodynamicsVideo.py                         \
-    --case_name         "PTSeg028_base_0p64"            \
-    --input_folder      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results/PTSeg028_base_0p64_ts10000_cy6_saveFreq5/" \
-    --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data"   \
-    --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/Hemodynamics/Videos" \
-    --config_file       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/configs/PTSeg028_base_0p64_viz_config.yaml" \
-    --save_freq         5                           \
-    --velocity_isovalue 0.5                         \
-    --qcri_isovalue     50000                       \
-    --vel_max           2.0                         \
-    --framerate         10                         \
-    --frame_stride      40                          \
-    --start_frame       8000                        \
-    --end_frame         9000                           
+# python viz_HemodynamicsVideo.py                         \
+#     --case_name         "PTSeg043_noLabbe_base"            \
+#     --input_folder      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/results/PTSeg043_noLabbe_base_ts10000_cy6_saveFreq5/" \
+#     --mesh_folder       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step1_CFD/data"   \
+#     --output_folder     "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step2_PostProcess/Hemodynamics/Videos" \
+#     --config_file       "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg043_noLabbe_base/step2_PostProcess/configs/PTSeg043_noLabbe_base_viz_config.yaml" \
+#     --save_freq         5                           \
+#     --velocity_isovalue 0.5                         \
+#     --qcri_isovalue     50000                       \
+#     --vel_max           2.0                         \
+#     --framerate         100                         \
+#     --frame_stride      50                          \
+#     --start_frame       8185                        \
+#     --end_frame         8745                           
 
 
 echo "Job finished: $(date)"

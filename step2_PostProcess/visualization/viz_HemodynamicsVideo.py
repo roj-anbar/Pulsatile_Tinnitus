@@ -161,13 +161,13 @@ def add_velocity_iso_panel(pl: pv.Plotter, grid: pv.UnstructuredGrid, isovalue: 
     """Render velocity magnitude isosurface into the active subplot."""
     iso = grid.contour(isosurfaces=[isovalue], scalars='velocity_magnitude')
     if iso.n_points > 0:
-        pl.add_mesh(iso, color='red', specular=1.0, specular_power=50,
+        pl.add_mesh(iso, color='red', specular=0.5, specular_power=80,
                     ambient=0.1, smooth_shading=True, show_scalar_bar=False)
     else:
         print(f'    [VelocityIso] No surface at |u| = {isovalue} m/s')
     add_geometry_outline(pl, grid)
-    pl.add_text('Velocity Isosurface', position='upper_left', font_size=20, color='black')
-    pl.add_text(f'isovalue = {isovalue} m/s', position='lower_right', font_size=14, color='black')
+    pl.add_text('Velocity Isosurface', position=(0.01, 0.85), viewport=True, font_size=20, color='black')
+    pl.add_text(f'isovalue = {isovalue} m/s', position='lower_right', font_size=14, color='red')
 
 
 def add_streamlines_panel(pl: pv.Plotter, grid: pv.UnstructuredGrid,
@@ -175,17 +175,22 @@ def add_streamlines_panel(pl: pv.Plotter, grid: pv.UnstructuredGrid,
                           vel_max: float = 2.0, t_label: float = None,
                           plot_seed_cloud: bool = False):
     """Render velocity streamlines into the active subplot."""
-    streamlines = grid.streamlines(
+    rng = np.random.default_rng(42)
+    pts = rng.uniform(-1, 1, (120, 3))
+    pts /= np.linalg.norm(pts, axis=1, keepdims=True)
+    pts *= rng.uniform(0, 1, (120, 1)) ** (1 / 3) * seed_radius
+    pts += np.asarray(seed_coord)
+    seed_cloud = pv.PolyData(pts)
+
+    streamlines = grid.streamlines_from_source(
+        seed_cloud,
         vectors='velocity',
-        source_center=seed_coord,
-        source_radius=seed_radius,
-        n_points=120,
         initial_step_length=0.05,
         min_step_length=0.01,
         max_step_length=0.2,
         max_steps=10000,
         terminal_speed=0.05,
-        interpolator_type='point',
+        interpolator_type='cell',
         integrator_type=45,
         integration_direction='forward',
     )
@@ -200,12 +205,12 @@ def add_streamlines_panel(pl: pv.Plotter, grid: pv.UnstructuredGrid,
                     show_scalar_bar=True,
                     scalar_bar_args=dict(
                         title='Velocity (m/s)',
-                        n_labels=5, fmt='%.2f',
+                        n_labels=5, fmt='%.1f',
                         height=0.05, width=0.2,
                         vertical=False,
-                        position_x=0.95, position_y=0.2,
-                        title_font_size=20,
-                        label_font_size=20,
+                        position_x=0.75, position_y=0.1,
+                        title_font_size=30,
+                        label_font_size=30,
                     ))
     else:
         print('    [Streamlines] No streamlines generated -- check seed coord/radius.')
@@ -226,8 +231,7 @@ def add_qcriterion_panel(pl: pv.Plotter, grid: pv.UnstructuredGrid, isovalue: fl
     iso = g.contour(isosurfaces=[isovalue], scalars='Qcriterion')
     if iso.n_points > 0:
         pl.add_mesh(iso, color='#FF6A00', smooth_shading=True,
-                    specular=0.5, specular_power=20, ambient=0.2,
-                    opacity=0.95, show_scalar_bar=False)
+                    specular=0.5, specular_power=80, ambient=0.2, opacity=0.95, show_scalar_bar=False)
     else:
         print(f'    [Q-criterion]  No surface at Q = {isovalue} [1/s2]')
     add_geometry_outline(pl, grid)
@@ -268,7 +272,7 @@ def render_frame_worker(task: dict) -> int:
     pl = make_panel_plotter(window_size)
     add_velocity_iso_panel(pl, grid, velocity_isovalue)
     apply_camera(pl, cam_params)
-    pl.add_text(f'Case A', position='upper_left', font_size=35, color='black') #, bold=True)
+    pl.add_text(f'Case B', position='upper_left', font_size=35, color='black') #, bold=True)
     pl.add_text(f'Flow rate = {flowrate:.2f} mL/s', position='upper_right', font_size=30, color='black') #, bold=True)
     panels.append(pl.screenshot(return_img=True))
     pl.close()
@@ -478,10 +482,10 @@ def main():
     end_label = end if args.end_frame is not None else 'end'
     out_video = output_folder / (
         f'{args.case_name}'
+        f'_video'
         f'_fr{start}-{end_label}'
         f'_stride{stride}'
-        f'_fps{args.framerate}'
-        f'_hemodynamics_video.mp4'
+        f'_fps{args.framerate}.mp4'
     )
     stitch_video(frames_dir, out_video, args.framerate)
 
