@@ -22,25 +22,44 @@ The workflow is: you run `run_oasis_PT.sh` → it calls `sbatch oasis_solver_PT.
 
 ## Prerequisites
 
-Before running anything, make sure you have:
+### One-Time Setup (do this once when you first join the project)
 
-1. **BSLSolver** cloned to your home directory:
-   ```
-   ~/BSLSolver/
-   ```
-2. **Apptainer container image** at:
-   ```
-   ~/containers/fenics-legacy/fenics-oasis.sif
-   ```
-3. **`pyshims/` directory** copied to your `$SCRATCH`:
-   ```
-   /scratch/<your_username>/pyshims/
-   ```
-   > This directory contains a shim that aliases `ufl-legacy` as `ufl`, required for the legacy FEniCS container. Copy it from the shared lab directory.
+Complete these steps in order on the Niagara login node.
 
-4. **Mesh data** for your case placed under `./data/` in your case directory:
-   - `./data/<casename>.xml.gz` — the mesh file
-   - `./data/<casename>.info` — boundary information file (inlets/outlets)
+**1. Clone Oasis to your home directory:**
+```bash
+git clone https://github.com/mikaem/Oasis.git ~/Oasis
+```
+> No `pip install` needed — Oasis is used via `PYTHONPATH` inside the container, not installed into any Python environment.
+
+**2. Clone BSLSolver to your home directory:**
+```bash
+git clone https://github.com/Biomedical-Simulation-Lab/BSLSolver.git ~/BSLSolver
+```
+> No `pip install` needed — same as Oasis, it is injected via `PYTHONPATH` at runtime.
+
+**3. Copy the Apptainer container image:**
+```bash
+mkdir -p ~/containers/fenics-legacy/
+cp /path/to/shared/fenics-oasis.sif ~/containers/fenics-legacy/fenics-oasis.sif
+```
+> The `.sif` file **must** be placed at exactly `~/containers/fenics-legacy/fenics-oasis.sif`. The solver script references this path directly — putting it elsewhere will cause the job to fail. Get the `.sif` file from an existing lab member.
+
+**4. Copy `pyshims/` to your scratch:**
+```bash
+cp -r /path/to/shared/pyshims /scratch/<your_username>/pyshims
+```
+> This directory contains a shim that aliases `ufl-legacy` as `ufl`, required for the legacy FEniCS container. Get it from an existing lab member.
+
+---
+
+### Per-Case Requirements
+
+Before running a case, make sure you also have:
+
+- **Mesh data** placed under `./data/` in your case directory:
+  - `./data/<casename>.xml.gz` — the mesh file
+  - `./data/<casename>.info` — boundary information file (inlets/outlets)
 
 ---
 
