@@ -150,12 +150,11 @@ apptainer exec \
   density_kgm3=$density_kgm3 \
   uOrder=$uOrder \
   inlet_BC_type=$inlet_BC_type \
-  inflowrate_constant_mLs=${inflowrate_constant_mLs:-5.0} \
+  inflowrate_constant_mLs=$inflowrate_constant_mLs \
   save_frequency=$save_frequency \
   save_first_cycle=$save_first_cycle \
   checkpoint=$checkpoint \
   &>> $log_file
-
 
 
 #------------------------------------ Write to log ---------------------------------------------------
