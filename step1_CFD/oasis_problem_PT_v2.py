@@ -36,9 +36,6 @@
 #   - save_first_cycle         : set True to also save the spin-up cycle (default: False)
 #   - flat_profile_at_intlet_bc: set True for plug/flat inlet profile (default: False)
 #   - inflowrate_constant_mLs  : constant inflow rate [mL/s], used when inlet_BC_type='constant' (default: 5.0)
-#   - noise_y                  : set True to add Gaussian noise to the y-component of the inlet velocity (default: False)
-#   - noise_z                  : set True to add Gaussian noise to the z-component of the inlet velocity (default: False)
-#   - case_fullname is suffixed with '_noisy' if either noise_y or noise_z is True, otherwise '_clean'
 #
 # OUTPUTS:
 #   - Results written under ./results/{case_fullname}/
@@ -343,11 +340,13 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
         #txt += '_Per%d'%int(period)
 
         #case_fullname = ("art_" + mesh_name + txt + "_Newt370" + "_ts" + str(timesteps) + "_cy" + str(cycles) + "_uO" + str(uOrder))
-        noise_y     = get_cmdarg(commandline_kwargs, 'noise_y', False)   # add Gaussian noise to the y-component of the inlet velocity
-        noise_z     = get_cmdarg(commandline_kwargs, 'noise_z', False)   # add Gaussian noise to the z-component of the inlet velocity
-        noise_sigma = get_cmdarg(commandline_kwargs, 'noise_sigma', 0.001)  # std dev of Gaussian noise
-        noise_tag   = "_noisy" if (noise_y or noise_z) else "_clean"
-        case_fullname = (mesh_name + noise_tag + "_ts" + str(timesteps) + "_cy" + str(no_of_cycles))
+        noise_y     = False   # add Gaussian noise to the y-component of the inlet velocity
+        noise_z     = False   # add Gaussian noise to the z-component of the inlet velocity
+        # noise_sigma = get_cmdarg(commandline_kwargs, 'noise_sigma', 0.001)  # std dev of Gaussian noise
+        # noise_tag   = "_noisy" if (noise_y or noise_z) else "_clean"
+        #case_fullname = (mesh_name + noise_tag + "_ts" + str(timesteps) + "_cy" + str(no_of_cycles))
+        
+        case_fullname = (mesh_name + "_ts" + str(timesteps) + "_cy" + str(no_of_cycles))
         results_folder = f"./results/{case_fullname}_saveFreq{save_freq}"
 
         #####--------- IMPORTANT: OASIS expects all parameters in [mm] and [ms]! -------------####
@@ -394,9 +393,9 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
             Qin_constant_mLs          = get_cmdarg(commandline_kwargs, 'inflowrate_constant_mLs', 5),       # constant inflow rate, used when inlet_BC_type='constant' [mL/s]
             ramp_slope                = get_cmdarg(commandline_kwargs, 'ramp_slope',  2),                   # slope of inflow ramp, used when inlet_BC_type='ramp'
             ramp_offset               = get_cmdarg(commandline_kwargs, 'ramp_offset', 2),                   # offset of inflow ramp, used when inlet_BC_type='ramp'
-            noise_y                   = noise_y,                                                            # add Gaussian noise to the y-component of the inlet velocity
-            noise_z                   = noise_z,                                                            # add Gaussian noise to the z-component of the inlet velocity
-            noise_sigma               = noise_sigma,                                                        # std dev of Gaussian noise (default = 0.001 m/s)
+            # noise_y                   = noise_y,                                                            # add Gaussian noise to the y-component of the inlet velocity
+            # noise_z                   = noise_z,                                                            # add Gaussian noise to the z-component of the inlet velocity
+            # noise_sigma               = noise_sigma,                                                        # std dev of Gaussian noise (default = 0.001 m/s)
             not_zero_pressure_outlets = not get_cmdarg(commandline_kwargs, 'zero_pressure_outlets', False),
             include_gravity           = get_cmdarg(commandline_kwargs,     'include_gravitational_effects', False),
             flat_profile_at_intlet_bc = get_cmdarg(commandline_kwargs,     'flat_profile_at_intlet_bc', False),
@@ -702,13 +701,12 @@ def create_bcs(u_, p_, p_1, t, NS_expressions, V, Q, area_ratio, mesh, subdomain
         elif NS_parameters['inlet_BC_type'] == 'ramp':
             Q_inflow = ramp_inflowrate(t, NS_parameters['ramp_slope'], NS_parameters['ramp_offset'])
 
-            #inlet_i = poiseuille_inlet_velocity(mesh, ds_inlet, Q_inflow)
-            inlet_i = poiseuille_inlet_velocity_xaxis(mesh, ds_inlet, Q_inflow)
+            inlet_i = poiseuille_inlet_velocity(mesh, ds_inlet, Q_inflow)
 
         # Option3: Constant
         elif NS_parameters['inlet_BC_type'] == 'constant':
             Q_inflow = constant_inflowrate(t, NS_parameters['Qin_constant_mLs'])
-            inlet_i = poiseuille_inlet_velocity_xaxis(mesh, ds_inlet, Q_inflow)
+            inlet_i = poiseuille_inlet_velocity(mesh, ds_inlet, Q_inflow)
 
         # Option4: Custom
         else: #THIS DOES NOT CURRENTLY WORK #NS_parameters['inlet_BC_type'] == 'custom'
@@ -906,6 +904,10 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
                     'Out', out_id, flux_out[out_id], area_ratio[i] * Q_ins_sum,
                     flux_out[out_id] / inout_area[out_id], pressure_out[out_id], NS_expressions[out_id].p))
             print("~" * 88)
+
+        elif NS_parameters['inlet_BC_type'] == 'constant':
+            Q_inflow_val = constant_inflowrate(t, NS_parameters['Qin_constant_mLs'])
+            print(f"Constant inlet flowrate: Q_set = {NS_parameters['Qin_constant_mLs']:.4f} mL/s,  Q_applied(t={t:.1f}ms) = {Q_inflow_val:.4f} mL/s,  Q_measured = {Q_ins_sum:.4f} mL/s")
 
 
         sys.stdout.flush()
