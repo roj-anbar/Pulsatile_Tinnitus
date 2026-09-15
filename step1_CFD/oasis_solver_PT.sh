@@ -141,7 +141,7 @@ echo "--------------------------------------------------------------------------
 apptainer exec \
   --env HYDRA_LAUNCHER=fork \
   $BIND_OPTS ~/containers/fenics-legacy/fenics-oasis.sif \
-  mpirun -n $NP oasis NSfracStep problem=oasis_problem_PT_v2 \
+  mpirun -n $NP oasis NSfracStep problem=oasis_problem_PT \
   mesh_name=$casename \
   cycles=$cycles \
   period=$period \
@@ -150,7 +150,6 @@ apptainer exec \
   density_kgm3=$density_kgm3 \
   uOrder=$uOrder \
   inlet_BC_type=$inlet_BC_type \
-  inflowrate_constant_mLs=$inflowrate_constant_mLs \
   save_frequency=$save_frequency \
   save_first_cycle=$save_first_cycle \
   checkpoint=$checkpoint \
