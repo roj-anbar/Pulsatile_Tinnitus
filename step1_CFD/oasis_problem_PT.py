@@ -855,16 +855,6 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
 
     # Update the current cycles
     current_cycle = int(tstep / timesteps)
-    
-    # Calculate worst-case CFL across all velocity components and all MPI ranks
-    # USe norm('linf') to get absolute value so negative/reverse-flow velocities are captured too
-    max_u = max(u_[i].vector().norm('linf') for i in range(mesh.geometry().dim()))
-    CFL = NS_parameters['dt'] * max_u / mesh.hmin()
-    
-    if mpi_rank == 0 and tstep % 100 == 0:
-        #max_u = max(u_[0].vector().get_local().max(), u_[1].vector().get_local().max())
-        #CFL = NS_parameters['dt']*max_u/mesh.hmin()
-        print(f"For cycle= {current_cycle}  tstep= {tstep}  t(ms)= {t:.2f}:        CFL= {CFL:.4f}")
 
 
     #boundary_markers = subdomain_data # used in commented-out area assembly lines below
@@ -914,9 +904,19 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
 
     Q_ins_sum = sum(Q_ins.values())
 
+        
+    # Calculate worst-case CFL across all velocity components and all MPI ranks
+    # USe norm('linf') to get absolute value so negative/reverse-flow velocities are captured too
+    max_u = max(u_[i].vector().norm('linf') for i in range(mesh.geometry().dim()))
+    CFL = NS_parameters['dt'] * max_u / mesh.hmin()
+    
+
     # Print to log
     if mpi_rank == 0 and tstep % 100 == 0:
-        print(f'Q_ins(mL/s)= {Q_ins_sum:.4f}, umax_in(m/s)= {umax_ins[inlet_ids[0]]:.4f}, Reynolds_in= {Re_ins[inlet_ids[0]]:.1f} \n')
+        #max_u = max(u_[0].vector().get_local().max(), u_[1].vector().get_local().max())
+        #CFL = NS_parameters['dt']*max_u/mesh.hmin()
+        print(f"For cycle= {current_cycle}  tstep= {tstep}  t(ms)= {t:.2f}:        CFL= {CFL:.4f}", flush=True)
+        print(f'Q_ins(mL/s)= {Q_ins_sum:.4f}, umax_in(m/s)= {umax_ins[inlet_ids[0]]:.4f}, Reynolds_in= {Re_ins[inlet_ids[0]]:.1f} \n', flush=True)
 
 
     # Out-Going Flux
