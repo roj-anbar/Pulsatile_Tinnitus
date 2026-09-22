@@ -150,6 +150,9 @@ apptainer exec \
   density_kgm3=$density_kgm3 \
   uOrder=$uOrder \
   inlet_BC_type=$inlet_BC_type \
+  ramp_slope=${ramp_slope:-2} \
+  ramp_offset=${ramp_offset:-1} \
+  inflowrate_constant_mLs=${inflowrate_constant_mLs:-5} \
   save_frequency=$save_frequency \
   save_first_cycle=$save_first_cycle \
   checkpoint=$checkpoint \
