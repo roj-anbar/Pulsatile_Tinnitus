@@ -418,7 +418,7 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
 def mesh(mesh_path, **NS_namespace):
     """Oasis function to create the mesh."""
 
-    print_section_header('Loading mesh file: ' + mesh_path)
+    print_section_header('MESH PARAMETERS:\nLoading mesh file: ' + mesh_path)
 
     #mesh_folder = mesh_path #path.join(path.dirname(path.abspath(__file__)), mesh_path)
 
@@ -661,7 +661,7 @@ def create_bcs(u_, p_, p_1, t, NS_expressions, V, Q, area_ratio, mesh, subdomain
                inlet_ids, outlet_ids, velocity_degree, pressure_degree, no_of_cycles,
                T, not_zero_pressure_outlets, flat_profile_at_intlet_bc, **NS_namespace):
 
-    print_section_header('Inspecting boundaries and making boundary conditions:')
+    print_section_header('BOUNDARY CONDITIONS:\n')
 
     # Mesh function / boundaries
     boundary_markers = subdomain_data
@@ -708,8 +708,7 @@ def create_bcs(u_, p_, p_1, t, NS_expressions, V, Q, area_ratio, mesh, subdomain
 
         # Option1: Pulsatile Womersley
         if inlet_BCtype == 'pulsatile': #if fcs_i_filename[0:3] == 'FC_':
-            # waveform_filename is already captured in the inlet summary table printed at the end
-            # if mpi_rank == 0: print ('- loading inflow wave form:', waveform_filename)
+            if mpi_rank == 0: print('Loading inflow waveform from:', waveform_filename)
             inlet_velocity = Womersley.make_womersley_bcs_2(NS_namespace["period"], Q_means[i], waveform_filename, mesh, nu, inlet_area_i, inlet_center_i, inlet_radius_i, inlet_normal_i, velocity_degree, flat_profile_at_intlet_bc)
         
 
@@ -970,23 +969,23 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
     """
 
     #Print the flow rates, fluxes, pressure
-    if mpi_rank == 0:
-        if NS_parameters['inlet_BC_type'] == 'pulsatile':
-            flux_err = 100. * (abs(sum(flux_in.values())) - abs(sum(flux_out.values()))) / abs(sum(flux_in.values()))
-            print("~" * 88)
-            print(f"Flow Rate / Flux Error: {flux_err:.4f} %")
-            print("~" * 88)
-            print("%3s  %2s  %-16s  %-16s  %-16s  %-16s" % ('I/O', 'id', 'Flux', 'Velocity', 'Pressure', 'New Pressure'))
-            for inlet_id in inlet_ids:
-                print("%-3s  %2d  % 16.15f  % 16.15f  % 16.15f  %-16s" % ('In', inlet_id, flux_in[inlet_id], flux_in[inlet_id]/inout_area[inlet_id], pressure_in[inlet_id], 'N/A'))
-            for i, out_id in enumerate(outlet_ids):
-                print("%-3s  %2d  % 16.15f  % 16.15f  % 16.15f  % 16.15f" % ('Out', out_id, flux_out[out_id], flux_out[out_id] / inout_area[out_id], pressure_out[out_id], NS_expressions[out_id].p))
+    # if mpi_rank == 0 and tstep % 1000 == 0:
+    #     if NS_parameters['inlet_BC_type'] == 'pulsatile':
+    #         flux_err = 100. * (abs(sum(flux_in.values())) - abs(sum(flux_out.values()))) / abs(sum(flux_in.values()))
+    #         print("~" * 88)
+    #         print(f"Flow Rate / Flux Error: {flux_err:.4f} %")
+    #         print("~" * 88)
+    #         print("%3s  %2s  %-16s  %-16s  %-16s  %-16s" % ('I/O', 'id', 'Flux', 'Velocity', 'Pressure', 'New Pressure'))
+    #         for inlet_id in inlet_ids:
+    #             print("%-3s  %2d  %10.5f  %10.5f  %10.5f  %-16s" % ('In', inlet_id, flux_in[inlet_id], flux_in[inlet_id]/inout_area[inlet_id], pressure_in[inlet_id], 'N/A'))
+    #         for i, out_id in enumerate(outlet_ids):
+    #             print("%-3s  %2d  %10.5f  %10.5f  %10.5f  %10.5f" % ('Out', out_id, flux_out[out_id], flux_out[out_id] / inout_area[out_id], pressure_out[out_id], NS_expressions[out_id].p))
             
-            print("~" * 88)
+    #         print("~" * 88 + "\n \n")
 
-        sys.stdout.flush()
+    #     sys.stdout.flush()
 
-        elapsed_wall_time = _global_timer.elapsed()[0] - initial_wall_time
+    #     elapsed_wall_time = _global_timer.elapsed()[0] - initial_wall_time
 
 
     # ---------------------------------- Saving ----------------------------------------        
