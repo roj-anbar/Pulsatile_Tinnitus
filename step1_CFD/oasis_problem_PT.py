@@ -378,9 +378,9 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
 
             # Boundary conditions params
             inlet_BC_type             = get_cmdarg(commandline_kwargs, 'inlet_BC_type', 'pulsatile'), # choose from 'ramp', 'pulsatile', 'constant', 'custom'
-            Qin_constant_mLs          = get_cmdarg(commandline_kwargs, 'inflowrate_constant_mLs', 5),       # constant inflow rate, used when inlet_BC_type='constant' [mL/s]
-            ramp_slope                = get_cmdarg(commandline_kwargs, 'ramp_slope',  2),                   # slope of inflow ramp, used when inlet_BC_type='ramp'
-            ramp_offset               = get_cmdarg(commandline_kwargs, 'ramp_offset', 2),                   # offset of inflow ramp, used when inlet_BC_type='ramp'
+            Qin_constant_mLs          = get_cmdarg(commandline_kwargs, 'inflowrate_constant_mLs', 5.0),       # constant inflow rate, used when inlet_BC_type='constant' [mL/s]
+            ramp_slope                = get_cmdarg(commandline_kwargs, 'ramp_slope',  2.0),                   # slope of inflow ramp, used when inlet_BC_type='ramp'
+            ramp_offset               = get_cmdarg(commandline_kwargs, 'ramp_offset', 2.0),                   # offset of inflow ramp, used when inlet_BC_type='ramp'
             not_zero_pressure_outlets = not get_cmdarg(commandline_kwargs, 'zero_pressure_outlets', False),
             include_gravity           = get_cmdarg(commandline_kwargs, 'include_gravitational_effects', False),
             flat_profile_at_intlet_bc = get_cmdarg(commandline_kwargs, 'flat_profile_at_intlet_bc', False),
@@ -561,16 +561,17 @@ def ramp_inflowrate(t, slope=2, offset=0.01):
 def constant_inflowrate(t, Q=5.0, ramp_duration=50.0):
     """
     Constant flowrate for the 'constant' inlet_BC_type, with a short linear ramp-up
-    from 0 to Q at the start of the simulation to avoid initialization shocks.
+    from a small initial value to Q at the start of the simulation to avoid initialization shocks.
     Returns Q_inflow in mL/s.
 
     t [ms]            : simulation time [ms]
     Q [mL/s]          : desired constant flowrate, set via the 'inflowrate_constant_mLs' commandline parameter (default 5.0)
-    ramp_duration[ms] : duration of the ramp-up,(default 50.0)
+    ramp_duration[ms] : duration of the ramp-up (default 50.0)
     """
+    Q_start = 0.01
     if t >= ramp_duration:
         return Q
-    return Q * (t / ramp_duration)
+    return Q_start + (Q - Q_start) * (t / ramp_duration)
 
 
 def poiseuille_inlet_velocity(mesh, ds_inlet, Q_inflow, **NS_namespace):
