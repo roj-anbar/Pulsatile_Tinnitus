@@ -1,27 +1,25 @@
 #!/bin/bash
 #-----------------------------------------------------------------------------------------------------------------------
-# run_oasis_PT.sh
+# run_oasis_case_casename.sh
 # Case-specific launcher for Oasis CFD jobs on SLURM (Trillium style clusters).
 #
 # __author__ = Rojin Anbarafshan <rojin.anbar@gmail.com>
 # __date__   = 2025-09
 #
 # PURPOSE:
-#   - Define all case parameters for CFD in one place and submit oasis_solver_PT.sh via sbatch.
+#   - Define all case parameters for CFD in one place and submit oasis-solver.sh via sbatch.
 #   - Optional flags let you override key settings without editing the file.
 #
 # REQUIREMENTS:
-#   - oasis_solver_PT.sh (the job script this wrapper submits)
-#   - oasis_problem_PT.py (required in oasis_solver_PT.sh)
+#   - oasis-solver.sh (the job script this wrapper submits)
 #
 # EXECUTION:
 #   - Run this script from terminal by:
-#     <./run_oasis_PT.sh>
+#     <./run_oasis_case_casename.sh>
 #
 # IMPORATNT NOTES:
-#   - This script should be ran from the PT case-specific directory containing the mesh data (under /data folder).
+#   - This script should be ran from the PT case directory containing the mesh data (under /data folder).
 #   - "PATH_OASIS_SOLVER" which is the path to "oasis_solver_PT.sh" should be modified for each user.
-#   - No need to copy oasis_solver_PT.sh and oasis_problem_PT.py for each case (just have these 2 scripts in one directory and call it using "PATH_OASIS_SOLVER" variable).
 #
 # Adapted from solver-v2.sh written by 2022 Anna Haley (ahaley@mie.utoronto.ca) and solver.sh written by 2018 Mehdi Najafi (mnuoft@gmail.com). 
 # Copyright (C) 2025 University of Toronto, Biomedical Simulation Lab.
@@ -51,22 +49,25 @@ set -a
 
 scinet_user=ranbar                # your cluster username (need to specify this or this won't work at all)
 group_name=def-steinman           # group allocation to run the job under
-debug=off                          # job partition -> choose between 'on'/'off' (Whether or not you are using debug node)
+debug=off                         # job partition -> choose between 'on'/'off' (Whether or not you are using debug node)
 num_cores=100                     # number of cores to use per node (everything runs on a single node) 
-required_time="15:59:59"          # amount of time cluster will need to run the case (max 24 hours)
+required_time="08:00:00"          # amount of time cluster will need to run the case (max 24 hours)
 post_processing_time_minutes=180  # amount of time needed to post-process the case (this is run on a single proc)
 
-casename="PTSeg028_base_0p64"          # What your case will be called in the output files & on cluster -- should be the same name as this script without the sh
-cycles=6                          # number of cycles to run, determines total simulation time (default: 2)
+casename="PTSeg106_base_0p64"     # What your case will be called in the output files & on cluster -- should be the same name as this script without the sh
+cycles=3                          # number of cycles to run, determines total simulation time (default: 2)
 period=915.0                      # waveform period [ms] (default: 915 ms)
 timesteps_per_cycle=10000         # number of timesteps for each cycle (default: 2000)
 viscosity_mu_Pas=0.0037           # dynamic viscosity [Pa.s] (default: 0.0037 Pa.s)
 density_kgm3=1057                 # blood density [kg/m3] (default: 1057 kg/m3)
 uOrder=1                          # velocity FE order (default: 1)
-inlet_BC_type="ramp"              # type of the inlet boundary condition --> options: {'pulsatile', 'ramp', 'custom'} (default: 'pulsatile')
+inlet_BC_type="pulsatile"         # type of the inlet boundary condition --> options: {'pulsatile', 'ramp', 'custom'} (default: 'pulsatile')
+#ramp_slope=3                     # slope of inflow ramp [mL/s2], used when inlet_BC_type='ramp' (default: 2.0)
+#ramp_offset=1.5                  # offset of inflow ramp [mL/s], used when inlet_BC_type='ramp' (default: 2.0)
+#inflowrate_constant_mLs=3.73      # constant inflow rate [mL/s], used when inlet_BC_type='constant' (default: 5.0)
 
-save_first_cycle=True             # flag to save first cycle or not (default: False)
-save_frequency=1                  # write solution every N steps (default: 5)
+save_first_cycle=False             # flag to save first cycle or not (default: False)
+save_frequency=10                  # write solution every N steps (default: 5)
 checkpoint=500                    # write restart every N steps
 
 set +a
