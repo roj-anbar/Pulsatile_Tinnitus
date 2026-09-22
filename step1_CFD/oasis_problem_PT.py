@@ -29,13 +29,12 @@
 #   - checkpoint           : write restart every N steps
 #   - inlet_BC_type        : type of the inlet boundary condition --> choose from: {'pulsatile', 'ramp', 'constant'} (default is 'pulsatile')
 #
-# Optional
+# OPTIONAL:
 #   - restart_folder           : path to a previous results folder to restart from
 #   - zero_pressure_outlets    : set True to enforce p=0 at all outlets (default: False)
 #   - save_first_cycle         : set True to also save the spin-up cycle (default: False)
 #   - flat_profile_at_intlet_bc: set True for plug/flat inlet profile (default: False)
 #   - inflowrate_constant_mLs  : constant inflow rate [mL/s], used when inlet_BC_type='constant' (default: 5.0)
-#
 #
 # OUTPUTS:
 #   - Results written under ./results/{case_fullname}/
@@ -633,14 +632,7 @@ def poiseuille_inlet_velocity(mesh, ds_inlet, Q_inflow, **NS_namespace):
     # Obtain inlet poiseuille velocity (one component per axis)
     uin_expressions = [[],[],[]]
 
-    # The ramp equation for inlet flowrate is embedded in the below Kernel: Q_in = 2*t/1000 + 0.01 -> t is in [ms]
-    # kernel = (
-    #     "-ncomp * (2.0 * (2*(t/1000) + 0.01)/ area) * (1.0 - "
-    #     "( pow((x[0]-c0) - n0 * ((x[0]-c0)*n0 + (x[1]-c1)*n1 + (x[2]-c2)*n2), 2) + "
-    #     "  pow((x[1]-c1) - n1 * ((x[0]-c0)*n0 + (x[1]-c1)*n1 + (x[2]-c2)*n2), 2) + "
-    #     "  pow((x[2]-c2) - n2 * ((x[0]-c0)*n0 + (x[1]-c1)*n1 + (x[2]-c2)*n2), 2) ) "
-    #     " / (R*R) )"
-    # )
+    # The poiseuille velocity profile kernel:
 
     kernel = (
         "-ncomp * (2.0 * Q_inflow/ area) * (1.0 - "
@@ -650,11 +642,21 @@ def poiseuille_inlet_velocity(mesh, ds_inlet, Q_inflow, **NS_namespace):
         " / (R*R) )"
     )
 
+    # The ramp equation for inlet flowrate is embedded in the below Kernel: Q_in = 2*t/1000 + 0.01 -> t is in [ms]
+    # kernel = (
+    #     "-ncomp * (2.0 * (2*(t/1000) + 0.01)/ area) * (1.0 - "
+    #     "( pow((x[0]-c0) - n0 * ((x[0]-c0)*n0 + (x[1]-c1)*n1 + (x[2]-c2)*n2), 2) + "
+    #     "  pow((x[1]-c1) - n1 * ((x[0]-c0)*n0 + (x[1]-c1)*n1 + (x[2]-c2)*n2), 2) + "
+    #     "  pow((x[2]-c2) - n2 * ((x[0]-c0)*n0 + (x[1]-c1)*n1 + (x[2]-c2)*n2), 2) ) "
+    #     " / (R*R) )"
+    # )
+
     for j in range(dim):      
-        uin_expressions[j] = Expression(kernel, ncomp=normal[j], t=0., area=area,
+        uin_expressions[j] = Expression(kernel, ncomp=normal[j], Q_inflow=Q_inflow, area=area,
                                         c0=c0, c1=c1, c2=c2,
                                         n0=n0, n1=n1, n2=n2,
                                         R=R, degree=2)
+        #uin_expressions[j] = Expression(kernel, ncomp=normal[j], t=0., area=area, c0=c0, c1=c1, c2=c2, n0=n0, n1=n1, n2=n2, R=R, degree=2)
 
     return uin_expressions
 
@@ -752,9 +754,9 @@ def create_bcs(u_, p_, p_1, t, NS_expressions, V, Q, area_ratio, mesh, subdomain
         for inlet in NS_expressions["inlet"]:
             for uc in inlet: uc.set_t(t)
 
-    elif NS_parameters['inlet_BC_type'] == 'ramp': # Added by Rojin A.
-        for inlet in NS_expressions["inlet"]:
-            for uc in inlet: uc.t = t
+    # elif NS_parameters['inlet_BC_type'] == 'ramp': # Added by Rojin A.
+    #     for inlet in NS_expressions["inlet"]:
+    #         for uc in inlet: uc.t = t
 
 
     if mpi_rank == 0: print(firststr)
@@ -850,18 +852,25 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
 
     #boundary_markers = subdomain_data # used in commented-out area assembly lines below
 
-    # Update boundary condition
+    # Update boundary condition (has to loop over all 3 expressions [expr_x, expr_y, expr_z])
     if NS_parameters['inlet_BC_type'] == 'pulsatile': # Added by Rojin A.
-        for inlet in NS_expressions["inlet"]:
-            for uc in inlet: uc.set_t(t)
+        for inlet in NS_expressions["inlet"]: # loops over inlets
+            for uc in inlet:
+                uc.set_t(t) #updating time for the kernel
 
     elif NS_parameters['inlet_BC_type'] == 'ramp': # Added by Rojin A.
-        for inlet in NS_expressions["inlet"]:
-            for uc in inlet: uc.t = t
+        Q_inflow_now = ramp_inflowrate(t, NS_parameters['ramp_slope'], NS_parameters['ramp_offset'])
+        for inlet in NS_expressions["inlet"]: 
+            for uc in inlet:
+                #uc.t = t #updating time for previous kernel
+                uc.Q_inflow = Q_inflow_now
     
     elif NS_parameters['inlet_BC_type'] == 'constant':
+        Q_inflow_now = constant_inflowrate(t, NS_parameters['Qin_constant_mLs'])
         for inlet in NS_expressions["inlet"]:
-            for uc in inlet: uc.t = t
+            for uc in inlet:
+                # uc.t = t
+                uc.Q_inflow = Q_inflow_now
                 
     timestep_cpu_time = time.time() - current_time
     current_time = time.time()
