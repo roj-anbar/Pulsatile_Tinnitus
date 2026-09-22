@@ -151,10 +151,12 @@ def get_file_paths(results_folder):
 
     return files
 
-def read_mesh_info(mesh_info_path, key):
+def read_mesh_info(mesh_info_path, boundary_key):
     """
     Parse the casename.info file for <INLETS> or <OUTLETS> blocks.
     Retrive the boundary information from the info file.
+    Each line has the format:
+        id  waveform_tag  (cx,cy,cz)  (nx,ny,nz)  radius  area  flowrate_or_ratio
 
     Returns:
         boundary_ids  : list[int]      mesh boundary tag IDs
@@ -162,15 +164,14 @@ def read_mesh_info(mesh_info_path, key):
         areas         : list[float]    areas (mm^2)
         waveform_tags : list[str]      waveform file tags for inlets; OR 'None' for outlets
     """
-    # Extract inflow rate and outflow split ratios
+    # Extract inflow rate and outflow split ratios:
     # Sample
-    # p162
     # <INLETS>
-    # 3 ICA_V27:FC_MCA_10 (3.4278309480,13.32740523503,-28.2355071983) (-0.2155297545,0.12005896011,-0.9690886291) 1.7649351905 9.7860492613   A*0.27
+    # 3 ICA_V27:FC_MCA_10 (3.4,13.3,-28.2) (-0.2,0.1,-0.9) 1.76 9.78 5.16
     #
     # <OUTLETS>
-    # 1  None  (-16.8228963362,-1.42906111694,17.7845745237)  (-0.9847740285,-0.16502447805,-0.0546537689)   0.8568220486   2.3063814691   0.3318956234191912
-    # 2  None    (7.9704219814,-9.22385217254,15.0763376349)   (0.7251682706,-0.49373752256,-0.4799523290)   1.3398999124   5.6402011155   0.6681043765808088
+    # 1  None  (-16.8,-1.4,17.7)  (-0.9,-0.1,-0.1)   0.86   2.33   0.33
+    # 2  None    (7.9,-9.2,15.9)   (0.7,-0.4,-0.4)   1.33   5.64   0.66
 
     # Initialize outputs
     boundary_ids = []
@@ -184,7 +185,7 @@ def read_mesh_info(mesh_info_path, key):
 
     # Looking for the given boundary key in the info file
     boundary_info_start = info.find(boundary_key)
-
+    
     # In case there is not info for the boundary
     if boundary_info_start < 0: return [], [], [], []
 
@@ -237,15 +238,6 @@ def read_mesh_info(mesh_info_path, key):
 
     return boundary_ids, flowrates, areas, waveform_tags
 
-
-#UNUSED FUNCTIONS
-"""
-def step_str(i, l=10):
-    # Get the zero leading string for given time step No.
-    a = str(i)
-    la = l - len(a)
-    return '0'*la + a
-
 def beta(err, p):
     if p < 0:
         if err >= 0.1:
@@ -257,6 +249,15 @@ def beta(err, p):
             return 1.5
         else:
             return 1.0  + 5*err**2
+
+
+#UNUSED FUNCTIONS
+"""
+def step_str(i, l=10):
+    # Get the zero leading string for given time step No.
+    a = str(i)
+    la = l - len(a)
+    return '0'*la + a
 
 def w(P):
     return 1.0 / ( 1.0 + 20.0*abs(P))
@@ -302,9 +303,8 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
         print('<!> Unable to run without a mesh file.')
 
     # Obtain mesh information
-    id_in, Q_means, inlet_area, fcs    = read_mesh_info(mesh_info_path, '<INLETS>')
-    id_out, area_ratio, outlet_area, _ = read_mesh_info(mesh_info_path, '<OUTLETS>')
-
+    inlet_ids, Q_means, inlet_area, waveform_tags  = read_mesh_info(mesh_info_path, '<INLETS>')
+    outlet_ids, area_ratio, outlet_area, _         = read_mesh_info(mesh_info_path, '<OUTLETS>')
 
     restart_folder = get_cmdarg(commandline_kwargs, 'restart_folder')
 
@@ -313,7 +313,6 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
         NS_parameters.update(pickle.load(f))
         f.close()
         NS_parameters['restart_folder'] = restart_folder
-        #Assign case name: pipe_ipcs_ab_cn_VWI_03k_LICA_constant_ts10000_cycles3_uOrder1
         case_name = NS_parameters['case_name']
         case_fullname = NS_parameters['case_fullname']
 
@@ -346,14 +345,16 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
         nu_mm2ms = nu_m2s*1000 #convert from SI to units that oasis expects
 
         NS_parameters.update(
+            # Case-specific params
             case_name           = case_name,
             case_fullname       = case_fullname,
             results_folder      = results_folder,
             mesh_path           = mesh_path, 
-            id_in               = id_in,
-            id_out              = id_out,
+            inlet_ids           = inlet_ids,
+            outlet_ids          = outlet_ids,
             area_ratio          = area_ratio,
 
+            # Physics params
             no_of_cycles        = no_of_cycles,                                                         # total number of cycles
             period              = period,                                                               # time of a single cycle [ms]
             T                   = period * no_of_cycles,                                                # total simulation time [ms]
@@ -362,6 +363,7 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
             nu                  = nu_mm2ms, #get_cmdarg(commandline_kwargs, 'viscosity', 0.0035),       # kinematic viscosity [mm^2/ms]
             velocity_degree     = get_cmdarg(commandline_kwargs, 'uOrder', 1),                          # FE degree of velocity
 
+            # I/O params
             save_freq           = get_cmdarg(commandline_kwargs, 'save_frequency', 5),                  # save every N steps 
             save_first_cycle    = get_cmdarg(commandline_kwargs, 'save_first_cycle', False),            # flag to save first cycle or not
             save_exact_tsteps   = get_cmdarg(commandline_kwargs, 'save_exact_tsteps', False),           # save exact timesteps
@@ -375,11 +377,14 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
             #print_WSS          = get_cmdarg(commandline_kwargs, 'print_WSS', True),
             #plot_interval      = 10e10,
 
-
-            inlet_BC_type               = get_cmdarg(commandline_kwargs, 'inlet_BC_type', 'pulsatile'), # choose from 'ramp', 'pulsatile', 'constant', 'custom'
-            not_zero_pressure_outlets   = not get_cmdarg(commandline_kwargs, 'zero_pressure_outlets', False),
-            include_gravity             = get_cmdarg(commandline_kwargs, 'include_gravitational_effects', False),
-            flat_profile_at_intlet_bc   = get_cmdarg(commandline_kwargs, 'flat_profile_at_intlet_bc', False),
+            # Boundary conditions params
+            inlet_BC_type             = get_cmdarg(commandline_kwargs, 'inlet_BC_type', 'pulsatile'), # choose from 'ramp', 'pulsatile', 'constant', 'custom'
+            Qin_constant_mLs          = get_cmdarg(commandline_kwargs, 'inflowrate_constant_mLs', 5),       # constant inflow rate, used when inlet_BC_type='constant' [mL/s]
+            ramp_slope                = get_cmdarg(commandline_kwargs, 'ramp_slope',  2),                   # slope of inflow ramp, used when inlet_BC_type='ramp'
+            ramp_offset               = get_cmdarg(commandline_kwargs, 'ramp_offset', 2),                   # offset of inflow ramp, used when inlet_BC_type='ramp'
+            not_zero_pressure_outlets = not get_cmdarg(commandline_kwargs, 'zero_pressure_outlets', False),
+            include_gravity           = get_cmdarg(commandline_kwargs, 'include_gravitational_effects', False),
+            flat_profile_at_intlet_bc = get_cmdarg(commandline_kwargs, 'flat_profile_at_intlet_bc', False),
             
             use_krylov_solvers  = True,
             krylov_solvers      = dict(
@@ -422,22 +427,28 @@ def mesh(mesh_path, **NS_namespace):
     m.mpi_comm = mpi_comm
 
     # Mesh statistics
-    num_points    = Function(FunctionSpace(m, "CG", 1)).vector().size()
-    vol           = MPI.sum(MPI.comm_world, assemble(Constant(1)*dx(m)))
-    cell_dia      = [Cell(m,i).circumradius() for i in range (m.num_cells())]
-    avg_cell_dia  = sum(cell_dia) / len(cell_dia)
-    num_cells     = int( MPI.sum(MPI.comm_world, m.num_cells()) )
-    #num_points   = int( MPI.sum(MPI.comm_world, m.num_vertices()) ) // shared points?
-    hmin          = MPI.min(MPI.comm_world, m.hmin()) #[mm]
-    hmax          = MPI.max(MPI.comm_world, m.hmax()) #[mm]
-    num_facets    = int( MPI.sum(MPI.comm_world, m.num_facets()) )
+    num_points        = Function(FunctionSpace(m, "CG", 1)).vector().size()
+    mesh_volume       = MPI.sum(MPI.comm_world, assemble(Constant(1)*dx(m)))
+    cell_diameter     = [Cell(m,i).circumradius() for i in range (m.num_cells())]
+    avg_cell_diameter = sum(cell_diameter) / len(cell_diameter)
+    num_cells         = int( MPI.sum(MPI.comm_world, m.num_cells()) )
+    #num_points       = int( MPI.sum(MPI.comm_world, m.num_vertices()) ) // shared points?
+    hmin              = MPI.min(MPI.comm_world, m.hmin()) #[mm]
+    hmax              = MPI.max(MPI.comm_world, m.hmax()) #[mm]
+    num_facets        = int( MPI.sum(MPI.comm_world, m.num_facets()) )
     
-    pss = mesh_path.rfind('/')
-    pss = 0 if pss < 0 else pss+1
-    pos = mesh_path.rfind('.xml.gz')
-    if pos < 0: pos = mesh_path.rfind('.')
-    mesh_h5_filename = mesh_path[pss:pos]+'.h5'
-    mesh_h5_filepathname = os.path.join( NS_namespace['results_folder'], mesh_h5_filename)
+    # pss = mesh_path.rfind('/')
+    # pss = 0 if pss < 0 else pss+1
+    # pos = mesh_path.rfind('.xml.gz')
+    # if pos < 0: pos = mesh_path.rfind('.')
+    # mesh_h5_filename = mesh_path[pss:pos]+'.h5'
+    # mesh_h5_filepathname = os.path.join( NS_namespace['results_folder'], mesh_h5_filename)
+
+    # Create HDF5 mesh filename
+    mesh_stem        = os.path.basename(mesh_path).replace('.xml.gz', '').replace('.xml', '')
+    mesh_h5_filename = mesh_stem + '.h5'
+    mesh_h5_filepath = os.path.join(NS_namespace['results_folder'], mesh_h5_filename)
+
 
     # Write mesh parameters to log
     if mpi_rank == 0:
@@ -446,41 +457,42 @@ def mesh(mesh_path, **NS_namespace):
         print ("Number of cells:            ", num_cells)
         print ("Number of points:           ", num_points)
         print ("Number of facets:           ", num_facets)
-        print ("Mesh Volume:                ", vol)
+        print ("Mesh Volume:                ", mesh_volume)
         print ("Min cell diameter [mm]:     ", hmin)
         print ("Max cell diameter [mm]:     ", hmax)
-        print ("Average cell diameter [mm]: ", avg_cell_dia)
+        print ("Average cell diameter [mm]: ", avg_cell_diameter)
         sys.stdout.flush()
         #info(m, False)
 
-    fd = MeshFunction("size_t", m, m.geometry().dim() - 1, m.domains())
+    boundary_markers = MeshFunction("size_t", m, m.geometry().dim() - 1, m.domains())
 
     inout_area = {}
     dS = {}
-    for id in NS_namespace['id_in']:
-        dS[id] = ds(id, domain=m, subdomain_data=fd)
-        inout_area[id] = abs( assemble(1.0*dS[id]) )
-    for id in NS_namespace['id_out']:
-        dS[id] = ds(id, domain=m, subdomain_data=fd)
-        inout_area[id] = abs( assemble(1.0*dS[id]) )
+    for inlet_id in NS_namespace['inlet_ids']:
+        dS[inlet_id] = ds(inlet_id, domain=m, subdomain_data=boundary_markers)
+        inout_area[inlet_id] = abs( assemble(1.0*dS[inlet_id]) )
+    for outlet_id in NS_namespace['outlet_ids']:
+        dS[outlet_id] = ds(outlet_id, domain=m, subdomain_data=boundary_markers)
+        inout_area[outlet_id] = abs( assemble(1.0*dS[outlet_id]) )
+    
     NS_namespace['inout_area'] = inout_area
 
     normals = FacetNormal(m)
 
     if mpi_rank == 0:
-        print('writing ', mesh_h5_filepathname)
+        print('writing ', mesh_h5_filepath)
         sys.stdout.flush()
 
     # Output the Mesh file into HDF5 format
-    Hdf = HDF5File(m.mpi_comm(), mesh_h5_filepathname, "w")
+    Hdf = HDF5File(m.mpi_comm(), mesh_h5_filepath, "w")
     Hdf.write(m, '/Mesh')
     Hdf.close()
 
-    h5stdio.SetMeshInfo(mesh_h5_filepathname, mesh_h5_filename, num_cells, num_points)
+    h5stdio.SetMeshInfo(mesh_h5_filepath, mesh_h5_filename, num_cells, num_points)
 
     print_section_footer()
 
-    return m, dS, fd, normals, m.geometry().dim(), inout_area
+    return m, dS, boundary_markers, normals, m.geometry().dim(), inout_area
 
 # Oasis hook: Overrides the default parameters
 def post_import_problem(NS_parameters, mesh, commandline_kwargs, NS_expressions, **NS_namespace):
@@ -495,15 +507,15 @@ def post_import_problem(NS_parameters, mesh, commandline_kwargs, NS_expressions,
 
     # If the mesh is a callable function, then create the mesh here.
     if callable(mesh):
-        mesh, dS, fd, nors, dim, inout_area= mesh(**NS_parameters)
+        mesh, dS, boundary_markers, normals, dimension, inout_area= mesh(**NS_parameters)
 
     assert(isinstance(mesh, Mesh))
 
     # Returned dictionary to be updated in the NS namespace
-    d = dict(mesh=mesh, dS=dS, subdomain_data=fd, normals=nors, dim=dim, inout_area=inout_area)
-    d.update(NS_parameters)
-    d.update(NS_expressions)
-    return d
+    dic = dict(mesh=mesh, dS=dS, subdomain_data=boundary_markers, normals=normals, dim=dimension, inout_area=inout_area)
+    dic.update(NS_parameters)
+    dic.update(NS_expressions)
+    return dic
 
 
 
@@ -536,30 +548,30 @@ def flow_waveform(Qmean, cycles, period, time_steps, FC):
     return t_values, Q_values
 """
 
-# def ramp_inflowrate(t, slope=2, offset=0.01):
-#     """
-#     Linear ramp flowrate for the 'ramp' inlet_BC_type.
-#     t in ms (simulation time); returns Q_inflow in mL/s (consistent legacy units).
+def ramp_inflowrate(t, slope=2, offset=0.01):
+    """
+    Linear ramp flowrate for the 'ramp' inlet_BC_type.
+    t in ms (simulation time); returns Q_inflow in mL/s (consistent legacy units).
 
-#     slope  : ramp rate [mL/s^2] (t/1000 converts ms -> s, so Q grows by `slope` mL/s every second)
-#     offset : starting flowrate at t=0 [mL/s]
-#     """
-#     return slope * t / 1000 + offset
+    slope  : ramp rate [mL/s^2] (t/1000 converts ms -> s, so Q grows by `slope` mL/s every second)
+    offset : starting flowrate at t=0 [mL/s]
+    """
+    return slope * t / 1000 + offset
 
 
-# def constant_inflowrate(t, Q=5.0, ramp_duration=50.0):
-#     """
-#     Constant flowrate for the 'constant' inlet_BC_type, with a short linear ramp-up
-#     from 0 to Q at the start of the simulation to avoid initialization shocks.
-#     Returns Q_inflow in mL/s.
+def constant_inflowrate(t, Q=5.0, ramp_duration=50.0):
+    """
+    Constant flowrate for the 'constant' inlet_BC_type, with a short linear ramp-up
+    from 0 to Q at the start of the simulation to avoid initialization shocks.
+    Returns Q_inflow in mL/s.
 
-#     t [ms]            : simulation time [ms]
-#     Q [mL/s]          : desired constant flowrate, set via the 'inflowrate_constant_mLs' commandline parameter (default 5.0)
-#     ramp_duration[ms] : duration of the ramp-up,(default 50.0)
-#     """
-#     if t >= ramp_duration:
-#         return Q
-#     return Q * (t / ramp_duration)
+    t [ms]            : simulation time [ms]
+    Q [mL/s]          : desired constant flowrate, set via the 'inflowrate_constant_mLs' commandline parameter (default 5.0)
+    ramp_duration[ms] : duration of the ramp-up,(default 50.0)
+    """
+    if t >= ramp_duration:
+        return Q
+    return Q * (t / ramp_duration)
 
 
 def poiseuille_inlet_velocity(mesh, ds_inlet, Q_inflow, **NS_namespace):
@@ -631,7 +643,7 @@ def poiseuille_inlet_velocity(mesh, ds_inlet, Q_inflow, **NS_namespace):
     # )
 
     kernel = (
-        "-ncomp * (2.0 * (3.73)/ area) * (1.0 - "
+        "-ncomp * (2.0 * Q_inflow/ area) * (1.0 - "
         "( pow((x[0]-c0) - n0 * ((x[0]-c0)*n0 + (x[1]-c1)*n1 + (x[2]-c2)*n2), 2) + "
         "  pow((x[1]-c1) - n1 * ((x[0]-c0)*n0 + (x[1]-c1)*n1 + (x[2]-c2)*n2), 2) + "
         "  pow((x[2]-c2) - n2 * ((x[0]-c0)*n0 + (x[1]-c1)*n1 + (x[2]-c2)*n2), 2) ) "
@@ -650,93 +662,99 @@ def poiseuille_inlet_velocity(mesh, ds_inlet, Q_inflow, **NS_namespace):
 # Create Boundary conditions
 def create_bcs(u_, p_, p_1, t, NS_expressions, V, Q, area_ratio, mesh, subdomain_data, 
                dS, normals, results_folder, mesh_path, nu,
-               id_in, id_out, velocity_degree, pressure_degree, no_of_cycles,
+               inlet_ids, outlet_ids, velocity_degree, pressure_degree, no_of_cycles,
                T, not_zero_pressure_outlets, flat_profile_at_intlet_bc, **NS_namespace):
 
     print_section_header('Inspecting boundaries and making boundary conditions:')
 
     # Mesh function / boundaries
-    fd = subdomain_data
+    boundary_markers = subdomain_data
 
     # Extract inflow rate and outflow split ratios
     mesh_info_path = path.join('./data', NS_namespace["mesh_name"]+'.info')
-    id_in, Q_means, inlet_area, fcs     = read_mesh_info(mesh_info_path, '<INLETS>')
-    id_out, area_ratio, outlet_area, _  = read_mesh_info(mesh_info_path, '<OUTLETS>')
+    inlet_ids, Q_means, inlet_area, waveform_tags = read_mesh_info(mesh_info_path, '<INLETS>')
+    outlet_ids, area_ratio, outlet_area, _        = read_mesh_info(mesh_info_path, '<OUTLETS>')
 
 
     # 1. Inlet BCs
-    # Womersley boundary condition at inlet
-    id_in_count = len(id_in)
+    inlet_ids_count = len(inlet_ids)
     if mpi_rank == 0:
         print ('Inlet BC type is:', NS_parameters['inlet_BC_type'])
-        print('Inlet', 'BCs' if id_in_count > 1 else 'BC', 'on boundaries:' if id_in_count > 1 else 'on boundary', id_in)
+        print(f'Inlet BCs on boundaries:{inlet_ids}')
         firststr = '    %8s    %-12s    %10s    %15s    %6s'%('inlet_id','wave_form','period(ms)','flowrate(mL/s)','cells')
         secondstr = 'Inlets & Outlets Information\n'+'  id   %-45s  %-45s   %-12s   %-12s'%('center','normal','radius','area')
-
   
     inlets = []
     inout_area = {}
     bc_inlet_u = [[],[],[]]
 
-    for i in range(id_in_count):
+    # Loop over inlets
+    for i in range(inlet_ids_count):
 
-        fcs_i_filename = fcs[i].split(':')[-1]
-        tmp_a, tmp_c, tmp_r, tmp_n = Womersley.compute_boundary_geometry_acrn(mesh, dS[id_in[i]], normals)
+        # Computing inlet area
+        ds_inlet = dS[inlet_ids[i]]
+
+        # Obtain inlet params
+        waveform_filename = waveform_tags[i].split(':')[-1]
+        tmp_a, tmp_c, tmp_r, tmp_n = Womersley.compute_boundary_geometry_acrn(mesh, dS[inlet_ids[i]], normals)
         
         # Create the inlet flow based on the flow type given by user
 
         # Option1: Pulsatile Womersley
         if NS_parameters['inlet_BC_type'] == 'pulsatile': #if fcs_i_filename[0:3] == 'FC_':
-            if mpi_rank == 0: print ('- loading inflow wave form:', fcs_i_filename)
-            inlet_i = Womersley.make_womersley_bcs_2(NS_namespace["period"], Q_means[i], fcs_i_filename, mesh, nu, tmp_a, tmp_c, tmp_r, tmp_n, velocity_degree, flat_profile_at_intlet_bc)
+            if mpi_rank == 0: print ('- loading inflow wave form:', waveform_filename)
+            inlet_i = Womersley.make_womersley_bcs_2(NS_namespace["period"], Q_means[i], waveform_filename, mesh, nu, tmp_a, tmp_c, tmp_r, tmp_n, velocity_degree, flat_profile_at_intlet_bc)
         
 
-        # Added by Rojin A.
-        # Option2: Ramp inflow (linearly increasing)
+        # Option2: Ramp inflow (linearly increasing) --> added by Rojin A.
         elif NS_parameters['inlet_BC_type'] == 'ramp':
-  
+            
+            Q_inflow = ramp_inflowrate(t, NS_parameters['ramp_slope'], NS_parameters['ramp_offset'])
+            inlet_i = poiseuille_inlet_velocity(mesh, ds_inlet, Q_inflow)
+
             # Surface integrand over the boundaries
-            inlet_tag = id_in[i] #inlet_tag = 2
-            ds_inlet = dS[inlet_tag]
-            Q_inflow = 3.73 #2*t/1000 + 0.01 #[ml/s]
+            # inlet_tag = id_in[i] #inlet_tag = 2
+            # ds_inlet = dS[inlet_tag]
+            # Q_inflow = 3.73 #2*t/1000 + 0.01 #[ml/s]
 
             # for debugging
             #if mpi_rank == 0:
                 #print('Inlet tag = ', inlet_tag) 
                 #print('ds_inlet  = ', ds_inlet)  # for debugging
 
+            
+
+        # Option3: Constant flowrate (steady)
+        elif NS_parameters['inlet_BC_type'] == 'constant':
+            Q_inflow = constant_inflowrate(t, NS_parameters['Qin_constant_mLs'])
             inlet_i = poiseuille_inlet_velocity(mesh, ds_inlet, Q_inflow)
 
-
-        else: #THIS DOES NOT CURRENTLY WORK #NS_parameters['inlet_BC_type'] == 'custom'
+        else:
             if mpi_rank == 0:
-                print ('- loading custom inflowrate function:', fcs_i_filename)
-            inlet_i = CustomFunction.make_custom_function_bcs(NS_namespace["period"], Q_means[i], fcs_i_filename, mesh, nu, tmp_a, tmp_c, tmp_r, tmp_n, velocity_degree, flat_profile_at_intlet_bc)
-            
+                print ('The inlet_BC_type is not recognized. Choose from {<pulsatile>, <ramp>, <constant>}')
+     
         inlets.append(inlet_i)
-        bci = [DirichletBC(V, ilt, fd, id_in[i]) for ilt in inlet_i]
+        bci = [DirichletBC(V, ilt, boundary_markers, inlet_ids[i]) for ilt in inlet_i]
         for j in range(3): bc_inlet_u[j].append(bci[j])
 
         count = len( bci[0].get_boundary_values() )
-        inout_area[id_in[i]] = tmp_a
+        inout_area[inlet_ids[i]] = tmp_a
         
         if mpi_rank == 0:
             # print (dir(dS[id_in[i]]))
-            firststr += "\n    %8d    %-12s    %10g    %15.8g    %6d"%(id_in[i], fcs_i_filename, NS_namespace["period"], Q_means[i], count)
-            secondstr += "\nI %2d   %-45s  %-45s   %-12.10f   %-12.10f"%( id_in[i], tuple2str(tmp_c), tuple2str(tmp_n), tmp_r, tmp_a)
+            firststr += "\n    %8d    %-12s    %10g    %15.8g    %6d"%(inlet_ids[i], waveform_filename, NS_namespace["period"], Q_means[i], count)
+            secondstr += "\nI %2d   %-45s  %-45s   %-12.10f   %-12.10f"%( inlet_ids[i], tuple2str(tmp_c), tuple2str(tmp_n), tmp_r, tmp_a)
 
     NS_expressions["inlet"] = inlets
 
     # Reset the time in boundary condition expressions
     if NS_parameters['inlet_BC_type'] == 'pulsatile': # Added by Rojin A.
         for inlet in NS_expressions["inlet"]:
-            for uc in inlet:
-                uc.set_t(t)
+            for uc in inlet: uc.set_t(t)
 
     elif NS_parameters['inlet_BC_type'] == 'ramp': # Added by Rojin A.
         for inlet in NS_expressions["inlet"]:
-            for uc in inlet:
-                uc.t = t
+            for uc in inlet: uc.t = t
 
 
     if mpi_rank == 0: print(firststr)
@@ -745,9 +763,10 @@ def create_bcs(u_, p_, p_1, t, NS_expressions, V, Q, area_ratio, mesh, subdomain
     # 2. Wall BCs
     # Create No-slip BCs for the velocity at the walls
     wall = Constant(0.0)
-    bc_wall = DirichletBC(V, wall, fd, 0) # wall is always with the id zero
-    bc_wall_len = len(bc_wall.get_boundary_values())
+    bc_wall = DirichletBC(V, wall, boundary_markers, 0) # wall is always with the id zero
     
+    # For DEBUG:
+    #bc_wall_len = len(bc_wall.get_boundary_values())
     #if mpi_rank == 0: print( 'Wall BC on ' + str(bc_wall_len) , 'cells')
 
 
@@ -757,13 +776,13 @@ def create_bcs(u_, p_, p_1, t, NS_expressions, V, Q, area_ratio, mesh, subdomain
 
 
     # 3. Outlet BCs
-    id_out_count = len(id_out)
+    outlet_ids_count = len(outlet_ids)
     bc_p = []
     if mpi_rank == 0:
-        print('Outlet', 'BCs' if id_out_count > 1 else 'BC', 'on boundaries:' if id_out_count > 1 else 'on boundary', id_out)
+        print(f'Outlet BCs on boundaries: {outlet_ids}')
         print("    outlet_id    mass_flow_ratio      cells")
-    for i, ind in enumerate(id_out):
-        tmp_a, tmp_c, tmp_r, tmp_n = Womersley.compute_boundary_geometry_acrn(mesh, dS[id_out[i]], normals)
+    for i, ind in enumerate(outlet_ids):
+        tmp_a, tmp_c, tmp_r, tmp_n = Womersley.compute_boundary_geometry_acrn(mesh, dS[outlet_ids[i]], normals)
         inout_area[ind] = tmp_a
         if mpi_rank == 0:
             secondstr += "\nO %2d   %-45s  %-45s   %-12.10f   %-12.10f"%( ind, tuple2str(tmp_c), tuple2str(tmp_n), tmp_r, tmp_a)
@@ -775,7 +794,7 @@ def create_bcs(u_, p_, p_1, t, NS_expressions, V, Q, area_ratio, mesh, subdomain
         else:
             p_initial = 0
         outflow = Expression("p", p=p_initial, degree=pressure_degree)
-        bc = DirichletBC(Q, outflow, fd, ind)
+        bc = DirichletBC(Q, outflow, boundary_markers, ind)
         bc_p.append(bc)
         NS_expressions[ind] = outflow
         count  = len(bc.get_boundary_values())
@@ -810,7 +829,7 @@ def pre_solve_hook(mesh, V, Q, newfolder, results_folder, u_, mesh_path,
 
 
 def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
-                  dump_stats, newfolder, id_in, files, id_out, inout_area, subdomain_data,
+                  dump_stats, newfolder, files, inlet_ids, outlet_ids, inout_area, subdomain_data,
                   normals, save_freq, save_first_cycle, hdf5_link, NS_expressions, current_cycle,
                   total_cycles, area_ratio, t, dS, timestep_cpu_time, current_time, 
                   cpu_time, final_time, timesteps, not_zero_pressure_outlets, **NS_namespace):
@@ -823,24 +842,27 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
     max_u = max(u_[i].vector().norm('linf') for i in range(mesh.geometry().dim()))
     CFL = NS_parameters['dt'] * max_u / mesh.hmin()
     
-    if mpi_rank == 0:
+    if mpi_rank == 0 and tstep % 100 == 0:
         #max_u = max(u_[0].vector().get_local().max(), u_[1].vector().get_local().max())
         #CFL = NS_parameters['dt']*max_u/mesh.hmin()
-        print(f"cycle= {current_cycle}  tstep= {tstep}  t(ms)= {t:.2f}:        CFL= {CFL:.4f}")
+        print(f"For cycle= {current_cycle}  tstep= {tstep}  t(ms)= {t:.2f}:        CFL= {CFL:.4f}")
 
-    #fd = subdomain_data # used in commented-out area assembly lines below
+
+    #boundary_markers = subdomain_data # used in commented-out area assembly lines below
 
     # Update boundary condition
     if NS_parameters['inlet_BC_type'] == 'pulsatile': # Added by Rojin A.
         for inlet in NS_expressions["inlet"]:
-            for uc in inlet:
-                uc.set_t(t)
+            for uc in inlet: uc.set_t(t)
 
     elif NS_parameters['inlet_BC_type'] == 'ramp': # Added by Rojin A.
         for inlet in NS_expressions["inlet"]:
-            for uc in inlet:
-                uc.t = t
-
+            for uc in inlet: uc.t = t
+    
+    elif NS_parameters['inlet_BC_type'] == 'constant':
+        for inlet in NS_expressions["inlet"]:
+            for uc in inlet: uc.t = t
+                
     timestep_cpu_time = time.time() - current_time
     current_time = time.time()
     cpu_time += timestep_cpu_time
@@ -854,7 +876,7 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
     pressure_in = {}
     umax_ins    = {}
     Re_ins      = {}
-    for inlet_id in id_in:
+    for inlet_id in inlet_ids:
         #inout_area[inlet_id] = abs( assemble(1.0*ds(inlet_id, domain=mesh, subdomain_data=fd)) )
         pressure_in[inlet_id] = -assemble(p_*dS[inlet_id]) / inout_area[inlet_id]
         flux_in[inlet_id]     = assemble(dot(u_, normals)*dS[inlet_id])
@@ -865,8 +887,10 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
         Re_ins[inlet_id]      = u_mean_in * (2*R_in) / NS_parameters["nu"]
 
     Q_ins_sum = sum(Q_ins.values())
-    if mpi_rank == 0 and tstep % 10 == 0:
-        print(f'Q_ins(mL/s)= {Q_ins_sum:.4f}, umax_in(m/s)= {umax_ins[id_in[0]]:.4f}, Reynolds_in= {Re_ins[id_in[0]]:.1f} \n')
+
+    # Print to log
+    if mpi_rank == 0 and tstep % 100 == 0:
+        print(f'Q_ins(mL/s)= {Q_ins_sum:.4f}, umax_in(m/s)= {umax_ins[inlet_ids[0]]:.4f}, Reynolds_in= {Re_ins[inlet_ids[0]]:.1f} \n')
 
 
 
@@ -874,14 +898,14 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
     flux_out = {}
     Q_outs =  {}
     pressure_out = {}
-    for out_id in id_out:
+    for out_id in outlet_ids:
         #inout_area[out_id] = abs( assemble(1.0*ds(out_id, domain=mesh, subdomain_data=fd)) )
         pressure_out[out_id] = assemble(p_*dS[out_id]) / inout_area[out_id]
         flux_out[out_id]     = assemble(dot(u_, normals)*dS[out_id])
         Q_outs[out_id]       = abs(flux_out[out_id])
     Q_outs_sum = sum(Q_outs.values())
 
-
+    """
     # Compute flux and update outlet pressure BCs using dual-pressure method
     # (Gin & Steinman, "A Dual-Pressure Boundary Condition for use in Simulations of Bifurcating Conduits")
     # Used for models with multiple outlets where we don't know a priori how the inflow will split between branches
@@ -917,7 +941,7 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
                     NS_expressions[out_id].p = p_old
                 else:
                     NS_expressions[out_id].p = p_old * beta(R_err, p_old) * M_err ** E
-        
+    """
 
     #Print the flow rates, fluxes, pressure
     if mpi_rank == 0:
@@ -927,15 +951,14 @@ def temporal_hook(u_, p_, p, q_, V, mesh, tstep, compute_flux,
             print(f"Flow Rate / Flux Error: {flux_err:.4f} %")
             print("~" * 88)
             print("%3s  %2s  %-16s  %-16s  %-16s  %-16s" % ('I/O', 'id', 'Flux', 'Velocity', 'Pressure', 'New Pressure'))
-            for inlet_id in id_in:
+            for inlet_id in inlet_ids:
                 print("%-3s  %2d  % 16.15f  % 16.15f  % 16.15f" % (
                     'In', inlet_id, flux_in[inlet_id], flux_in[inlet_id]/inout_area[inlet_id], pressure_in[inlet_id]))
             
-            for i, out_id in enumerate(id_out):
+            for i, out_id in enumerate(outlet_ids):
                 print("%-3s  %2d  % 16.15f  % 16.15f  % 16.15f  % 16.15f  % 16.15f" % (
                 'Out', out_id, flux_out[out_id], flux_out[out_id] / inout_area[out_id], pressure_out[out_id], NS_expressions[out_id].p))
             print("~" * 88)
-
 
         sys.stdout.flush()
 
