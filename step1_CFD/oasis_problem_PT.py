@@ -157,10 +157,10 @@ def read_mesh_info(mesh_info_path, key):
     Retrive the boundary information from the info file.
 
     Returns:
-        ids        : list[int]      boundary ids
-        idfr       : list[float]    inlet mean flows (mL/s) OR outlet ratios (unitless)
-        ida        : list[float]    areas (mm^2)
-        fcs        : list[str]      waveform tags (for inlets); '_' for outlets
+        boundary_ids  : list[int]      mesh boundary tag IDs
+        flowrates     : list[float]    mean flowrates [mL/s] for inlets; OR split ratios for outlets
+        areas         : list[float]    areas (mm^2)
+        waveform_tags : list[str]      waveform file tags for inlets; OR 'None' for outlets
     """
     # Extract inflow rate and outflow split ratios
     # Sample
@@ -172,59 +172,70 @@ def read_mesh_info(mesh_info_path, key):
     # 1  None  (-16.8228963362,-1.42906111694,17.7845745237)  (-0.9847740285,-0.16502447805,-0.0546537689)   0.8568220486   2.3063814691   0.3318956234191912
     # 2  None    (7.9704219814,-9.22385217254,15.0763376349)   (0.7251682706,-0.49373752256,-0.4799523290)   1.3398999124   5.6402011155   0.6681043765808088
 
-    #info = open(path.splitext(mesh_path)[0]+'.info', 'r').read()
+    # Initialize outputs
+    boundary_ids = []
+    flowrates = []
+    areas = []
+    radii = []
+    waveform_tags = []
+
+    # Open info file
     info = open(mesh_info_path, 'r').read()
 
-    # Looking for the given key
-    p1 = info.find(key)
-    if p1<0:
-        return [], [], []
-    p1 += len(key)
-    p2 = info.find('<', p1)
-    if p2<0:
-        buf = info[p1:]
+    # Looking for the given boundary key in the info file
+    boundary_info_start = info.find(boundary_key)
+
+    # In case there is not info for the boundary
+    if boundary_info_start < 0: return [], [], [], []
+
+    boundary_info_start += len(boundary_key)                #to go the line after boundary key
+    boundary_info_end = info.find('<', boundary_info_start) #block ends when next <boundary> starts 
+    
+    # Reading the info block for the boundary
+    if boundary_info_end < 0:
+        boundary_info = info[boundary_info_start:] #read to end of mesh.info
     else:
-        buf = info[p1:p2-1]
-    lines = buf.split('\n')
+        boundary_info = info[boundary_info_start:boundary_info_end-1] #read to end of boundary block
+    
 
-    ids = []
-    idfr = []
-    ida = []
-    idr = []
-    fcs = []
-    # Reaing at the key values
+    lines = boundary_info.split('\n')
+    # Reading the info values for the boundary
     for line in lines:
-        ls = line.split()
-        if len(ls) > 1:
-            # id
-            ids.append(int(ls[0]))# eval(ls[ 0]))
-            # radius
-            idr.append(eval(ls[-3]))
-            # area
-            ida.append(eval(ls[-2]))
-            # flowrate or arearatio
-            s = ls[-1].replace('A[','a[').replace('R[','r[')
-            s = s.replace('A',ls[-2]).replace('R',ls[-3])
-            idfr.append(s)
-            # wave form
-            fcs.append(ls[1])
-    # evaluate all the expressions in the flowrates and outflow ratios
-    for i,expr in enumerate(idfr):
-        for j,k in enumerate(ids):
-             expr = expr.replace( 'r[%d]'%k, str(idr[j])).replace( 'a[%d]'%k, str(ida[j]))
-        idfr[i] = eval(expr)
+        tokens = line.split() #split the line from spaces
+        if len(tokens) > 1: #skip useless tokens (like line breaks and empty values)
+            boundary_ids.append(int(tokens[0]))
+            waveform_tags.append(tokens[1])
+            radii.append(eval(tokens[4]))
+            areas.append(eval(tokens[5]))
+            flowrates.append(tokens[6])          # store raw string, resolve later
 
-    # sum of area ratio correction:
-    if key == '<OUTLETS>':
-        idfr[-1] = 1.0 - sum(idfr[:-1])
+
+    # Flowrate (last column) may use A/R as shorthand for this boundary's area/radius
+    # Below script is to resolve this:
+
+    # Build lookup dicts now that all boundaries are collected
+    area_by_id   = dict(zip(boundary_ids, areas))
+    radius_by_id = dict(zip(boundary_ids, radii))
+
+    for i, (raw, area, radius) in enumerate(zip(flowrates, areas, radii)):
+        expr = raw
+        for bid in boundary_ids:            # cross-references A[id]/R[id] first
+            expr = expr.replace(f'A[{bid}]', str(area_by_id[bid]))
+            expr = expr.replace(f'R[{bid}]', str(radius_by_id[bid]))
+        expr = expr.replace('A', str(area)).replace('R', str(radius))  # plain A/R last
+        flowrates[i] = eval(expr)
+
+    # Force outlet ratios to sum exactly to 1.0
+    if boundary_key == '<OUTLETS>':
+        flowrates[-1] = 1.0 - sum(flowrates[:-1])
 
     # print the summary
-    for i,s in enumerate(idfr):
-        if mpi_rank == 0 and key == '<INLETS>': print ('Inlet  id:', ids[i], ' flowrate (mL/s):', s)
-        if mpi_rank == 0 and key == '<OUTLETS>': print ('Outlet id:', ids[i], ' flowrate ratio:', s)
+    for i, flow_value in enumerate(flowrates):
+        if mpi_rank == 0 and boundary_key == '<INLETS>':  print ('Inlet  id:', boundary_ids[i], ' flowrate (mL/s):', flow_value)
+        if mpi_rank == 0 and boundary_key == '<OUTLETS>': print ('Outlet id:', boundary_ids[i], ' flowrate ratio:', flow_value)
 
 
-    return ids, idfr, ida, fcs
+    return boundary_ids, flowrates, areas, waveform_tags
 
 
 #UNUSED FUNCTIONS
