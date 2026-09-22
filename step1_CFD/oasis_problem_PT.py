@@ -27,7 +27,7 @@
 #   - uOrder               : velocity polynomial order for FE
 #   - save_frequency       : save every N steps
 #   - checkpoint           : write restart every N steps
-#   - inlet_BC_type        : type of the inlet boundary condition --> choose from: {'pulsatile', 'ramp', 'custom'} (default is 'pulsatile')
+#   - inlet_BC_type        : type of the inlet boundary condition --> choose from: {'pulsatile', 'ramp', 'constant'} (default is 'pulsatile')
 #
 # Optional
 #   - restart_folder           : path to a previous results folder to restart from
@@ -92,7 +92,10 @@ max_wtime_before_kill = (23.5*60*60)
 def mpi_comm():
     return MPI.comm_world
 
+def tuple2str(t, fmt='%12.10f'):
+    return ','.join([fmt]*len(t))%tuple(t)
 
+# For output formatting
 def print_section_header(title, width=100):
     if mpi_rank == 0:
         print ("-"*width)
@@ -104,23 +107,11 @@ def print_section_footer(width=100):
         print ("-"*width)
         sys.stdout.flush()
 
-def tuple2str(t, fmt='%12.10f'):
-    return ','.join([fmt]*len(t))%tuple(t)
-
-
 def info_gray(s, check=True):
     if mpi_rank == 0 and check:
         print ("\033[1;37;30m%s\033[0m"%s)
 
-
-# Get the zero leading string for given time step No.
-def step_str(i, l=10):
-    a = str(i)
-    la = l - len(a)
-    return '0'*la + a
-
-
-# Type check parser
+# For I/O handling
 def get_cmdarg(cmdline, key, default_value = None):
     """Retrieve key from commandline kwargs with light type coercion based on default."""
     if key in cmdline.keys():
@@ -134,24 +125,6 @@ def get_cmdarg(cmdline, key, default_value = None):
                 return bool(eval(value))
         return value
     return default_value
-
-
-def beta(err, p):
-    if p < 0:
-        if err >= 0.1:
-            return 0.5
-        else:
-            return 1.0 - 5*err**2
-    else:
-        if err >= 0.1:
-            return 1.5
-        else:
-            return 1.0  + 5*err**2
-
-
-def w(P):
-    return 1.0 / ( 1.0 + 20.0*abs(P))
-
 
 def get_file_paths(results_folder):
     if mpi_rank == 0:
@@ -177,7 +150,6 @@ def get_file_paths(results_folder):
     files = {"u": file_u, "p": file_p, "u_mean": file_u_mean, "nut": file_nu}
 
     return files
-
 
 def read_mesh_info(mesh_info_path, key):
     """
@@ -255,7 +227,29 @@ def read_mesh_info(mesh_info_path, key):
     return ids, idfr, ida, fcs
 
 
+#UNUSED FUNCTIONS
 """
+def step_str(i, l=10):
+    # Get the zero leading string for given time step No.
+    a = str(i)
+    la = l - len(a)
+    return '0'*la + a
+
+def beta(err, p):
+    if p < 0:
+        if err >= 0.1:
+            return 0.5
+        else:
+            return 1.0 - 5*err**2
+    else:
+        if err >= 0.1:
+            return 1.5
+        else:
+            return 1.0  + 5*err**2
+
+def w(P):
+    return 1.0 / ( 1.0 + 20.0*abs(P))
+
 # check if the period is mentioned in the fc waveform file
 def _not_used_get_period_from_fcs(fcs):
     periods = [951.0 for f in fcs]
@@ -274,7 +268,6 @@ def _not_used_get_period_from_fcs(fcs):
                     periods[i] = float(''.join((ch if ch in '0123456789.-e' else ' ') for ch in line[p+9:]).strip().split(' ')[0])
     return periods
 """
-
 
 # ---------------------------------- Setup Parameters ---------------------------------------------------
 def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
@@ -298,7 +291,7 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
         print('<!> Unable to run without a mesh file.')
 
     # Obtain mesh information
-    id_in, Q_means, inlet_area, fcs = read_mesh_info(mesh_info_path, '<INLETS>')
+    id_in, Q_means, inlet_area, fcs    = read_mesh_info(mesh_info_path, '<INLETS>')
     id_out, area_ratio, outlet_area, _ = read_mesh_info(mesh_info_path, '<OUTLETS>')
 
 
@@ -706,7 +699,7 @@ def create_bcs(u_, p_, p_1, t, NS_expressions, V, Q, area_ratio, mesh, subdomain
 
         else: #THIS DOES NOT CURRENTLY WORK #NS_parameters['inlet_BC_type'] == 'custom'
             if mpi_rank == 0:
-                print ('- loading custom inflowrate function:', fcs_ifname)
+                print ('- loading custom inflowrate function:', fcs_i_filename)
             inlet_i = CustomFunction.make_custom_function_bcs(NS_namespace["period"], Q_means[i], fcs_i_filename, mesh, nu, tmp_a, tmp_c, tmp_r, tmp_n, velocity_degree, flat_profile_at_intlet_bc)
             
         inlets.append(inlet_i)
