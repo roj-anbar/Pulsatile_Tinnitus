@@ -132,6 +132,37 @@ echo "--------------------------------------------------------------------------
 #echo "SLURM_SUBMIT_DIR= $SLURM_SUBMIT_DIR"
 
 
+#---------------------------------- Write run metadata ---------------------------------------------
+# Written before solver starts so the file exists even if the job crashes.
+# Travels with the results folder if it is moved or copied.
+
+mkdir -p ./logs
+cat > "./logs/${casename_full}_run_params.json" << EOF
+{
+  "case": "${casename}",
+  "case_full": "${casename_full}",
+  "inlet_BC_type": "${inlet_BC_type}",
+  "ramp_slope_mLs2": ${ramp_slope:-2},
+  "ramp_offset_mLs": ${ramp_offset:-1},
+  "inflowrate_constant_mLs": ${inflowrate_constant_mLs:-5},
+  "timesteps_per_cycle": ${timesteps_per_cycle},
+  "cycles": ${cycles},
+  "period_ms": ${period},
+  "save_frequency": ${save_frequency},
+  "save_first_cycle": "${save_first_cycle}",
+  "checkpoint": ${checkpoint},
+  "viscosity_mu_Pas": ${viscosity_mu_Pas},
+  "density_kgm3": ${density_kgm3},
+  "uOrder": ${uOrder},
+  "num_cores": ${NP},
+  "slurm_job_id": "${SLURM_JOB_ID}",
+  "slurm_job_name": "${SLURM_JOB_NAME}",
+  "submitted_by": "${scinet_user}",
+  "date": "$(date -Iseconds)"
+}
+EOF
+echo "[run_params] Written to ./logs/${casename_full}_run_params.json"
+
 
 #---------------------------------- Launch Solver ---------------------------------------------
 

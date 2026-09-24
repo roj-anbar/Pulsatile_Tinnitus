@@ -372,7 +372,7 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
             dump_stats          = 1000,
             compute_flux        = 5,
             save_step           = get_cmdarg(commandline_kwargs, 'save_step', 100000),                  # Mehdi doesn't use the oasis output
-            print_intermediate_info = 1000,                                                              # Controls the frequency of printing summary of timings to log file
+            print_intermediate_info = 10000,                                                              # Controls the frequency of printing summary of timings to log file
             #print_WSS          = get_cmdarg(commandline_kwargs, 'print_WSS', True),
             #plot_interval      = 10e10,
 
@@ -380,7 +380,7 @@ def problem_parameters(commandline_kwargs, NS_parameters, **NS_namespace):
             inlet_BC_type             = get_cmdarg(commandline_kwargs, 'inlet_BC_type', 'pulsatile'), # choose from 'ramp', 'pulsatile', 'constant', 'custom'
             Qin_constant_mLs          = get_cmdarg(commandline_kwargs, 'inflowrate_constant_mLs', 5.0),       # constant inflow rate, used when inlet_BC_type='constant' [mL/s]
             ramp_slope                = get_cmdarg(commandline_kwargs, 'ramp_slope',  2.0),                   # slope of inflow ramp, used when inlet_BC_type='ramp'
-            ramp_offset               = get_cmdarg(commandline_kwargs, 'ramp_offset', 2.0),                   # offset of inflow ramp, used when inlet_BC_type='ramp'
+            ramp_offset               = get_cmdarg(commandline_kwargs, 'ramp_offset', 1.0),                   # offset of inflow ramp, used when inlet_BC_type='ramp'
             not_zero_pressure_outlets = not get_cmdarg(commandline_kwargs, 'zero_pressure_outlets', False),
             include_gravity           = get_cmdarg(commandline_kwargs, 'include_gravitational_effects', False),
             flat_profile_at_intlet_bc = get_cmdarg(commandline_kwargs, 'flat_profile_at_intlet_bc', False),
