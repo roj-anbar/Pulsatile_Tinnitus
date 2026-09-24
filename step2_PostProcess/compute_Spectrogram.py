@@ -652,8 +652,9 @@ def filter_raw_spectrogram(spectrogram_data, spectral_analysis_params):
     # Apply both masks simultaneously
     power_filt = power_avg_dB[np.ix_(mask_freq, mask_Q)]
 
-    # Clamp values below the dB floor
-    power_filt[power_filt < cutoff_db] = cutoff_db
+    # Clamp values below the dB floor (skip if cutoff_db not set)
+    if cutoff_db is not None:
+        power_filt[power_filt < cutoff_db] = cutoff_db
 
 
     # Save the filtered fields to a similar structure as raw spectrogram
@@ -696,9 +697,13 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_mid, f_
 
     # Compute average power for each frequency band
     # Note: it is better to perform averaging in linear space and convert back to dB but this doesn't give good results for my cases
-    mean_power_lowFreq  = np.mean(spec_lowFreq)   #10 * np.log10(np.mean(10**(spec_lowFreq/10))) 
+    mean_power_lowFreq  = np.mean(spec_lowFreq) 
     mean_power_midFreq  = np.mean(spec_midFreq)
     mean_power_highFreq = np.mean(spec_highFreq)
+
+    # mean_power_lowFreq  = 10 * np.log10(np.mean(10**(spec_lowFreq/10))) 
+    # mean_power_midFreq  = 10 * np.log10(np.mean(10**(spec_midFreq/10))) 
+    # mean_power_highFreq = 10 * np.log10(np.mean(10**(spec_highFreq/10))) 
     
     """
     # Compute fraction of frequencies with power > 80dB
@@ -827,7 +832,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
 
     # Setting plot properties
     font_size = 20
-    plt.rc('axes',   titlesize=font_size)     # fontsize of the title
+    plt.rc('axes',   titlesize=16)     # fontsize of the title
     plt.rc('font',   size=font_size)          # controls default text size
     plt.rc('xtick',  labelsize=font_size)    # fontsize of the x tick labels
     plt.rc('ytick',  labelsize=font_size)    # fontsize of the y tick labels
@@ -869,7 +874,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
 
     #ax[1].set_ylim([-1, analysis_params['SPL_db_max']])
     ax[1].set_ylabel('Mean SPL (dB)', fontweight='bold', labelpad=20, fontsize=font_size)
-    #ax[1].legend(loc = 'upper left', fontsize=font_size)
+    ax[1].legend(loc = 'upper left', fontsize=font_size)
 
     # ------------------------ Subplot 2: Spectral Centroid ----------------------------
     ax[2].plot(bins_Q, spectral_metrics['centroid_freq'], linewidth = 4, color='black')
@@ -1014,7 +1019,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
             # Construct the title: use region_shortname from CSV if available, else fall back to ROI ID range
             region_name = ROI_params.get("region_shortname")
             region_label = region_name if region_name else f'ROI{ROI_start_center_id}to{ROI_end_center_id}'
-            spectrogram_title = f'{case_name}_win{window_length}_region{region_label}'
+            spectrogram_title = f'{case_name}_region{region_label}'
 
             # Save full spectrogram data
             spec_output_npz = Path(output_folder_files) / f"{spectrogram_title}.npz"
@@ -1067,7 +1072,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
                 spec_quantity_array_ROI = assemble_quantity_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh, spec_quantity, spec_quantity_array, ROI_params)
 
                 # Construct the title
-                spectrogram_title = f'{case_name}_win{window_length}_{ROI_id}' 
+                spectrogram_title = f'{case_name}_{ROI_id}'
                 
                 # Calculate average spectrogram for each ROI
                 spectrogram_data = calculate_mean_spectrogram(
@@ -1191,12 +1196,12 @@ def parse_args():
 
 
     # Spectral analysis and visualization parameters
-    ap.add_argument("--cutoff_db",          type=float, default=0.0,      help="Minimum dB floor for visualization")
+    ap.add_argument("--cutoff_db",          type=float, default=None,     help="Minimum dB floor for visualization (omit to disable clamping)")
     ap.add_argument("--freq_low",           type=float, default=100,      help="Upper threshold for low-frequency band in Hz (default: 100 Hz)")
     ap.add_argument("--freq_mid",           type=float, default=1000,     help="Upper threshold for mid-frequency band in Hz (default: 1000 Hz)")
     ap.add_argument("--freq_max",           type=float, default=5000,     help="Maximum frequency to filter spectrogram in Hz (default: 5000 Hz)")
     ap.add_argument("--flowrate_min",       type=float, default=2.0,      help="Lower inlet flowrate limit for analysis window in mL/s (default: 2.0)")
-    ap.add_argument("--flowrate_max",       type=float, default=10.0,      help="Upper inlet flowrate limit for analysis window in mL/s (default: 10.0)")
+    ap.add_argument("--flowrate_max",       type=float, default=10.0,     help="Upper inlet flowrate limit for analysis window in mL/s (default: 10.0)")
     ap.add_argument("--flowrate_cut",       type=float, default=8.0,      help="Upper inlet flowrate limit for figures in mL/s (default: 8.0)")
     ap.add_argument("--power_SPL_db_min",   type=float, default=20.0,     help="Lower SPL power limit for spectrogram colormap in dB (default: 20)")
     ap.add_argument("--power_SPL_db_max",   type=float, default=120.0,    help="Upper SPL power limit for spectrogram colormap in dB (default: 120)")
@@ -1216,7 +1221,8 @@ def main():
 
     _roi_suffix   = f"_ROI{args.ROI_type}"             if args.ROI_type    != "cylinder" else ""
     _multi_suffix = f"_multiROI{args.flag_multi_ROI}"  if not args.flag_multi_ROI       else ""
-    _subfolder    = f"window{args.window_length}_overlap{args.overlap_fraction}{_roi_suffix}{_multi_suffix}"
+    _db_suffix    = f"_cutdb{args.cutoff_db:g}"           if args.cutoff_db is not None    else "_cutdbNone"
+    _subfolder    = f"window{args.window_length}_overlap{args.overlap_fraction}{_roi_suffix}{_multi_suffix}{_db_suffix}"
 
     output_folder_files = Path(f"{output_folder}/{_subfolder}/files")
     output_folder_imgs  = Path(f"{output_folder}/{_subfolder}/imgs")
