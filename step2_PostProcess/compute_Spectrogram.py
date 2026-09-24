@@ -792,7 +792,7 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
         #Q_phases[0] = bins_Q[idx_nonzero_spectral_centroid[0]]  # first rise in centroid
 
     # PHASE 2: First rise in highFreq power
-    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 2)[0] # array of indices of positive highFreq powers
+    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > 0.1)[0] # array of indices of positive highFreq powers
 
     if len(idx_nonzero_highFreq_power) > 0:
         Q_phases[1] = bins_Q[idx_nonzero_highFreq_power[0]] # first rise in power
@@ -846,7 +846,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     # ------------------------ Subplot 0: Spectrogram ----------------------------
     spectrogram = ax[0].pcolormesh(bins_Q, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
     # Set the limit for power colormap
-    spectrogram.set_clim(analysis_params['SPL_db_min'], analysis_params['SPL_db_max'])
+    #spectrogram.set_clim(analysis_params['SPL_db_min'], analysis_params['SPL_db_max'])
 
 
     ax[0].set_ylabel('Frequency (Hz)',   fontweight='bold', fontsize=font_size, labelpad=10)
@@ -858,8 +858,8 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
         ax[0].set_ylim([0, 3000]) #analysis_params['freq_max']])
 
     # Adding the colorbar
-    #cbar = fig.colorbar(spectrogram, ax=ax[0], orientation='vertical') #pad=0.5
-    #cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
+    cbar = fig.colorbar(spectrogram, ax=ax[0], orientation='vertical') #pad=0.5
+    cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
 
 
     # ------------------------ Subplot 1: Mean power ----------------------------
@@ -867,7 +867,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     ax[1].plot(bins_Q, spectral_metrics['mean_power_midFreq'],  label='mid-freq',  linewidth = 4, color='tab:blue') #deepskyblue
     ax[1].plot(bins_Q, spectral_metrics['mean_power_highFreq'], label='high-freq', linewidth = 4, color='tab:red') #'mediumblue'
 
-    ax[1].set_ylim([-1, analysis_params['SPL_db_max']])
+    #ax[1].set_ylim([-1, analysis_params['SPL_db_max']])
     ax[1].set_ylabel('Mean SPL (dB)', fontweight='bold', labelpad=20, fontsize=font_size)
     #ax[1].legend(loc = 'upper left', fontsize=font_size)
 
@@ -1210,13 +1210,17 @@ def main():
     mesh_folder   = Path(args.mesh_folder)
     output_folder = Path(f'{args.output_folder}/Spectrogram_{args.spec_quantity}')
     
-    # Create paths
+    # Create paths and folder names
     if not Path(output_folder).exists():
         Path(output_folder).mkdir(parents=True, exist_ok=True)
 
-    output_folder_files = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.flag_multi_ROI}/files")
-    output_folder_imgs  = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.flag_multi_ROI}/imgs")
-    output_folder_ROIs  = Path(f"{output_folder}/window{args.window_length}_overlap{args.overlap_fraction}_ROI{args.ROI_type}_multiROI{args.flag_multi_ROI}/ROIs")
+    _roi_suffix   = f"_ROI{args.ROI_type}"             if args.ROI_type    != "cylinder" else ""
+    _multi_suffix = f"_multiROI{args.flag_multi_ROI}"  if not args.flag_multi_ROI       else ""
+    _subfolder    = f"window{args.window_length}_overlap{args.overlap_fraction}{_roi_suffix}{_multi_suffix}"
+
+    output_folder_files = Path(f"{output_folder}/{_subfolder}/files")
+    output_folder_imgs  = Path(f"{output_folder}/{_subfolder}/imgs")
+    output_folder_ROIs  = Path(f"{output_folder}/{_subfolder}/ROIs")
     
     output_folder_files.mkdir(parents=True, exist_ok=True)
     output_folder_imgs.mkdir(parents=True, exist_ok=True)
@@ -1300,8 +1304,8 @@ def main():
             inlet_wall_idx = np.where(np.isin(wall_pids, inlet_pids))[0]
           
             mean_inlet_pressure = spec_quantity_array[inlet_wall_idx, :].mean(axis=0)  # (n_times,)
-            spec_quantity_array = spec_quantity_array - mean_inlet_pressure[None, :]
-            print(f"[TEST] Subtracted mean pressure of {len(inlet_wall_idx)} inlet wall nodes from all {spec_quantity_array.shape[0]} wall nodes.")
+            #spec_quantity_array = spec_quantity_array - mean_inlet_pressure[None, :]
+            #print(f"[TEST] Subtracted mean pressure of {len(inlet_wall_idx)} inlet wall nodes from all {spec_quantity_array.shape[0]} wall nodes.")
 
 
 
