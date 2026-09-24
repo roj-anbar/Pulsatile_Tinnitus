@@ -123,6 +123,18 @@ def extract_timestep_from_h5_filename(h5_file: Path) -> int:
     return int(match.group(1))
 
 
+def extract_ramp_slope_from_foldername(path: Path) -> float:
+    """Parse ramp slope from a path containing 'rampSlope<N>' (e.g. rampSlope2 → 2.0, rampSlope2p5 → 2.5)."""
+    match = re.search(r'rampSlope(\d+(?:[p.]\d+)?)', str(path))
+    if match is None:
+        raise ValueError(
+            f"Could not parse ramp slope from path '{path}'. "
+            "Expected a folder named 'rampSlope<N>' (e.g. rampSlope2). "
+            "Supply --ramp_slope on the CLI instead."
+        )
+    return float(match.group(1).replace('p', '.'))
+
+
 def extract_sim_params_from_h5_filename(h5_file: Path) -> tuple[float, int]:
     """Parse timesteps-per-cycle from a snapshot filename.
 
@@ -490,8 +502,8 @@ def assemble_quantity_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh,
     # --- Sanity check: ensure ROI is not empty ---
     if ROI_pids.size == 0:
         raise ValueError("No mesh points found in ROI. Try increasing --ROI_radius (check mesh units: mm vs m) or choose a different --ROI_center_coord. ")
-    else:
-        print(f"Found {ROI_pids.size} mesh points in {ROI_id} with center coordinate {ROI_center_coord} ...")
+    # else:
+    #     print(f"Found {ROI_pids.size} mesh points in {ROI_id} with center coordinate {ROI_center_coord} ...")
 
     # Assemble variable array for ROI points
     var_array_ROI = var_array[ROI_pids,:]
@@ -645,7 +657,8 @@ def filter_raw_spectrogram(spectrogram_data, spectral_analysis_params):
     power_avg_dB = spectrogram_data['power_avg_dB']
 
     # Build masks
-    bins_Q    = 2 * bins                           # Q_inlet = 2*t  (ramp-specific conversion)
+    ramp_slope = spectral_analysis_params.get("ramp_slope")
+    bins_Q    = ramp_slope * bins                  # Q_inlet = ramp_slope * t
     mask_Q    = (bins_Q >= Q_min) & (bins_Q <= Q_max)
     mask_freq = freqs <= freq_max
     
@@ -764,7 +777,8 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
     freqs   = spectrogram_data['freqs']
     spec_dB = spectrogram_data['power_avg_dB']
 
-    bins_Q = 2*bins            # for ramp Q = 2t
+    ramp_slope = spectral_analysis_params.get("ramp_slope")
+    bins_Q = ramp_slope * bins  # Q_inlet = ramp_slope * t
     n_cols = spec_dB.shape[1]  # total number of columns of spectrogram (#times)
 
     # Initialize arrays
@@ -826,9 +840,8 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     freqs = spectrogram_data['freqs']
     spectrogram_signal = spectrogram_data['power_avg_dB']
 
-    # JUST FOR PT_RAMP:
-    # Create bins to show Q_inlet (instead of time) --> specify based on the ramp slope
-    bins_Q = 2*bins # Q_in = 2*t
+    ramp_slope = analysis_params.get("ramp_slope")
+    bins_Q = ramp_slope * bins  # Q_inlet = ramp_slope * t
 
     # Setting plot properties
     font_size = 20
@@ -840,10 +853,10 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     plt.rc('axes',   labelsize=18)     # fontsize of the x and y labels
 
     # For horizontal plotting:
-    #fig, ax = plt.subplots(1, 3, figsize=(18, 6)) #(20,5)
+    fig, ax = plt.subplots(1, 3, figsize=(18, 6)) #(20,5)
 
     # For vertical plotting:
-    fig, ax = plt.subplots(3, 1, figsize=(8, 16), sharex=True) #, gridspec_kw={'hspace': 0.05})
+    #fig, ax = plt.subplots(3, 1, figsize=(8, 16), sharex=True) #, gridspec_kw={'hspace': 0.05})
 
     fig.suptitle(plot_title, fontweight='bold', y=0.99)             # y adds distance to the title's location
 
@@ -887,8 +900,8 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     for a in ax:
         a.set_xlim([analysis_params['Q_min'], analysis_params['Q_cut']])
         a.tick_params(direction='in')
-        #a.set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
-    ax[2].set_xlabel('Flow rate (mL/s)', fontweight='bold', fontsize=font_size, labelpad=10)
+        a.set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
+    #ax[2].set_xlabel('Flow rate (mL/s)', fontweight='bold', fontsize=font_size, labelpad=10)
 
     #--------- Adding phase lines 
     if flag_plot_phases:
@@ -1196,6 +1209,7 @@ def parse_args():
 
 
     # Spectral analysis and visualization parameters
+    ap.add_argument("--ramp_slope",         type=float, default=None,     help="Ramp slope [mL/s2] used to convert time bins to inlet flowrate Q = ramp_slope * t. If not given, parsed from input_folder name (expects 'rampSlope<N>mLs2').")
     ap.add_argument("--cutoff_db",          type=float, default=None,     help="Minimum dB floor for visualization (omit to disable clamping)")
     ap.add_argument("--freq_low",           type=float, default=100,      help="Upper threshold for low-frequency band in Hz (default: 100 Hz)")
     ap.add_argument("--freq_mid",           type=float, default=1000,     help="Upper threshold for mid-frequency band in Hz (default: 1000 Hz)")
@@ -1213,7 +1227,13 @@ def main():
     args          = parse_args()
     input_folder  = Path(args.input_folder)
     mesh_folder   = Path(args.mesh_folder)
-    output_folder = Path(f'{args.output_folder}/Spectrogram_{args.spec_quantity}')
+
+    ramp_slope = args.ramp_slope
+    if ramp_slope is None:
+        ramp_slope = extract_ramp_slope_from_foldername(input_folder)
+        print(f"Found ramp_slope = {ramp_slope} mL/s2 from input folder name. \n")
+
+    output_folder = Path(f'{args.output_folder}/Spectrogram_{args.spec_quantity}/rampSlope{ramp_slope:g}mLs2')
     
     # Create paths and folder names
     if not Path(output_folder).exists():
@@ -1254,6 +1274,7 @@ def main():
         "detrend": args.detrend}
     
     spectral_analysis_params = {
+        "ramp_slope": ramp_slope,
         "cutoff_db":  args.cutoff_db,
         "freq_low":   args.freq_low,
         "freq_mid":   args.freq_mid,
