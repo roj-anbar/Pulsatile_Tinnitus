@@ -37,7 +37,7 @@ CASE=PTSeg106_base_0p64                                              # Case name
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE                 # Parent directory of the case
 MESH_FOLDER="$BASE_DIR/step1_CFD/data"                                  # Path to mesh data folder containing the h5 mesh
 CENTERLINE="$MESH_FOLDER/${CASE}_centerline_points.csv"                 # Path to centerline csv file used to construct ROIs
-INPUT="$BASE_DIR/step1_CFD/results_inletBC_ramp/rampSlope3mLs2/${CASE}_ts10000_cy4_saveFreq1"       # Path to CFD results folder containing timeseries HDF5 files
+INPUT="$BASE_DIR/step1_CFD/results_inletBC_ramp/rampSlope1mLs2/${CASE}_ts10000_cy10_saveFreq2"       # Path to CFD results folder containing timeseries HDF5 files
 OUTPUT="$BASE_DIR/step2_PostProcess"                                    # Path to saving spectrogram files
 SPECTROGRAM_REGIONS="$OUTPUT/configs/${CASE}_spectrogram_regions.csv"   # Path to spectrogram regions csv file used to generate regional specs
 
@@ -81,10 +81,11 @@ python "$SCRIPT" \
     --ROI_center_csv        "$CENTERLINE" \
     --spec_regions_csv      "$SPECTROGRAM_REGIONS" \
     --spec_quantity         "wallpressure" \
+    --max_cycle             8 \
     --window_length         2732 \
     --ROI_type              "cylinder" \
     --cutoff_db             -60 \
-    --flag_multi_ROI        
+    --flag_multi_ROI
 
 #    --ramp_slope    2
 #    --flag_save_ROI

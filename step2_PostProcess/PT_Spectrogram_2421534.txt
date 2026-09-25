@@ -1,0 +1,149 @@
+Job started: Fri 25 Sep 2026 01:44:24 PM EDT
+
+The following have been reloaded with a version change:
+  1) python/3.12.4 => python/3.11.5
+
+Found ramp_slope = 1.0 mL/s2 from input folder name. 
+
+========================================================================================================================================================================================================
+
+compute_Spectrogram.py
+
+[info] Mesh file:                         /scratch/ranbar/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data/PTSeg106_base_0p64.h5
+[info] Read CFD results from:             /scratch/ranbar/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/results_inletBC_ramp/rampSlope1mLs2/PTSeg106_base_0p64_ts10000_cy10_saveFreq2
+[info] Write spectrograms to:             /scratch/ranbar/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess/Spectrogram_wallpressure/rampSlope1mLs2
+[info] Read spectrogram regions from:  /scratch/ranbar/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess/configs/PTSeg106_base_0p64_spectrogram_regions.csv
+[info] Read ROI centers from:          /scratch/ranbar/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data/PTSeg106_base_0p64_centerline_points.csv 
+
+========================================================================================================================================================================================================
+
+[info] Limiting to cycles 0–8: 44998 snapshots retained.
+
+Reading 44998 CFD results HDF5 files in parallel into 1 array of shape [95218, 44998] ... 
+
+Found timesteps_per_cycle = 10000 from CFD results HDF5 file names. 
+
+Performing post-processing computation on 191 cores ... 
+
+
+---------------------- Region 1/6 --------------------------------
+SuperiorSagittalSinus: ROI 100 to 456 
+
+Computing wallpressure spectrograms for cylinder ROIs with STFT parameters: 
+window_length (samples) = 2732 
+overlap_fraction        = 0.9 
+
+Found 19624 unique mesh points in total in the specified region. 
+
+Inlet flowrate of onset Phase 1 = 2.01 mL/s
+Inlet flowrate of onset Phase 2 = 3.01 mL/s
+
+Finished computing and saving spectrograms.
+
+---------------------- Region 2/6 --------------------------------
+TransverseSinus: ROI 1300 to 1450 
+
+Computing wallpressure spectrograms for cylinder ROIs with STFT parameters: 
+window_length (samples) = 2732 
+overlap_fraction        = 0.9 
+
+Found 9501 unique mesh points in total in the specified region. 
+
+Inlet flowrate of onset Phase 1 = 2.01 mL/s
+Inlet flowrate of onset Phase 2 = 3.01 mL/s
+
+Finished computing and saving spectrograms.
+
+---------------------- Region 3/6 --------------------------------
+TransverseSinusStenosis: ROI 1200 to 1270 
+
+Computing wallpressure spectrograms for cylinder ROIs with STFT parameters: 
+window_length (samples) = 2732 
+overlap_fraction        = 0.9 
+
+Found 5740 unique mesh points in total in the specified region. 
+
+Inlet flowrate of onset Phase 1 = 2.01 mL/s
+Inlet flowrate of onset Phase 2 = 3.01 mL/s
+
+Finished computing and saving spectrograms.
+
+---------------------- Region 4/6 --------------------------------
+PostStenoticRegion: ROI 1108 to 1188 
+
+Computing wallpressure spectrograms for cylinder ROIs with STFT parameters: 
+window_length (samples) = 2732 
+overlap_fraction        = 0.9 
+
+Found 10174 unique mesh points in total in the specified region. 
+
+Inlet flowrate of onset Phase 1 = 2.01 mL/s
+Inlet flowrate of onset Phase 2 = 2.56 mL/s
+
+Finished computing and saving spectrograms.
+
+---------------------- Region 5/6 --------------------------------
+SigmoidSinus: ROI 990 to 1085 
+
+Computing wallpressure spectrograms for cylinder ROIs with STFT parameters: 
+window_length (samples) = 2732 
+overlap_fraction        = 0.9 
+
+Found 7403 unique mesh points in total in the specified region. 
+
+Inlet flowrate of onset Phase 1 = 2.01 mL/s
+Inlet flowrate of onset Phase 2 = 3.16 mL/s
+
+Finished computing and saving spectrograms.
+
+---------------------- Region 6/6 --------------------------------
+JugularBulb: ROI 825 to 890 
+
+Computing wallpressure spectrograms for cylinder ROIs with STFT parameters: 
+window_length (samples) = 2732 
+overlap_fraction        = 0.9 
+
+Found 6030 unique mesh points in total in the specified region. 
+
+Inlet flowrate of onset Phase 1 = 2.83 mL/s
+Inlet flowrate of onset Phase 2 = 4.04 mL/s
+
+Finished computing and saving spectrograms.
+
+scontrol show job 2421534
+JobId=2421534 JobName=PT_Spectrogram
+   UserId=ranbar(3125970) GroupId=ranbar(3125970) MCS_label=N/A
+   Priority=11632728 Nice=0 Account=def-steinman QOS=normal
+   JobState=COMPLETING Reason=None Dependency=(null)
+   Requeue=0 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0
+   RunTime=00:09:27 TimeLimit=00:30:00 TimeMin=N/A
+   SubmitTime=2026-09-25T13:44:19 EligibleTime=2026-09-25T13:44:19
+   AccrueTime=2026-09-25T13:44:19
+   StartTime=2026-09-25T13:44:20 EndTime=2026-09-25T13:53:47 Deadline=N/A
+   SuspendTime=None SecsPreSuspend=0 LastSchedEval=2026-09-25T13:44:20 Scheduler=Main
+   Partition=debug AllocNode:Sid=tri-login04:1489794
+   ReqNodeList=(null) ExcNodeList=(null)
+   NodeList=tri0518
+   BatchHost=tri0518
+   NumNodes=1 NumCPUs=192 NumTasks=192 CPUs/Task=1 ReqB:S:C:T=0:0:*:*
+   ReqTRES=cpu=192,mem=767000M,node=1,billing=192
+   AllocTRES=cpu=192,mem=767000M,node=1,billing=192
+   Socks/Node=* NtasksPerN:B:S:C=192:0:*:* CoreSpec=*
+   MinCPUsNode=192 MinMemoryNode=767000M MinTmpDiskNode=0
+   Features=(null) DelayBoot=00:00:00
+   OverSubscribe=NO Contiguous=0 Licenses=(null) LicensesAlloc=(null) Network=(null)
+   Command=/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/compute_Spectrogram_job.sh
+   SubmitLine=SBATCH --comment /opt/slurm/bin/sbatch --export=NONE compute_Spectrogram_job.sh --export=NONE compute_Spectrogram_job.sh
+   WorkDir=/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess
+   Comment=/opt/slurm/bin/sbatch --export=NONE compute_Spectrogram_job.sh
+   StdErr=
+   StdIn=/dev/null
+   StdOut=/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/PT_Spectrogram_2421534.txt
+
+sacct -j 2421534
+JobID           JobName    Account    Elapsed  MaxVMSize     MaxRSS  SystemCPU    UserCPU ExitCode 
+------------ ---------- ---------- ---------- ---------- ---------- ---------- ---------- -------- 
+2421534      PT_Spectr+ def-stein+   00:09:27                         00:00:00   00:00:00      0:0 
+2421534.bat+      batch def-stein+   00:09:27                         00:00:00   00:00:00      0:0 
+2421534.ext+     extern def-stein+   00:09:27                         00:00:00   00:00:00      0:0 
+

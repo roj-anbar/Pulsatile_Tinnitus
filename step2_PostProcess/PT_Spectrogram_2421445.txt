@@ -1,0 +1,80 @@
+Job started: Fri 25 Sep 2026 01:33:07 PM EDT
+
+The following have been reloaded with a version change:
+  1) python/3.12.4 => python/3.11.5
+
+Found ramp_slope = 1.0 mL/s2 from input folder name. 
+
+========================================================================================================================================================================================================
+
+compute_Spectrogram.py
+
+[info] Mesh file:                         /scratch/ranbar/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data/PTSeg106_base_0p64.h5
+[info] Read CFD results from:             /scratch/ranbar/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/results_inletBC_ramp/rampSlope1mLs2/PTSeg106_base_0p64_ts10000_cy10_saveFreq2
+[info] Write spectrograms to:             /scratch/ranbar/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess/Spectrogram_wallpressure/rampSlope1mLs2
+[info] Read spectrogram regions from:  /scratch/ranbar/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess/configs/PTSeg106_base_0p64_spectrogram_regions.csv
+[info] Read ROI centers from:          /scratch/ranbar/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data/PTSeg106_base_0p64_centerline_points.csv 
+
+========================================================================================================================================================================================================
+
+
+Reading 48844 CFD results HDF5 files in parallel into 1 array of shape [95218, 48844] ... 
+
+Process Reader191:
+Traceback (most recent call last):
+  File "/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v4/Compiler/gcccore/python/3.11.5/lib/python3.11/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v4/Compiler/gcccore/python/3.11.5/lib/python3.11/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/compute_Spectrogram.py", line 236, in read_wallpressure_from_h5_files
+    with h5py.File(h5_files[t_index], 'r') as h5:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v4/Compiler/gcc12/hdf5/1.14.2/lib/python3.11/site-packages/h5py/_hl/files.py", line 562, in __init__
+    fid = make_fid(name, mode, userblock_size, fapl, fcpl, swmr=swmr)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v4/Compiler/gcc12/hdf5/1.14.2/lib/python3.11/site-packages/h5py/_hl/files.py", line 235, in make_fid
+    fid = h5f.open(name, flags, fapl=fapl)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "h5py/_objects.pyx", line 54, in h5py._objects.with_phil.wrapper
+  File "h5py/_objects.pyx", line 55, in h5py._objects.with_phil.wrapper
+  File "h5py/h5f.pyx", line 102, in h5py.h5f.open
+OSError: Unable to synchronously open file (file signature not found)
+[2026-09-25T13:42:53.268] error: *** JOB 2421445 ON tri0526 CANCELLED AT 2026-09-25T13:42:53 DUE to SIGNAL Terminated ***
+
+scontrol show job 2421445
+JobId=2421445 JobName=PT_Spectrogram
+   UserId=ranbar(3125970) GroupId=ranbar(3125970) MCS_label=N/A
+   Priority=11648348 Nice=0 Account=def-steinman QOS=normal
+   JobState=COMPLETING Reason=None Dependency=(null)
+   Requeue=0 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:15
+   RunTime=00:09:51 TimeLimit=00:30:00 TimeMin=N/A
+   SubmitTime=2026-09-25T13:32:59 EligibleTime=2026-09-25T13:32:59
+   AccrueTime=2026-09-25T13:32:59
+   StartTime=2026-09-25T13:33:02 EndTime=2026-09-25T13:42:53 Deadline=N/A
+   SuspendTime=None SecsPreSuspend=0 LastSchedEval=2026-09-25T13:33:02 Scheduler=Main
+   Partition=debug AllocNode:Sid=tri-login04:1489794
+   ReqNodeList=(null) ExcNodeList=(null)
+   NodeList=tri0526
+   BatchHost=tri0526
+   NumNodes=1 NumCPUs=192 NumTasks=192 CPUs/Task=1 ReqB:S:C:T=0:0:*:*
+   ReqTRES=cpu=192,mem=767000M,node=1,billing=192
+   AllocTRES=cpu=192,mem=767000M,node=1,billing=192
+   Socks/Node=* NtasksPerN:B:S:C=192:0:*:* CoreSpec=*
+   MinCPUsNode=192 MinMemoryNode=767000M MinTmpDiskNode=0
+   Features=(null) DelayBoot=00:00:00
+   OverSubscribe=NO Contiguous=0 Licenses=(null) LicensesAlloc=(null) Network=(null)
+   Command=/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/compute_Spectrogram_job.sh
+   SubmitLine=SBATCH --comment /opt/slurm/bin/sbatch --export=NONE compute_Spectrogram_job.sh --export=NONE compute_Spectrogram_job.sh
+   WorkDir=/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess
+   Comment=/opt/slurm/bin/sbatch --export=NONE compute_Spectrogram_job.sh
+   StdErr=
+   StdIn=/dev/null
+   StdOut=/scratch/ranbar/My_Projects/Study1_PTRamp/scripts/step2_PostProcess/PT_Spectrogram_2421445.txt
+
+sacct -j 2421445
+JobID           JobName    Account    Elapsed  MaxVMSize     MaxRSS  SystemCPU    UserCPU ExitCode 
+------------ ---------- ---------- ---------- ---------- ---------- ---------- ---------- -------- 
+2421445      PT_Spectr+ def-stein+   00:09:51                        02:45.106   01:20:48      0:0 
+2421445.bat+      batch def-stein+   00:09:54          0 540900852K  02:45.106   01:20:48     0:15 
+2421445.ext+     extern def-stein+   00:09:54                         00:00:00   00:00:00      0:0 
+

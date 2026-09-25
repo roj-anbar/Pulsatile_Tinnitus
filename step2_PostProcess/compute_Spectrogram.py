@@ -135,27 +135,32 @@ def extract_ramp_slope_from_foldername(path: Path) -> float:
     return float(match.group(1).replace('p', '.'))
 
 
-def extract_sim_params_from_h5_filename(h5_file: Path) -> tuple[float, int]:
-    """Parse timesteps-per-cycle from a snapshot filename.
 
-    Expected patterns:
-      '_ts<int>'   — timesteps per cycle             (e.g. '_ts500_')
+def extract_sim_params_from_foldername(input_path: Path) -> tuple[int, int | None]:
+    """Parse timesteps-per-cycle and save frequency from the results folder path.
+
+    Expected patterns (anywhere in the full path string):
+      '_ts<int>'       — timesteps per cycle  (e.g. 'case_ts10000_cy10_...')
+      '_saveFreq<int>' — save frequency       (e.g. 'case_ts10000_cy10_saveFreq2')
 
     Returns:
-    timesteps_per_cyc : int
+      timesteps_per_cyc : int
+      save_freq         : int or None (None if pattern absent)
     """
-    stem = h5_file.stem
+    path_str = str(input_path)
 
-    match_ts = re.search(r'_ts(\d+)', stem)
+    match_ts = re.search(r'_ts(\d+)', path_str)
     if match_ts is None:
         raise ValueError(
-            f"Filename '{h5_file.name}' has no '_ts<int>' pattern. "
+            f"Folder path '{input_path}' has no '_ts<int>' pattern. "
             "Supply --timesteps_per_cyc on the CLI instead."
         )
-
     timesteps_per_cyc = int(match_ts.group(1))
 
-    return timesteps_per_cyc
+    match_sf = re.search(r'_saveFreq(\d+)', path_str)
+    save_freq = int(match_sf.group(1)) if match_sf else None
+
+    return timesteps_per_cyc, save_freq
 
 
 # ---------------------------------------- Mesh Utilities -----------------------------------------------------
@@ -887,7 +892,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
 
     #ax[1].set_ylim([-1, analysis_params['SPL_db_max']])
     ax[1].set_ylabel('Mean SPL (dB)', fontweight='bold', labelpad=20, fontsize=font_size)
-    ax[1].legend(loc = 'upper left', fontsize=font_size)
+    #ax[1].legend(loc = 'upper left', fontsize=font_size)
 
     # ------------------------ Subplot 2: Spectral Centroid ----------------------------
     ax[2].plot(bins_Q, spectral_metrics['centroid_freq'], linewidth = 4, color='black')
@@ -947,6 +952,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
                     spec_quantity_array: np.array,
                     period_seconds: float, 
                     timesteps_per_cyc: int,
+                    save_freq: int,
                     ROI_params: dict,
                     STFT_params: dict,
                     spectral_analysis_params: dict):
@@ -973,7 +979,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
 
 
     # Compute sampling rate and add to STFT_params
-    sampling_rate = timesteps_per_cyc/period_seconds # Hz
+    sampling_rate = timesteps_per_cyc / period_seconds / save_freq # Hz
     STFT_params["sampling_rate"] = sampling_rate 
 
     print (f"Computing {spec_quantity} spectrograms for {ROI_type} ROIs with STFT parameters: \n"
@@ -1179,6 +1185,8 @@ def parse_args():
     ap.add_argument("--density",           type=float,  default=1057,   help="Blood density [kg/m3] (default: 1057)")
     ap.add_argument("--period_seconds",    type=float,  default=0.915,  help="Period in seconds")
     ap.add_argument("--timesteps_per_cyc", type=int,                    help="Number of timesteps per cycle")
+    ap.add_argument("--save_freq",         type=int,  default=None,     help="Every Nth timestep was saved (e.g. 2 means every other step). If omitted, parsed from input folder name (expects 'saveFreq<N>').")
+    ap.add_argument("--max_cycle",         type=int,  default=None,     help="Only read snapshots up to and including this cycle index (0-based). Useful to skip corrupted late-cycle files.")
     ap.add_argument("--spec_quantity",     type=str,    required=True,  choices=["wallpressure","velocity","qcriterion"], help="Quantity of interest used for spectrogram")
     
 
@@ -1320,6 +1328,11 @@ def main():
         # Find & sort CFD results h5 files by timestep 
         CFD_h5_files = sorted(input_path.glob('*_curcyc_*up.h5'), key = extract_timestep_from_h5_filename)
 
+        if args.max_cycle is not None:
+            CFD_h5_files = [f for f in CFD_h5_files
+                            if (m := re.search(r'_curcyc_(\d+)_', f.name)) and int(m.group(1)) <= args.max_cycle]
+            print(f"[info] Limiting to cycles 0–{args.max_cycle}: {len(CFD_h5_files)} snapshots retained.")
+
         # Assemble variable array
         if args.spec_quantity == 'wallpressure':
             spec_quantity_array = read_wallpressure_from_h5_files_parallel(CFD_h5_files, surf_mesh, args.n_process, args.density)
@@ -1353,10 +1366,18 @@ def main():
     # Obtain simulation temporal parameters from filename (if not given as input argument)
     timesteps_per_cyc = args.timesteps_per_cyc
     period_seconds    = args.period_seconds
+    save_freq         = args.save_freq
 
-    if timesteps_per_cyc is None:
-        timesteps_per_cyc = extract_sim_params_from_h5_filename(CFD_h5_files[0])
-        print(f"Found timesteps_per_cycle = {timesteps_per_cyc} from CFD results HDF5 file names. \n")
+    if timesteps_per_cyc is None or save_freq is None:
+        ts_parsed, sf_parsed = extract_sim_params_from_foldername(input_path)
+        if timesteps_per_cyc is None:
+            timesteps_per_cyc = ts_parsed
+            print(f"[info] Found timesteps_per_cycle = {timesteps_per_cyc}  (parsed from folder name)")
+        if save_freq is None:
+            if sf_parsed is None:
+                raise ValueError("Could not find '_saveFreq<int>' in folder path and --save_freq was not supplied.")
+            save_freq = sf_parsed
+            print(f"[info] Found save_freq           = {save_freq}  (parsed from folder name)")
 
 
     # If --spec_regions_csv is provided, load all regions from the CSV so H5 files are reused for every region without re-reading from disk.
@@ -1392,6 +1413,7 @@ def main():
                             spec_quantity_array      = spec_quantity_array,
                             period_seconds           = period_seconds,
                             timesteps_per_cyc        = timesteps_per_cyc,
+                            save_freq                = save_freq,
                             ROI_params               = region_ROI_params,
                             STFT_params              = short_time_fourier_params,
                             spectral_analysis_params = spectral_analysis_params)
