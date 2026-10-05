@@ -897,7 +897,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     ax[1].plot(bins_Q, spectral_metrics['mean_power_midFreq'],  label='mid-freq',  linewidth = 4, color='tab:blue') #deepskyblue
     ax[1].plot(bins_Q, spectral_metrics['mean_power_highFreq'], label='high-freq', linewidth = 4, color='tab:red') #'mediumblue'
 
-    #ax[1].set_ylim([-60, analysis_params['SPL_db_max']])
+    ax[1].set_ylim([analysis_params['SPL_db_min'], analysis_params['SPL_db_max']])
     ax[1].set_ylabel('Mean SPL (dB)', fontweight='bold', labelpad=20, fontsize=font_size)
     #ax[1].legend(loc = 'upper left', fontsize=font_size)
 
@@ -1233,7 +1233,7 @@ def parse_args():
     ap.add_argument("--flowrate_min",       type=float, default=2.0,      help="Lower inlet flowrate limit for analysis window in mL/s (default: 2.0)")
     ap.add_argument("--flowrate_max",       type=float, default=10.0,     help="Upper inlet flowrate limit for analysis window in mL/s (default: 10.0)")
     ap.add_argument("--flowrate_cut",       type=float, default=8.0,      help="Upper inlet flowrate limit for figures in mL/s (default: 8.0)")
-    ap.add_argument("--power_SPL_db_min",   type=float, default=0.0,      help="Lower SPL power limit for spectrogram colormap in dB (default: 20)")
+    ap.add_argument("--power_SPL_db_min",   type=float, default=-20.0,      help="Lower SPL power limit for spectrogram colormap in dB (default: 20)")
     ap.add_argument("--power_SPL_db_max",   type=float, default=120.0,    help="Upper SPL power limit for spectrogram colormap in dB (default: 120)")
 
     return ap.parse_args()

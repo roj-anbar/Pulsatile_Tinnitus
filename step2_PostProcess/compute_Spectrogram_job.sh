@@ -33,7 +33,7 @@ set -euo pipefail
 echo "Job started: $(date)"
 
 # ---------------------------------- Define Paths -------------------------------------------------------------------------------
-CASE=PTSeg106_base_0p64                                              # Case name
+CASE=PTSeg028_base_0p64                                              # Case name
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE                 # Parent directory of the case
 MESH_FOLDER="$BASE_DIR/step1_CFD/data"                                  # Path to mesh data folder containing the h5 mesh
 CENTERLINE="$MESH_FOLDER/${CASE}_centerline_points.csv"                 # Path to centerline csv file used to construct ROIs
