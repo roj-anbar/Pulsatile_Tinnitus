@@ -37,7 +37,7 @@ CASE=PTSeg106_base_0p64                                              # Case name
 BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE                 # Parent directory of the case
 MESH_FOLDER="$BASE_DIR/step1_CFD/data"                                  # Path to mesh data folder containing the h5 mesh
 CENTERLINE="$MESH_FOLDER/${CASE}_centerline_points.csv"                 # Path to centerline csv file used to construct ROIs
-INPUT="$BASE_DIR/step1_CFD/results_inletBC_ramp/rampSlope1mLs2/${CASE}_ts10000_cy10_saveFreq2"       # Path to CFD results folder containing timeseries HDF5 files
+INPUT="$BASE_DIR/step1_CFD/results_inletBC_ramp/rampSlope2mLs2/${CASE}_ts10000_cy6_saveFreq1"       # Path to CFD results folder containing timeseries HDF5 files
 OUTPUT="$BASE_DIR/step2_PostProcess"                                    # Path to saving spectrogram files
 SPECTROGRAM_REGIONS="$OUTPUT/configs/${CASE}_spectrogram_regions.csv"   # Path to spectrogram regions csv file used to generate regional specs
 
@@ -81,12 +81,12 @@ python "$SCRIPT" \
     --ROI_center_csv        "$CENTERLINE" \
     --spec_regions_csv      "$SPECTROGRAM_REGIONS" \
     --spec_quantity         "wallpressure" \
-    --max_cycle             8 \
     --window_length         2732 \
     --ROI_type              "cylinder" \
-    --cutoff_db             -60 \
     --flag_multi_ROI
 
+#    --cutoff_db             -80 \
+#    --max_cycle             9 \
 #    --ramp_slope    2
 #    --flag_save_ROI
 #    --timesteps_per_cyc 10000 
@@ -117,19 +117,19 @@ python "$SCRIPT" \
 # Note2: You HAVE to comment this part if submitting this file through sbatch
 
 # python compute_Spectrogram.py \
-#     --case_name             "PTSeg106_base_0p64" \
-#     --input_folder          "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/results_inletBC_ramp/PTSeg106_base_0p64_ts10000_cy6_saveFreq1/" \
-#     --mesh_folder           "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data" \
-#     --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess" \
-#     --ROI_center_csv        "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data/PTSeg106_base_0p64_centerline_points.csv" \
-#     --spec_regions_csv      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess/configs/PTSeg106_base_0p64_spectrogram_regions.csv" \
+#     --case_name             "PTSeg028_base_0p64" \
+#     --input_folder          "$PROJECT/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/results_inletBC_ramp/rampSlope3mLs2/PTSeg028_base_0p64_ts10000_cy4_saveFreq1/" \
+#     --mesh_folder           "$PROJECT/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data" \
+#     --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess" \
+#     --ROI_center_csv        "$PROJECT/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step1_CFD/data/PTSeg028_base_0p64_centerline_points.csv" \
+#     --spec_regions_csv      "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg028_base_0p64/step2_PostProcess/configs/PTSeg028_base_0p64_spectrogram_regions.csv" \
 #     --spec_quantity         "wallpressure" \
 #     --window_length         2732 \
 #     --ROI_type              "cylinder" \
-#     --ROI_start_center_id   825 \
-#     --ROI_end_center_id     890 \
-#     --ROI_radius            12 \
-#     --ROI_stride            2 \
+#     --ROI_start_center_id   1108 \
+#     --ROI_end_center_id     1188 \
+#     --ROI_radius            10 \
+#     --ROI_stride            4 \
 #     --flag_multi_ROI  
 #    --flag_save_ROI
 

@@ -84,7 +84,7 @@ import re   # for text manupulation
 
 import vtk
 import numpy as np
-from scipy.signal import stft, find_peaks
+from scipy.signal import stft, find_peaks, butter, sosfiltfilt
 from scipy.ndimage import uniform_filter1d #for cleaning signal
 import pyvista as pv
 import matplotlib.pyplot as plt
@@ -307,6 +307,7 @@ def short_time_fourier(data,
                         n_fft:         int,
                         pad_mode:      str,
                         detrend:       str,
+                        hp_cutoff:     float = None,   # high-pass cutoff in Hz, None = disabled
                         ):
 
     """
@@ -330,6 +331,11 @@ def short_time_fourier(data,
         bins : Time vector in [seconds] -> shape (n_frames,)
         Z    : Complex STFT output      -> shape (n_freqs, n_frames)
     """
+
+    # High-pass filter applied to raw signal before padding/STFT
+    if hp_cutoff is not None:
+        sos = butter(4, hp_cutoff, btype='high', fs=sampling_rate, output='sos')
+        data = sosfiltfilt(sos, data, axis=-1)
 
     n_frames = data.shape[1]
 
@@ -547,6 +553,7 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
     pad_mode      = STFT_params.get("pad_mode")
     window_type   = STFT_params.get("window_type")
     detrend       = STFT_params.get("detrend")
+    hp_cutoff     = STFT_params.get("hp_cutoff")
     #cutoff_db     = STFT_params.get("cutoff_db")
     #cutoff_freq   = STFT_params.get("cutoff_freq")
 
@@ -567,7 +574,7 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
     # Note: All the below S arrays have shape (n_freq, n_frames)
 
     # Compute FFT for first point. # Pass data as row vectors
-    freqs, bins, Z0 = short_time_fourier(signal[0][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend)
+    freqs, bins, Z0 = short_time_fourier(signal[0][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend, hp_cutoff)
     power_sum = np.zeros_like(Z0, dtype=np.float64)
 
     # Case 1: Single point ROI
@@ -578,7 +585,7 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
     else:
         for point in range(n_points):
             # Pass data as row vectors
-            _, _, Z_point = short_time_fourier(signal[point][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend)
+            _, _, Z_point = short_time_fourier(signal[point][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend, hp_cutoff)
             power_point = np.abs(Z_point)**2
             power_sum += power_point 
             
@@ -715,13 +722,13 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_low, f_mid, f_
 
     # Compute average power for each frequency band
     # Note: it is better to perform averaging in linear space and convert back to dB but this doesn't give good results for my cases
-    mean_power_lowFreq  = np.mean(spec_lowFreq) 
-    mean_power_midFreq  = np.mean(spec_midFreq)
-    mean_power_highFreq = np.mean(spec_highFreq)
+    # mean_power_lowFreq  = np.mean(spec_lowFreq) 
+    # mean_power_midFreq  = np.mean(spec_midFreq)
+    # mean_power_highFreq = np.mean(spec_highFreq)
 
-    # mean_power_lowFreq  = 10 * np.log10(np.mean(10**(spec_lowFreq/10))) 
-    # mean_power_midFreq  = 10 * np.log10(np.mean(10**(spec_midFreq/10))) 
-    # mean_power_highFreq = 10 * np.log10(np.mean(10**(spec_highFreq/10))) 
+    mean_power_lowFreq  = 10 * np.log10(np.mean(10**(spec_lowFreq/10))) 
+    mean_power_midFreq  = 10 * np.log10(np.mean(10**(spec_midFreq/10))) 
+    mean_power_highFreq = 10 * np.log10(np.mean(10**(spec_highFreq/10))) 
     
     """
     # Compute fraction of frequencies with power > 80dB
@@ -869,7 +876,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     # ------------------------ Subplot 0: Spectrogram ----------------------------
     spectrogram = ax[0].pcolormesh(bins_Q, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
     # Set the limit for power colormap
-    #spectrogram.set_clim(analysis_params['SPL_db_min'], analysis_params['SPL_db_max'])
+    spectrogram.set_clim(analysis_params['SPL_db_min'], analysis_params['SPL_db_max'])
 
 
     ax[0].set_ylabel('Frequency (Hz)',   fontweight='bold', fontsize=font_size, labelpad=10)
@@ -890,7 +897,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     ax[1].plot(bins_Q, spectral_metrics['mean_power_midFreq'],  label='mid-freq',  linewidth = 4, color='tab:blue') #deepskyblue
     ax[1].plot(bins_Q, spectral_metrics['mean_power_highFreq'], label='high-freq', linewidth = 4, color='tab:red') #'mediumblue'
 
-    #ax[1].set_ylim([-1, analysis_params['SPL_db_max']])
+    #ax[1].set_ylim([-60, analysis_params['SPL_db_max']])
     ax[1].set_ylabel('Mean SPL (dB)', fontweight='bold', labelpad=20, fontsize=font_size)
     #ax[1].legend(loc = 'upper left', fontsize=font_size)
 
@@ -1185,8 +1192,8 @@ def parse_args():
     ap.add_argument("--density",           type=float,  default=1057,   help="Blood density [kg/m3] (default: 1057)")
     ap.add_argument("--period_seconds",    type=float,  default=0.915,  help="Period in seconds")
     ap.add_argument("--timesteps_per_cyc", type=int,                    help="Number of timesteps per cycle")
-    ap.add_argument("--save_freq",         type=int,  default=None,     help="Every Nth timestep was saved (e.g. 2 means every other step). If omitted, parsed from input folder name (expects 'saveFreq<N>').")
-    ap.add_argument("--max_cycle",         type=int,  default=None,     help="Only read snapshots up to and including this cycle index (0-based). Useful to skip corrupted late-cycle files.")
+    ap.add_argument("--save_freq",         type=int,    default=None,   help="Every Nth timestep was saved (e.g. 2 means every other step). If omitted, parsed from input folder name (expects 'saveFreq<N>').")
+    ap.add_argument("--max_cycle",         type=int,    default=None,   help="Only read snapshots up to and including this cycle index (0-based). Useful to skip corrupted late-cycle files.")
     ap.add_argument("--spec_quantity",     type=str,    required=True,  choices=["wallpressure","velocity","qcriterion"], help="Quantity of interest used for spectrogram")
     
 
@@ -1212,8 +1219,9 @@ def parse_args():
     ap.add_argument("--n_fft",            type=int,   default=None,     help="FFT length (bins)")
     ap.add_argument("--overlap_fraction", type=float, default=0.9,      help="Overlap fraction between consequent windows [0,1] (default: 0.9)")
     ap.add_argument("--window_type",      type=str,   default='hann',   choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT (default: hann)")
-    ap.add_argument("--pad_mode",         type=str,   default='even',   choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts (default: even)")
+    ap.add_argument("--pad_mode",         type=str,   default='odd',    choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts (default: even)")
     ap.add_argument("--detrend",          type=str,   default='linear', help="Detrend option for STFT: 'linear', 'constant', or False (default: linear)")
+    ap.add_argument("--hp_cutoff",        type=float, default=None,     help="High-pass filter cutoff frequency in Hz before STFT (omit to disable, default: None)")
 
 
     # Spectral analysis and visualization parameters
@@ -1221,11 +1229,11 @@ def parse_args():
     ap.add_argument("--cutoff_db",          type=float, default=None,     help="Minimum dB floor for visualization (omit to disable clamping)")
     ap.add_argument("--freq_low",           type=float, default=100,      help="Upper threshold for low-frequency band in Hz (default: 100 Hz)")
     ap.add_argument("--freq_mid",           type=float, default=1000,     help="Upper threshold for mid-frequency band in Hz (default: 1000 Hz)")
-    ap.add_argument("--freq_max",           type=float, default=5000,     help="Maximum frequency to filter spectrogram in Hz (default: 5000 Hz)")
+    ap.add_argument("--freq_max",           type=float, default=3000,     help="Maximum frequency to filter spectrogram in Hz (default: 5000 Hz)")
     ap.add_argument("--flowrate_min",       type=float, default=2.0,      help="Lower inlet flowrate limit for analysis window in mL/s (default: 2.0)")
     ap.add_argument("--flowrate_max",       type=float, default=10.0,     help="Upper inlet flowrate limit for analysis window in mL/s (default: 10.0)")
     ap.add_argument("--flowrate_cut",       type=float, default=8.0,      help="Upper inlet flowrate limit for figures in mL/s (default: 8.0)")
-    ap.add_argument("--power_SPL_db_min",   type=float, default=20.0,     help="Lower SPL power limit for spectrogram colormap in dB (default: 20)")
+    ap.add_argument("--power_SPL_db_min",   type=float, default=0.0,      help="Lower SPL power limit for spectrogram colormap in dB (default: 20)")
     ap.add_argument("--power_SPL_db_max",   type=float, default=120.0,    help="Upper SPL power limit for spectrogram colormap in dB (default: 120)")
 
     return ap.parse_args()
@@ -1279,7 +1287,8 @@ def main():
         "overlap_frac": args.overlap_fraction,
         "window_type": args.window_type,
         "pad_mode": args.pad_mode,
-        "detrend": args.detrend}
+        "detrend": args.detrend,
+        "hp_cutoff": args.hp_cutoff}
     
     spectral_analysis_params = {
         "ramp_slope": ramp_slope,
@@ -1315,7 +1324,30 @@ def main():
     
     print("=" * 200 + "\n")
 
-    
+    print("[params] ROI parameters:")
+    for k, v in ROI_params.items():
+        print(f"         {k:<30} = {v}")
+
+    print("\n[params] STFT parameters:")
+    for k, v in short_time_fourier_params.items():
+        print(f"         {k:<30} = {v}")
+
+    print("\n[params] Spectral analysis parameters:")
+    for k, v in spectral_analysis_params.items():
+        print(f"         {k:<30} = {v}")
+
+    print("\n[params] Misc:")
+    print(f"         {'density':<30} = {args.density}")
+    print(f"         {'period_seconds':<30} = {args.period_seconds}")
+    print(f"         {'n_process':<30} = {args.n_process}")
+    print(f"         {'spec_quantity':<30} = {args.spec_quantity}")
+    print(f"         {'spec_regions_csv':<30} = {args.spec_regions_csv}")
+    if args.max_cycle is not None:
+        print(f"         {'max_cycle':<30} = {args.max_cycle}")
+
+    print("\n" + "=" * 200 + "\n")
+
+
     # Reading the input files for quantity used to generate spectrograms
     input_path = Path(input_folder)
 
