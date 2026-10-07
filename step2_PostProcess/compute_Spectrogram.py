@@ -325,11 +325,12 @@ def short_time_fourier(data,
         n_fft: Number of FFT bins in each segment (>= window_length) -> if a zero padded FFT is desired, if None, is equal to window_length (nperseg) 
         pad_mode : Optional padding strategy to reduce edge artifacts {'cycle','constant','odd','even',None}
         detrend : {'linear','constant', False}
+        scaling: {'spectrum','density'}
     
     Returns:
         freqs: Frequency vector in [Hz] -> shape (n_freqs,)
         bins : Time vector in [seconds] -> shape (n_frames,)
-        Z    : Complex STFT output      -> shape (n_freqs, n_frames)
+        Z    : Complex STFT output      -> shape (n_freqs, n_frames), same units as input data
     """
 
     # High-pass filter applied to raw signal before padding/STFT
@@ -360,7 +361,7 @@ def short_time_fourier(data,
     elif pad_mode in ['odd', 'even', 'none', None]:
         boundary = pad_mode
     
-
+    # These have to be the same names as the scipy.signal.stft function expects
     stft_params = {
         'fs' : sampling_rate,
         'window' : window_type,
@@ -372,13 +373,18 @@ def short_time_fourier(data,
         'boundary' : boundary,
         'padded' : True,
         'axis' : -1,
+        'scaling': 'psd',
         }
 
 
     # All the below S arrays have shape (n_freq, n_frames)
     freqs, bins, Z = stft(x=data, **stft_params) #data[0] will be the first row
+    
+    # correcting for the one-sided FFT (doubling the amplitudes)
+    Z_corrected = Z.copy()
+    Z_corrected[1:-1, :] *= np.sqrt(2)   # multiply amplitude; squaring gives ×2 in power
 
-    return freqs, bins, Z
+    return freqs, bins, Z_corrected
 
 
 # ---------------------------------- ROI Utilities -------------------------------------------
@@ -1227,16 +1233,16 @@ def parse_args():
     # Spectral analysis and visualization parameters
     ap.add_argument("--ramp_slope",         type=float, default=None,     help="Ramp slope [mL/s2] used to convert time bins to inlet flowrate Q = ramp_slope * t. If not given, parsed from input_folder name (expects 'rampSlope<N>mLs2').")
     ap.add_argument("--cutoff_db",          type=float, default=None,     help="Minimum dB floor for visualization (omit to disable clamping)")
-    ap.add_argument("--freq_min",           type=float, default=10,        help="Lower threshold for low-frequency band in Hz (default: 10 Hz)")
+    ap.add_argument("--freq_min",           type=float, default=10,       help="Lower threshold for low-frequency band in Hz (default: 10 Hz)")
     ap.add_argument("--freq_low",           type=float, default=100,      help="Upper threshold for low-frequency band in Hz (default: 100 Hz)")
     ap.add_argument("--freq_mid",           type=float, default=1000,     help="Upper threshold for mid-frequency band in Hz (default: 1000 Hz)")
     ap.add_argument("--freq_max",           type=float, default=3000,     help="Maximum frequency to filter spectrogram in Hz (default: 3000 Hz)")
     ap.add_argument("--flowrate_min",       type=float, default=2.0,      help="Lower inlet flowrate limit for analysis window in mL/s (default: 2.0)")
     ap.add_argument("--flowrate_max",       type=float, default=10.0,     help="Upper inlet flowrate limit for analysis window in mL/s (default: 10.0)")
     ap.add_argument("--flowrate_cut",       type=float, default=8.0,      help="Upper inlet flowrate limit for figures in mL/s (default: 8.0)")
-    ap.add_argument("--power_SPL_db_min",   type=float, default=0.0,    help="Lower SPL power limit for spectrogram colormap in dB (default: 20)")
-    ap.add_argument("--power_SPL_db_max",   type=float, default=120.0,  help="Upper SPL power limit for spectrogram colormap in dB (default: 120)")
-    ap.add_argument("--phase_detection_db", type=float, default=5.0,    help="dB threshold above the noise floor used to detect onset of each spectral phase (default: 0 dB)")
+    ap.add_argument("--power_SPL_db_min",   type=float, default=0.0,      help="Lower SPL power limit for spectrogram colormap in dB (default: 20)")
+    ap.add_argument("--power_SPL_db_max",   type=float, default=120.0,    help="Upper SPL power limit for spectrogram colormap in dB (default: 120)")
+    ap.add_argument("--phase_detection_db", type=float, default=0.0,    help="dB threshold above the noise floor used to detect onset of each spectral phase (default: 0 dB)")
 
     return ap.parse_args()
 
