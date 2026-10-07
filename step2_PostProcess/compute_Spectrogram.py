@@ -308,6 +308,7 @@ def short_time_fourier(data,
                         pad_mode:      str,
                         detrend:       str,
                         hp_cutoff:     float = None,   # high-pass cutoff in Hz, None = disabled
+                        stft_scaling:  str   = 'psd',
                         ):
 
     """
@@ -373,7 +374,7 @@ def short_time_fourier(data,
         'boundary' : boundary,
         'padded' : True,
         'axis' : -1,
-        'scaling': 'psd',
+        'scaling': stft_scaling,
         }
 
 
@@ -560,6 +561,7 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
     window_type   = STFT_params.get("window_type")
     detrend       = STFT_params.get("detrend")
     hp_cutoff     = STFT_params.get("hp_cutoff")
+    stft_scaling  = STFT_params.get("stft_scaling", "psd")
     #cutoff_db     = STFT_params.get("cutoff_db")
     #cutoff_freq   = STFT_params.get("cutoff_freq")
 
@@ -579,7 +581,7 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
     # Note: All the below S arrays have shape (n_freq, n_frames)
 
     # Compute FFT for first point. # Pass data as row vectors
-    freqs, bins, Z0 = short_time_fourier(signal[0][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend, hp_cutoff)
+    freqs, bins, Z0 = short_time_fourier(signal[0][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend, hp_cutoff, stft_scaling)
     power_sum = np.zeros_like(Z0, dtype=np.float64)
 
     # Case 1: Single point ROI
@@ -590,7 +592,7 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
     else:
         for point in range(n_points):
             # Pass data as row vectors
-            _, _, Z_point = short_time_fourier(signal[point][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend, hp_cutoff)
+            _, _, Z_point = short_time_fourier(signal[point][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend, hp_cutoff, stft_scaling)
             power_point = np.abs(Z_point)**2
             power_sum += power_point 
             
@@ -1228,6 +1230,7 @@ def parse_args():
     ap.add_argument("--pad_mode",         type=str,   default='odd',    choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts (default: even)")
     ap.add_argument("--detrend",          type=str,   default='linear', help="Detrend option for STFT: 'linear', 'constant', or False (default: linear)")
     ap.add_argument("--hp_cutoff",        type=float, default=None,     help="High-pass filter cutoff frequency in Hz before STFT (omit to disable, default: None)")
+    ap.add_argument("--stft_scaling",     type=str,   default='psd',    choices=["psd","spectrum"], help="STFT output scaling: 'psd' (Pa²/Hz, resolution-independent) or 'spectrum' (Pa² per bin) (default: psd)")
 
 
     # Spectral analysis and visualization parameters
@@ -1296,7 +1299,8 @@ def main():
         "window_type": args.window_type,
         "pad_mode": args.pad_mode,
         "detrend": args.detrend,
-        "hp_cutoff": args.hp_cutoff}
+        "hp_cutoff": args.hp_cutoff,
+        "stft_scaling": args.stft_scaling}
     
     spectral_analysis_params = {
         "ramp_slope": ramp_slope,

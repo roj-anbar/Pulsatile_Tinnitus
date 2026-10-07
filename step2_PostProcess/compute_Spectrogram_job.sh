@@ -24,7 +24,7 @@
 #SBATCH --partition=debug
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=192
-#SBATCH --time=00:45:00
+#SBATCH --time=00:35:00
 #SBATCH --job-name PT_Spectrogram
 #SBATCH --output=PT_Spectrogram_%j.txt
 
@@ -33,11 +33,11 @@ set -euo pipefail
 echo "Job started: $(date)"
 
 # ---------------------------------- Define Paths -------------------------------------------------------------------------------
-CASE=PTSeg028_base_0p64                                                                             # Case name
+CASE=PTSeg106_base_0p64                                                                             # Case name
 BASE_DIR=$PROJECT/My_Projects/Study1_PTRamp/cases/$CASE                                             # Parent directory of the case
 MESH_FOLDER="$BASE_DIR/step1_CFD/data"                                                              # Path to mesh data folder containing the h5 mesh
 CENTERLINE="$MESH_FOLDER/${CASE}_centerline_points.csv"                                             # Path to centerline csv file used to construct ROIs
-INPUT="$BASE_DIR/step1_CFD/results_inletBC_ramp/rampSlope3mLs2/${CASE}_ts10000_cy4_saveFreq1"      # Path to CFD results folder containing timeseries HDF5 files
+INPUT="$BASE_DIR/step1_CFD/results_inletBC_ramp/rampSlope2mLs2/${CASE}_ts10000_cy6_saveFreq1"      # Path to CFD results folder containing timeseries HDF5 files
 OUTPUT="$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE/step2_PostProcess"                           # Path to saving spectrogram files
 SPECTROGRAM_REGIONS="$OUTPUT/configs/${CASE}_spectrogram_regions.csv"                               # Path to spectrogram regions csv file used to generate regional specs
 
@@ -116,20 +116,20 @@ python -u "$SCRIPT" \
 # Note1: You HAVE to load the modules first from terminal then run below
 # Note2: You HAVE to comment this part if submitting this file through sbatch
 
-python compute_Spectrogram.py \
-    --case_name             "PTSeg106_base_0p64" \
-    --input_folder          "$PROJECT/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/results_inletBC_ramp/rampSlope2mLs2/PTSeg106_base_0p64_ts10000_cy6_saveFreq1/" \
-    --mesh_folder           "$PROJECT/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data" \
-    --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess" \
-    --ROI_center_csv        "$PROJECT/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data/PTSeg106_base_0p64_centerline_points.csv" \
-    --spec_quantity         "wallpressure" \
-    --window_length         1000 \
-    --ROI_type              "cylinder" \
-    --ROI_start_center_id   1108 \
-    --ROI_end_center_id     1188 \
-    --ROI_radius            10 \
-    --ROI_stride            2 \
-    --flag_multi_ROI  
+# python compute_Spectrogram.py \
+#     --case_name             "PTSeg106_base_0p64" \
+#     --input_folder          "$PROJECT/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/results_inletBC_ramp/rampSlope2mLs2/PTSeg106_base_0p64_ts10000_cy6_saveFreq1/" \
+#     --mesh_folder           "$PROJECT/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data" \
+#     --output_folder         "$SCRATCH/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step2_PostProcess" \
+#     --ROI_center_csv        "$PROJECT/My_Projects/Study1_PTRamp/cases/PTSeg106_base_0p64/step1_CFD/data/PTSeg106_base_0p64_centerline_points.csv" \
+#     --spec_quantity         "wallpressure" \
+#     --window_length         1000 \
+#     --ROI_type              "cylinder" \
+#     --ROI_start_center_id   1108 \
+#     --ROI_end_center_id     1188 \
+#     --ROI_radius            10 \
+#     --ROI_stride            2 \
+#     --flag_multi_ROI  
 
 #    --ramp_slope            2 \
 #    --flag_save_ROI
