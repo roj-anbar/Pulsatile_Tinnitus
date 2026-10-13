@@ -387,6 +387,10 @@ def short_time_fourier(data,
 
     return freqs, bins, Z_corrected
 
+def power_to_db(power_linear, power_ref):
+    power_db = 10.0 * np.log10(power_linear / power_ref)
+
+    return power_db
 
 # ---------------------------------- ROI Utilities -------------------------------------------
 def read_ROI_centerlines_from_csv(csv_path: str, ROI_type: str) -> np.ndarray:
@@ -534,14 +538,13 @@ def assemble_quantity_array_for_one_ROI(output_folder_ROIs, surf_mesh, vol_mesh,
 
 
 
+
 # ======================================================================================================
-# HEMODYNAMICS FUNCTIONS
+# SPECTROGRAM ANALYSIS: QUANTIFICATION AND CLASSIFICATION FUNCTIONS
 # ======================================================================================================
 
 
-# ---------------------------------------- Compute Spectrograms -----------------------------------------------------
-
-def calculate_mean_spectrogram(var_name, var_array, STFT_params):
+def calculate_mean_spectrogram(var_name, var_array, STFT_params, pressure_ref):
     """
     Compute an average spectrogram (in dB) based on the given array for the variable of interest with configurable STFT parameters.
 
@@ -601,36 +604,32 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
         
     # Define the reference value for normalizing the power to obtain dB scales
     if var_name == 'wallpressure':
-        power_ref = (2e-5)**2 
+        power_ref = pressure_ref**2 
     else:
         power_ref = np.mean(power_avg) 
 
     # Convert power to dB scale
-    power_avg_db = 10.0 * np.log10(power_avg / power_ref)
-    power_avg_db = np.squeeze(power_avg_db)
+    #power_avg_db = 10.0 * np.log10(power_avg / power_ref)
+    power_avg_db = power_to_db(power_avg, power_ref)
 
+    # To fix the array dimensions
+    power_avg    = np.squeeze(power_avg)
+    power_avg_db = np.squeeze(power_avg_db)
 
 
     if pad_mode in ['cycle', 'even', 'odd']:
         bins = bins - bins[0]
 
 
-    # Remove last frame to keep edges clean    
+    # Remove last frame to keep edges clean   
+    power_avg    = power_avg[:,:-1] 
     power_avg_db = power_avg_db[:,:-1]
     bins = bins[:-1]
-
-    # Clamp values below a threshold
-    #power_avg_db[power_avg_db < cutoff_db] = cutoff_db
-
-    # Set the power for any frequencies above a certain threshold to zero
-    #mask = freqs <= cutoff_freq
-    #power_avg_db[freqs > cutoff_freq, :] = 0
-
 
     # Store all values in spectrogram_data
     spectrogram_data = {
             'power_avg_linear': power_avg,  # (n_freq, n_frames)    — linear scale (|Z|^2), before dB conversion
-            'power_avg_dB': power_avg_db,   # (n_freq, n_frames)    — dB scale, clamped/filtered
+            'power_avg_db': power_avg_db,   # (n_freq, n_frames)    — dB scale, clamped/filtered
             'bins': bins,                   # time values (n_frames,1)
             'freqs': freqs,                 # (n_freqs,1)
             'sampling_rate': sampling_rate,
@@ -642,10 +641,6 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params):
     
     return spectrogram_data
 
-
-# ======================================================================================================
-# SPECTROGRAM ANALYSIS: QUANTIFICATION AND CLASSIFICATION FUNCTIONS
-# ======================================================================================================
 
 def filter_raw_spectrogram(spectrogram_data, spectral_analysis_params):
     """
@@ -666,77 +661,96 @@ def filter_raw_spectrogram(spectrogram_data, spectral_analysis_params):
     """
 
     # Unpack parameters
-    cutoff_db = spectral_analysis_params.get("cutoff_db")
-    freq_max  = spectral_analysis_params.get("freq_max")
-    Q_min     = spectral_analysis_params.get("Q_min")
-    Q_max     = spectral_analysis_params.get("Q_max")
+    cutoff_db     = spectral_analysis_params.get("cutoff_db")
+    freq_max      = spectral_analysis_params.get("freq_max")
+    flowrate_min  = spectral_analysis_params.get("Q_min")
+    flowrate_max  = spectral_analysis_params.get("Q_max")
+    ramp_slope    = spectral_analysis_params.get("ramp_slope")
+    ramp_offset   = spectral_analysis_params.get("ramp_offset")
+    pressure_ref  = spectral_analysis_params.get("pressure_ref")
+    power_ref     = pressure_ref**2    
 
     freqs        = spectrogram_data['freqs']
     bins         = spectrogram_data['bins']
     power_avg_dB = spectrogram_data['power_avg_dB']
 
     # Build masks
-    ramp_slope = spectral_analysis_params.get("ramp_slope")
-    bins_Q    = ramp_slope * bins                  # Q_inlet = ramp_slope * t
-    mask_Q    = (bins_Q >= Q_min) & (bins_Q <= Q_max)
     mask_freq = freqs <= freq_max
     
+    if flowrate_min is not None and flowrate_max is not None:
+        bins_Q  = ramp_slope * bins + ramp_offset  #Q_inlet = ramp_slope*t + ramp_ofset
+        mask_Q    = (bins_Q >= flowrate_min) & (bins_Q <= flowrate_max)
+    else:
+        mask_Q  = np.ones(len(bins), dtype=bool)  # keep all time bins
+
+
     # Apply both masks simultaneously
-    power_filt = power_avg_dB[np.ix_(mask_freq, mask_Q)]
+    power_filt_linear = power_avg_linear[np.ix_(mask_freq, mask_Q)]
+    power_filt_db     = power_avg_db[np.ix_(mask_freq, mask_Q)]
 
     # Clamp values below the dB floor (skip if cutoff_db not set)
     if cutoff_db is not None:
-        power_filt[power_filt < cutoff_db] = cutoff_db
+        linear_floor = 10.0**(cutoff_db/10.0) * power_ref
+        power_filt_linear[power_filt_linear < linear_floor] = linear_floor
+        power_filt_db[power_filt_db < cutoff_db] = cutoff_db
 
 
     # Save the filtered fields to a similar structure as raw spectrogram
     spec_filt = dict(spectrogram_data)   # shallow copy
 
-    spec_filt['freqs']        = freqs[mask_freq]
-    spec_filt['bins']         = bins[mask_Q]
-    spec_filt['power_avg_dB'] = power_filt
-    #spec_filt['power_avg_linear'] = spectrogram_data['power_avg_linear'][:, analysis_mask]
+    spec_filt['freqs']            = freqs[mask_freq]
+    spec_filt['bins']             = bins[mask_Q]
+    spec_filt['power_avg_db']     = power_filt_db
+    spec_filt['power_avg_linear'] = power_filt_linear
 
     return spec_filt
 
 
-def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_min, f_low, f_mid, f_max):
+def extract_metrics_from_spectrogram_column(freqs, spec_col_linear, spec_col_db, f_min, f_low, f_mid, f_max, pressure_ref):
     """
     Compute simple metrics for one spectrogram column (one time).
-    spec_col_dB: 1D array (n_freq,) in dB.
+    spec_col_linear: 1D array of averaged power (n_freq,) in Pascals.
+    spec_col_db: 1D array (n_freq,) in dB.
     f_min:       min frequency threshold in Hz (default = 10 Hz).
     f_low:       low frequency threshold in Hz (default = 100 Hz).
     f_mid:       mid frequency threshold in Hz (default = 1000 Hz).
     f_max:       max frequency threshold in Hz (default = 3000 Hz).
     
     Returns a dictionary of metrics for each column based on the 3 frequency bands (lowFreq_band: 0-f_low / midFreq_band: f_low-f_mid / highFreq_band: f_mid-f_max)
-    - mean_power_lowFreq: Average acoustic power below low frequency f_low.
-    - mean_power_midFreq: 
-    - mean_power_highFreq: Average acoustic power above mid frequency f_mid and below high frequency f_max.
+    - mean_power_lowFreq_db:  Average acoustic power in low frequency band in dB scale.
+    - mean_power_midFreq_db:  Average acoustic power in mid frequency band in dB scale.
+    - mean_power_highFreq_db: Average acoustic power in high frequency band in dB scale.
     - centroid_freq: Spectral centroid defined as the center of mass of the spectral power in Hz.
     """
     
     # Create a mask for each frequency band
-    mask_lowFreq  = (freqs >= f_min) & (freqs < f_low)
-    mask_midFreq  = (freqs >= f_low) & (freqs < f_mid)
-    mask_highFreq = (freqs >= f_mid) & (freqs < f_max)
+    lowFreq_band  = (freqs >= f_min) & (freqs < f_low)
+    midFreq_band  = (freqs >= f_low) & (freqs < f_mid)
+    highFreq_band = (freqs >= f_mid) & (freqs < f_max)
     
     # Filter the spectrogram for each frequency band
-    spec_lowFreq  = spec_col_dB[mask_lowFreq]
-    spec_midFreq  = spec_col_dB[mask_midFreq]
-    spec_highFreq = spec_col_dB[mask_highFreq]
+    power_lowFreq  = spec_col_linear[lowFreq_band]
+    power_midFreq  = spec_col_linear[midFreq_band]
+    power_highFreq = spec_col_linear[highFreq_band]
 
-    # Compute the basic spectral metrics:
+    # power_lowFreq_db  = spec_col_db[lowFreq_band]
+    # power_midFreq_db  = spec_col_db[midFreq_band]
+    # power_highFreq_db = spec_col_db[highFreq_band]
 
     # Compute average power for each frequency band
-    # Note: it is better to perform averaging in linear space and convert back to dB but this doesn't give good results for my cases
-    # mean_power_lowFreq  = np.mean(spec_lowFreq) 
-    # mean_power_midFreq  = np.mean(spec_midFreq)
-    # mean_power_highFreq = np.mean(spec_highFreq)
+    mean_power_lowFreq  = np.mean(spec_lowFreq) 
+    mean_power_midFreq  = np.mean(spec_midFreq)
+    mean_power_highFreq = np.mean(spec_highFreq)
 
-    mean_power_lowFreq  = 10 * np.log10(np.mean(10**(spec_lowFreq/10))) 
-    mean_power_midFreq  = 10 * np.log10(np.mean(10**(spec_midFreq/10))) 
-    mean_power_highFreq = 10 * np.log10(np.mean(10**(spec_highFreq/10))) 
+    # Convert to dB scale
+    power_ref = pressure_ref**2
+    mean_power_lowFreq_db  = power_to_db(mean_power_lowFreq, power_ref)
+    mean_power_midFreq_db  = power_to_db(mean_power_midFreq, power_ref)
+    mean_power_highFreq_db  = power_to_db(mean_power_highFreq, power_ref)
+
+    # mean_power_lowFreq  = 10 * np.log10(np.mean(10**(power_lowFreq/10))) 
+    # mean_power_midFreq  = 10 * np.log10(np.mean(10**(power_midFreq/10))) 
+    # mean_power_highFreq = 10 * np.log10(np.mean(10**(power_highFreq/10))) 
     
     """
     # Compute fraction of frequencies with power > 80dB
@@ -759,16 +773,20 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_dB, f_min, f_low, f_
     """
 
     # Compute spectral centroid (center of mass of spectrum)
-    spec_col_linear = 10.0**(spec_col_dB/10.0)    
-    centroid_freq = np.sum(freqs * spec_col_linear) / np.sum(spec_col_linear)
+    epsilon = 1e-12 # tiny float for regularization
 
-    spec_col_metrics = dict(mean_power_lowFreq  = mean_power_lowFreq,
-                            mean_power_midFreq  = mean_power_midFreq,
-                            mean_power_highFreq = mean_power_highFreq,
+    centroid_numerator   = np.sum(freqs * spec_col_linear)
+    centroid_denominator = np.sum(spec_col_linear)
+    centroid_freq        = centroid_numerator/(centroid_denominator+epsilon)
+
+    # spec_col_linear = 10.0**(spec_col_dB/10.0)    
+    # centroid_freq = np.sum(freqs * spec_col_linear) / np.sum(spec_col_linear)
+
+    spec_col_metrics = dict(mean_power_lowFreq_db  = mean_power_lowFreq_db,
+                            mean_power_midFreq_db  = mean_power_midFreq_db,
+                            mean_power_highFreq_db = mean_power_highFreq_db,
                             centroid_freq       = centroid_freq)
 
-
-    #print(f"above_flow, f_high: {mean_power_above_f_low:.2f}, {mean_power_above_f_mid:.2f}\n")  
     return spec_col_metrics
 
 
@@ -781,9 +799,8 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
     f_max:       max frequency threshold in Hz (default = 3000 Hz) --> 5000 is the Nyquist limit.
 
     Intended meaning:
-      0: quiet / nothing
-      1: weak low-frequency activity (laminar)
-      2: mid-frequency activity (harmonics)
+      0: weak low-frequency activity (quiet)
+      2: mid-frequency activity (onset)
       3: strong high-frequency activity (turbulent-like)
     """
 
@@ -792,15 +809,18 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
     f_low  = spectral_analysis_params.get("freq_low")
     f_mid  = spectral_analysis_params.get("freq_mid")
     f_max  = spectral_analysis_params.get("freq_max")
+    ramp_slope   = spectral_analysis_params.get("ramp_slope")
+    ramp_offset  = spectral_analysis_params.get("ramp_offset")
+    pressure_ref = spectral_analysis_params.get("pressure_ref")
     detection_db = spectral_analysis_params.get("phase_detection_db")
 
 
-    bins    = spectrogram_data['bins']
-    freqs   = spectrogram_data['freqs']
-    spec_dB = spectrogram_data['power_avg_dB']
+    bins        = spectrogram_data['bins']
+    freqs       = spectrogram_data['freqs']
+    spec_dB     = spectrogram_data['power_avg_dB']
+    spec_linear = spectrogram_data['power_avg_linear']
 
-    ramp_slope = spectral_analysis_params.get("ramp_slope")
-    bins_Q = ramp_slope * bins  # Q_inlet = ramp_slope * t
+    bins_Q = ramp_slope * bins + ramp_offset # Q_inlet = ramp_slope * t
     n_cols = spec_dB.shape[1]  # total number of columns of spectrogram (#times)
 
     # Initialize arrays
@@ -809,7 +829,7 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
 
     # Loop over each frame (column) and calculate spectral metrics for it
     for col in range(n_cols):
-        metrics_column = extract_metrics_from_spectrogram_column(freqs, spec_dB[:, col], f_min, f_low, f_mid, f_max)
+        metrics_column = extract_metrics_from_spectrogram_column(freqs, spec_linear[:, col], spec_dB[:, col], f_min, f_low, f_mid, f_max, pressure_ref)
         
         # Append the metrics for each column to the overall metrics array
         for key, value in metrics_column.items():
@@ -852,6 +872,43 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
     return Q_phases, spectral_metrics
 
 
+def prepare_plot_xaxis(spectrogram_data, Q_phases, spectral_analysis_params, pipe_diameter):
+    """
+    Compute x-axis arrays for spectral analysis plots.
+    Returns x_vals, x_lim, x_label, x_phases in either flow-rate or Reynolds-number units.
+    """
+    bins = spectrogram_data["bins"]
+    bins_Q = spectral_analysis_params["ramp_slope"] * spectrogram_data["bins"] + spectral_analysis_params["ramp_offset"]
+
+    plots_xaxis_var   = spectral_analysis_params.get("plots_xaxis_var")
+    density           = spectral_analysis_params.get("density")
+    dynamic_viscosity = spectral_analysis_params.get("dynamic_viscosity")
+
+    if plots_xaxis_var == "reynolds":
+        # x_vals   = flowrate_mLs_to_reynolds(bins_Q,                                  density, dynamic_viscosity, pipe_diameter)
+        # x_min    = flowrate_mLs_to_reynolds(spectral_analysis_params["flowrate_min"], density, dynamic_viscosity, pipe_diameter)
+        # x_cut    = flowrate_mLs_to_reynolds(spectral_analysis_params["flowrate_cut"], density, dynamic_viscosity, pipe_diameter)
+        # x_phases = flowrate_mLs_to_reynolds(Q_phases,                                density, dynamic_viscosity, pipe_diameter)
+        # x_label  = "Inlet Reynolds number"
+        print("Not implemented yet!")
+
+    elif plots_xaxis_var == "flowrate":
+        x_vals   = bins_Q
+        x_min    = spectral_analysis_params["flowrate_min"]
+        x_cut    = spectral_analysis_params["flowrate_cut"]
+        x_phases = Q_phases
+        x_label  = "Flow rate (mL/s)"
+
+    else:
+        x_vals   = bins
+        x_min    = 1
+        x_cut    = 5
+        x_phases = Q_phases/spectral_analysis_params["ramp_slope"]
+        x_label  = "Time (s)"
+
+    return x_vals, x_min, x_cut, x_label, x_phases
+
+
 def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data, Q_phases, spectral_metrics, analysis_params, plot_title, flag_plot_phases=True):
     """
     Plot and save spectrograms and spectral metrics as PNG files.
@@ -860,10 +917,11 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     # Extract relevant data for plotting
     bins  = spectrogram_data['bins']
     freqs = spectrogram_data['freqs']
-    spectrogram_signal = spectrogram_data['power_avg_dB']
+    
+    #bins_Q = analysis_params.get("ramp_slope") * bins + analysis_params.get("ramp_offset")
 
-    ramp_slope = analysis_params.get("ramp_slope")
-    bins_Q = ramp_slope * bins  # Q_inlet = ramp_slope * t
+    # Setting up the xaxis 
+    x_vals, x_min, x_cut, x_label, x_phases = prepare_plot_xaxis(spectrogram_data, Q_phases, analysis_params, pipe_diameter=10)
 
     # Setting plot properties
     font_size = 20
@@ -884,10 +942,10 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
 
 
     # ------------------------ Subplot 0: Spectrogram ----------------------------
-    spectrogram = ax[0].pcolormesh(bins_Q, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
+    spectrogram_signal = spectrogram_data['power_avg_dB']
+    spectrogram = ax[0].pcolormesh(x_vals, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
     # Set the limit for power colormap
     spectrogram.set_clim(analysis_params['SPL_db_min'], analysis_params['SPL_db_max'])
-
 
     ax[0].set_ylabel('Frequency (Hz)',   fontweight='bold', fontsize=font_size, labelpad=10)
 
@@ -899,38 +957,39 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
 
     # Adding the colorbar
     cbar = fig.colorbar(spectrogram, ax=ax[0], orientation='vertical') #pad=0.5
-    cbar.set_label('SPL (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
+    cbar.set_label('dB SPL', rotation=270, labelpad=15, size=16, fontweight='bold')
 
 
     # ------------------------ Subplot 1: Mean power ----------------------------
-    ax[1].plot(bins_Q, spectral_metrics['mean_power_lowFreq'],  label='low-freq',  linewidth = 4, color='tab:green') #(160/255,230/255,245/255)) #RGB:'#A6CEE3'
-    ax[1].plot(bins_Q, spectral_metrics['mean_power_midFreq'],  label='mid-freq',  linewidth = 4, color='tab:blue') #deepskyblue
-    ax[1].plot(bins_Q, spectral_metrics['mean_power_highFreq'], label='high-freq', linewidth = 4, color='tab:red') #'mediumblue'
+    ax[1].plot(x_vals, spectral_metrics['mean_power_lowFreq_db'],  label='low-freq',  linewidth = 4, color='tab:green') #(160/255,230/255,245/255)) #RGB:'#A6CEE3'
+    ax[1].plot(x_vals, spectral_metrics['mean_power_midFreq_db'],  label='mid-freq',  linewidth = 4, color='tab:blue') #deepskyblue
+    ax[1].plot(x_vals, spectral_metrics['mean_power_highFreq_db'], label='high-freq', linewidth = 4, color='tab:red') #'mediumblue'
 
     #ax[1].set_ylim([-20, analysis_params['SPL_db_max']])
-    ax[1].set_ylabel('Mean SPL (dB)', fontweight='bold', labelpad=20, fontsize=font_size)
+    ax[1].set_ylabel('Mean Power (dB SPL)', fontweight='bold', labelpad=20, fontsize=font_size)
     #ax[1].legend(loc = 'upper left', fontsize=font_size)
 
     # ------------------------ Subplot 2: Spectral Centroid ----------------------------
-    ax[2].plot(bins_Q, spectral_metrics['centroid_freq'], linewidth = 4, color='black')
+    ax[2].plot(x_vals, spectral_metrics['centroid_freq'], linewidth = 4, color='black')
     ax[2].set_ylim([-1, 300])
     ax[2].set_ylabel('Centroid (Hz)', fontweight='bold', fontsize=font_size, labelpad=10)
 
 
     #------- Common x-axis settings
     for a in ax:
-        a.set_xlim([analysis_params['Q_min'], analysis_params['Q_cut']])
+        if x_min is not None and x_cut is not None:
+            a.set_xlim([x_min, x_cut])
         a.tick_params(direction='in')
-        a.set_xlabel('Flow rate (mL/s)', fontweight='bold', labelpad=10)
-    #ax[2].set_xlabel('Flow rate (mL/s)', fontweight='bold', fontsize=font_size, labelpad=10)
+        a.set_xlabel(x_label, fontweight='bold', labelpad=10)
+    #ax[2].set_xlabel(x_label, fontweight='bold', fontsize=font_size, labelpad=10)
 
     #--------- Adding phase lines 
     if flag_plot_phases:
-        for (phase, Qphase) in enumerate(Q_phases, start=1):
-            if not np.isnan(Qphase):
-                print(f'Inlet flowrate of onset Phase {phase} = {Qphase:.2f} mL/s')
+        for (phase, xphase) in enumerate(x_phases, start=1):
+            if not np.isnan(xphase):
+                print(f'Start of Phase {phase} = {x_label} = {xphase:.2f}')
                 for a in ax:
-                    a.axvline(Qphase, color="darkgray", linestyle="solid", linewidth=3, zorder = 5, alpha=0.8)
+                    a.axvline(xphase, color="darkgray", linestyle="solid", linewidth=3, zorder = 5, alpha=0.8)
 
 
     #----- For customizing the colorbar and axis for figures ----
@@ -1230,7 +1289,7 @@ def parse_args():
     ap.add_argument("--pad_mode",         type=str,   default='odd',    choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts (default: even)")
     ap.add_argument("--detrend",          type=str,   default='linear', help="Detrend option for STFT: 'linear', 'constant', or False (default: linear)")
     ap.add_argument("--hp_cutoff",        type=float, default=None,     help="High-pass filter cutoff frequency in Hz before STFT (omit to disable, default: None)")
-    ap.add_argument("--stft_scaling",     type=str,   default='psd',    choices=["psd","spectrum"], help="STFT output scaling: 'psd' (Pa²/Hz, resolution-independent) or 'spectrum' (Pa² per bin) (default: psd)")
+    ap.add_argument("--stft_scaling",     type=str,   default='spectrum',    choices=["psd","spectrum"], help="STFT output scaling: 'psd' (Pa²/Hz, resolution-independent) or 'spectrum' (Pa² per bin) (default: psd)")
 
 
     # Spectral analysis and visualization parameters
@@ -1245,8 +1304,9 @@ def parse_args():
     ap.add_argument("--flowrate_cut",       type=float, default=8.0,      help="Upper inlet flowrate limit for figures in mL/s (default: 8.0)")
     ap.add_argument("--power_SPL_db_min",   type=float, default=0.0,      help="Lower SPL power limit for spectrogram colormap in dB (default: 20)")
     ap.add_argument("--power_SPL_db_max",   type=float, default=120.0,    help="Upper SPL power limit for spectrogram colormap in dB (default: 120)")
-    ap.add_argument("--phase_detection_db", type=float, default=0.0,    help="dB threshold above the noise floor used to detect onset of each spectral phase (default: 0 dB)")
-
+    ap.add_argument("--phase_detection_db", type=float, default=0.0,      help="dB threshold above the noise floor used to detect onset of each spectral phase (default: 0 dB)")
+    ap.add_argument("--plots_xaxis_variable",  type=str,   default=flowrate,  choices=["flowrate", "reynolds", "time"], help="X-axis for spectral plots: 'flowrate' (mL/s), 'reynolds' (inlet Re number), or 'time' (ms). (default: time)")
+   
     return ap.parse_args()
 
 
@@ -1303,15 +1363,15 @@ def main():
         "stft_scaling": args.stft_scaling}
     
     spectral_analysis_params = {
-        "ramp_slope": ramp_slope,
-        "cutoff_db":  args.cutoff_db,
-        "freq_min":   args.freq_min,
-        "freq_low":   args.freq_low,
-        "freq_mid":   args.freq_mid,
-        "freq_max":   args.freq_max,
-        "Q_min":      args.flowrate_min,
-        "Q_max":      args.flowrate_max,
-        "Q_cut":      args.flowrate_cut,
+        "ramp_slope":         ramp_slope,
+        "cutoff_db":          args.cutoff_db,
+        "freq_min":           args.freq_min,
+        "freq_low":           args.freq_low,
+        "freq_mid":           args.freq_mid,
+        "freq_max":           args.freq_max,
+        "flowrate_min":       args.flowrate_min,
+        "flowrate_max":       args.flowrate_max,
+        "flowrate_cut":       args.flowrate_cut,
         "SPL_db_min":         args.power_SPL_db_min,
         "SPL_db_max":         args.power_SPL_db_max,
         "phase_detection_db": args.phase_detection_db}

@@ -24,7 +24,7 @@
 #SBATCH --partition=debug
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=192
-#SBATCH --time=00:35:00
+#SBATCH --time=00:45:00
 #SBATCH --job-name PT_Spectrogram
 #SBATCH --output=PT_Spectrogram_%j.txt
 
@@ -33,11 +33,11 @@ set -euo pipefail
 echo "Job started: $(date)"
 
 # ---------------------------------- Define Paths -------------------------------------------------------------------------------
-CASE=PTSeg106_base_0p64                                                                             # Case name
-BASE_DIR=$PROJECT/My_Projects/Study1_PTRamp/cases/$CASE                                             # Parent directory of the case
+CASE=PTSeg028_base_0p64                                                                             # Case name
+BASE_DIR=$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE                                             # Parent directory of the case
 MESH_FOLDER="$BASE_DIR/step1_CFD/data"                                                              # Path to mesh data folder containing the h5 mesh
 CENTERLINE="$MESH_FOLDER/${CASE}_centerline_points.csv"                                             # Path to centerline csv file used to construct ROIs
-INPUT="$BASE_DIR/step1_CFD/results_inletBC_ramp/rampSlope2mLs2/${CASE}_ts10000_cy6_saveFreq1"      # Path to CFD results folder containing timeseries HDF5 files
+INPUT="$BASE_DIR/step1_CFD/results_inletBC_ramp/rampSlope1mLs2/${CASE}_ts10000_cy9_saveFreq1"      # Path to CFD results folder containing timeseries HDF5 files
 OUTPUT="$SCRATCH/My_Projects/Study1_PTRamp/cases/$CASE/step2_PostProcess"                           # Path to saving spectrogram files
 SPECTROGRAM_REGIONS="$OUTPUT/configs/${CASE}_spectrogram_regions.csv"                               # Path to spectrogram regions csv file used to generate regional specs
 
@@ -81,7 +81,7 @@ python -u "$SCRIPT" \
     --ROI_center_csv        "$CENTERLINE" \
     --spec_regions_csv      "$SPECTROGRAM_REGIONS" \
     --spec_quantity         "wallpressure" \
-    --window_length         2731 \
+    --window_length         5465 \
     --ROI_type              "cylinder" \
     --flag_multi_ROI
 
