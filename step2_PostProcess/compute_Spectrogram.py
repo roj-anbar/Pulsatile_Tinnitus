@@ -163,6 +163,14 @@ def extract_sim_params_from_foldername(input_path: Path) -> tuple[int, int | Non
     return timesteps_per_cyc, save_freq
 
 
+def flowrate_mLs_to_reynolds(Q_mLs, density, dynamic_viscosity, pipe_diameter_mm):
+    """Convert flow rate [mL/s] to inlet Reynolds number.
+    Assumes pipe_diameter is in mm (often the mesh units for our vascular cases).
+    Re = 4 * rho * Q / (pi * D * mu)
+    """
+    Q_m3s = np.asarray(Q_mLs) * 1e-6
+    return 4.0 * density * Q_m3s / (np.pi * (pipe_diameter_mm/1000) * dynamic_viscosity)
+
 # ---------------------------------------- Mesh Utilities -----------------------------------------------------
 
 def load_surface_mesh(mesh_file:Path) -> pv.PolyData:
@@ -383,7 +391,7 @@ def short_time_fourier(data,
     
     # correcting for the one-sided FFT (doubling the amplitudes)
     Z_corrected = Z.copy()
-    Z_corrected[1:-1, :] *= np.sqrt(2)   # multiply amplitude; squaring gives ×2 in power
+    Z_corrected[:, 1:-1, :] *= np.sqrt(2)   # multiply amplitude; squaring gives ×2 in power
 
     return freqs, bins, Z_corrected
 
@@ -670,9 +678,10 @@ def filter_raw_spectrogram(spectrogram_data, spectral_analysis_params):
     pressure_ref  = spectral_analysis_params.get("pressure_ref")
     power_ref     = pressure_ref**2    
 
-    freqs        = spectrogram_data['freqs']
-    bins         = spectrogram_data['bins']
-    power_avg_dB = spectrogram_data['power_avg_dB']
+    freqs            = spectrogram_data['freqs']
+    bins             = spectrogram_data['bins']
+    power_avg_db     = spectrogram_data['power_avg_db']
+    power_avg_linear = spectrogram_data['power_avg_linear']
 
     # Build masks
     mask_freq = freqs <= freq_max
@@ -738,9 +747,9 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_linear, spec_col_db,
     # power_highFreq_db = spec_col_db[highFreq_band]
 
     # Compute average power for each frequency band
-    mean_power_lowFreq  = np.mean(spec_lowFreq) 
-    mean_power_midFreq  = np.mean(spec_midFreq)
-    mean_power_highFreq = np.mean(spec_highFreq)
+    mean_power_lowFreq  = np.mean(power_lowFreq) 
+    mean_power_midFreq  = np.mean(power_midFreq)
+    mean_power_highFreq = np.mean(power_highFreq)
 
     # Convert to dB scale
     power_ref = pressure_ref**2
@@ -765,7 +774,7 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_linear, spec_col_db,
 
 
     # Compute peak (dominant) frequency
-    #mask_analysis = (freqs < f_max)  & (spec_col_dB > 50)   # Only use frequencies up to f_high to stay within analysis band
+    #mask_analysis = (freqs < f_max)  & (spec_col_db > 50)   # Only use frequencies up to f_high to stay within analysis band
     #if np.any(mask_analysis):
     #    peak_freq = freqs[mask_analysis].max()
     #else:
@@ -779,7 +788,7 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_linear, spec_col_db,
     centroid_denominator = np.sum(spec_col_linear)
     centroid_freq        = centroid_numerator/(centroid_denominator+epsilon)
 
-    # spec_col_linear = 10.0**(spec_col_dB/10.0)    
+    # spec_col_linear = 10.0**(spec_col_b/10.0)    
     # centroid_freq = np.sum(freqs * spec_col_linear) / np.sum(spec_col_linear)
 
     spec_col_metrics = dict(mean_power_lowFreq_db  = mean_power_lowFreq_db,
@@ -817,11 +826,11 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
 
     bins        = spectrogram_data['bins']
     freqs       = spectrogram_data['freqs']
-    spec_dB     = spectrogram_data['power_avg_dB']
+    spec_db     = spectrogram_data['power_avg_db']
     spec_linear = spectrogram_data['power_avg_linear']
 
     bins_Q = ramp_slope * bins + ramp_offset # Q_inlet = ramp_slope * t
-    n_cols = spec_dB.shape[1]  # total number of columns of spectrogram (#times)
+    n_cols = spec_db.shape[1]  # total number of columns of spectrogram (#times)
 
     # Initialize arrays
     phases   = np.zeros(n_cols, dtype=int)
@@ -829,7 +838,7 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
 
     # Loop over each frame (column) and calculate spectral metrics for it
     for col in range(n_cols):
-        metrics_column = extract_metrics_from_spectrogram_column(freqs, spec_linear[:, col], spec_dB[:, col], f_min, f_low, f_mid, f_max, pressure_ref)
+        metrics_column = extract_metrics_from_spectrogram_column(freqs, spec_linear[:, col], spec_db[:, col], f_min, f_low, f_mid, f_max, pressure_ref)
         
         # Append the metrics for each column to the overall metrics array
         for key, value in metrics_column.items():
@@ -845,7 +854,7 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
     Q_phases = np.full(3, np.nan) # Initialize Qphases as NaNs
 
     # PHASE 1: First rise in midFreq power
-    idx_nonzero_midFreq_power = np.where(spectral_metrics['mean_power_midFreq'] > detection_db+0.1)[0] # array of indices of positive midFreq powers
+    idx_nonzero_midFreq_power = np.where(spectral_metrics['mean_power_midFreq_db'] > detection_db+0.1)[0] # array of indices of positive midFreq powers
     #idx_nonzero_spectral_centroid = np.where(spectral_metrics['centroid_freq'] > 1)[0]  # array of indices of positive spectral centroid
 
     if len(idx_nonzero_midFreq_power) > 0:
@@ -853,7 +862,7 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
         #Q_phases[0] = bins_Q[idx_nonzero_spectral_centroid[0]]  # first rise in centroid
 
     # PHASE 2: First rise in highFreq power
-    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq'] > detection_db+0.1)[0] # array of indices of positive highFreq powers
+    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq_db'] > detection_db+0.1)[0] # array of indices of positive highFreq powers
 
     if len(idx_nonzero_highFreq_power) > 0:
         Q_phases[1] = bins_Q[idx_nonzero_highFreq_power[0]] # first rise in power
@@ -942,7 +951,7 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
 
 
     # ------------------------ Subplot 0: Spectrogram ----------------------------
-    spectrogram_signal = spectrogram_data['power_avg_dB']
+    spectrogram_signal = spectrogram_data['power_avg_db']
     spectrogram = ax[0].pcolormesh(x_vals, freqs, spectrogram_signal, shading='gouraud', cmap='inferno')
     # Set the limit for power colormap
     spectrogram.set_clim(analysis_params['SPL_db_min'], analysis_params['SPL_db_max'])
@@ -1107,7 +1116,8 @@ def compute_and_save_spectrogram_for_all_ROIs(
             spectrogram_data = calculate_mean_spectrogram(
                                 var_name= spec_quantity,
                                 var_array = spec_quantity_array_ROI_multi,
-                                STFT_params = STFT_params)
+                                STFT_params = STFT_params,
+                                pressure_ref = spectral_analysis_params["pressure_ref"])
             
             # Construct the title: use region_shortname from CSV if available, else fall back to ROI ID range
             region_name = ROI_params.get("region_shortname")
@@ -1116,7 +1126,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
 
             # Save full spectrogram data
             spec_output_npz = Path(output_folder_files) / f"{spectrogram_title}.npz"
-            np.savez(spec_output_npz, spectrogram_data)
+            np.savez(spec_output_npz, **spectrogram_data)
 
             # Cut spectrogram to analysis window
             spectrogram_data_filt = filter_raw_spectrogram(spectrogram_data, spectral_analysis_params)
@@ -1171,11 +1181,12 @@ def compute_and_save_spectrogram_for_all_ROIs(
                 spectrogram_data = calculate_mean_spectrogram(
                                     var_name = spec_quantity,
                                     var_array = spec_quantity_array_ROI,
-                                    STFT_params = STFT_params)
+                                    STFT_params = STFT_params,
+                                    pressure_ref = spectral_analysis_params["pressure_ref"])
                 
                 # Save full spectrogram data
                 spec_output_npz = Path(output_folder_files) / f"{spectrogram_title}.npz"
-                np.savez(spec_output_npz, spectrogram_data)
+                np.savez(spec_output_npz, **spectrogram_data)
 
                 # Cut spectrogram to analysis window
                 spectrogram_data_filt = filter_raw_spectrogram(spectrogram_data, spectral_analysis_params)
@@ -1223,11 +1234,12 @@ def compute_and_save_spectrogram_for_all_ROIs(
         spectrogram_data = calculate_mean_spectrogram(
                             var_name = spec_quantity,
                             var_array = spec_quantity_array_ROI,
-                            STFT_params = STFT_params)
+                            STFT_params = STFT_params,
+                            pressure_ref = spectral_analysis_params["pressure_ref"])
 
         # Save full spectrogram data
         spec_output_npz = Path(output_folder_files) / f"{spectrogram_title}.npz"
-        np.savez(spec_output_npz, spectrogram_data)
+        np.savez(spec_output_npz, **spectrogram_data)
         
         # Cut spectrogram to analysis window
         spectrogram_data_filt = filter_raw_spectrogram(spectrogram_data, spectral_analysis_params)
@@ -1257,6 +1269,7 @@ def parse_args():
     ap.add_argument("--n_process",      type=int,            help="Number of parallel processes", default=max(1, mp.cpu_count() - 1))
 
     ap.add_argument("--density",           type=float,  default=1057,   help="Blood density [kg/m3] (default: 1057)")
+    ap.add_argument("--dynamic_viscosity", type=float,  default=0.0035, help="Blood dynamic viscosity [Pa·s] used when --x_axis_var=reynolds (default: 0.0035)")
     ap.add_argument("--period_seconds",    type=float,  default=0.915,  help="Period in seconds")
     ap.add_argument("--timesteps_per_cyc", type=int,                    help="Number of timesteps per cycle")
     ap.add_argument("--save_freq",         type=int,    default=None,   help="Every Nth timestep was saved (e.g. 2 means every other step). If omitted, parsed from input folder name (expects 'saveFreq<N>').")
@@ -1269,7 +1282,7 @@ def parse_args():
     ROI_group.add_argument("--ROI_center_coord", nargs=3,  type=float, metavar=("X", "Y", "Z"), help="XYZ coordinates for a single ROI center (mesh units)")
     ROI_group.add_argument("--ROI_center_csv",   type=str, help="CSV file with multiple ROI points; coords columns = Points:0/1/2")
     
-    ap.add_argument("--spec_regions_csv",    type=str,   default=None,      help="CSV file defining multiple anatomical regions to process for spectrograms. Required columns: region_name, ROI_start_center_id, ROI_end_center_id, ROI_stride, ROI_radius. Optional columns: ROI_height, flag_multi_ROI, flag_save_ROI.")
+    ap.add_argument("--spec_regions_csv",    type=str,   default=None,       help="CSV file defining multiple anatomical regions to process for spectrograms. Required columns: region_name, ROI_start_center_id, ROI_end_center_id, ROI_stride, ROI_radius. Optional columns: ROI_height, flag_multi_ROI, flag_save_ROI.")
     ap.add_argument("--ROI_type",            type=str,   default="cylinder", choices=["point","sphere","cylinder"], help="Type of ROI shape")
     ap.add_argument("--ROI_radius",          type=float, default=None,       help="Radius of ROI in mesh units (mm in most cases). Required unless --spec_regions_csv is used.")
     ap.add_argument("--ROI_height",          type=float, default=2,          help="Height of cylindrical ROI in mesh units (mm in most cases)")
@@ -1282,18 +1295,19 @@ def parse_args():
 
 
     # Spectrogram specific parameters (including Short-time Fourier Transform control)
-    ap.add_argument("--window_length",    type=int,   default=None,     help="Length of FFT window in samples (number of snapshots for each window)")
-    ap.add_argument("--n_fft",            type=int,   default=None,     help="FFT length (bins)")
-    ap.add_argument("--overlap_fraction", type=float, default=0.9,      help="Overlap fraction between consequent windows [0,1] (default: 0.9)")
-    ap.add_argument("--window_type",      type=str,   default='hann',   choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT (default: hann)")
-    ap.add_argument("--pad_mode",         type=str,   default='odd',    choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts (default: even)")
-    ap.add_argument("--detrend",          type=str,   default='linear', help="Detrend option for STFT: 'linear', 'constant', or False (default: linear)")
-    ap.add_argument("--hp_cutoff",        type=float, default=None,     help="High-pass filter cutoff frequency in Hz before STFT (omit to disable, default: None)")
+    ap.add_argument("--window_length",    type=int,   default=None,          help="Length of FFT window in samples (number of snapshots for each window)")
+    ap.add_argument("--n_fft",            type=int,   default=None,          help="FFT length (bins)")
+    ap.add_argument("--overlap_fraction", type=float, default=0.9,           help="Overlap fraction between consequent windows [0,1] (default: 0.9)")
+    ap.add_argument("--window_type",      type=str,   default='hann',        choices=["hann","hamming","boxcar","blackman","bartlett"], help="Window type for STFT (default: hann)")
+    ap.add_argument("--pad_mode",         type=str,   default='odd',         choices=["cycle","constant","odd","even","none"], help="Padding strategy to reduce edge artifacts (default: even)")
+    ap.add_argument("--detrend",          type=str,   default='linear',      help="Detrend option for STFT: 'linear', 'constant', or False (default: linear)")
+    ap.add_argument("--hp_cutoff",        type=float, default=None,          help="High-pass filter cutoff frequency in Hz before STFT (omit to disable, default: None)")
     ap.add_argument("--stft_scaling",     type=str,   default='spectrum',    choices=["psd","spectrum"], help="STFT output scaling: 'psd' (Pa²/Hz, resolution-independent) or 'spectrum' (Pa² per bin) (default: psd)")
 
 
     # Spectral analysis and visualization parameters
-    ap.add_argument("--ramp_slope",         type=float, default=None,     help="Ramp slope [mL/s2] used to convert time bins to inlet flowrate Q = ramp_slope * t. If not given, parsed from input_folder name (expects 'rampSlope<N>mLs2').")
+    ap.add_argument("--phase_detection_db", type=float, default=0.0,      help="dB threshold above the noise floor used to detect onset of each spectral phase (default: 0 dB)")
+    ap.add_argument("--pressure_ref",       type=float, default=2e-5,     help="Reference pressure for dB SPL conversion [Pa] (default: 2e-5 Pa, lowest threshold for human hearing)")
     ap.add_argument("--cutoff_db",          type=float, default=None,     help="Minimum dB floor for visualization (omit to disable clamping)")
     ap.add_argument("--freq_min",           type=float, default=10,       help="Lower threshold for low-frequency band in Hz (default: 10 Hz)")
     ap.add_argument("--freq_low",           type=float, default=100,      help="Upper threshold for low-frequency band in Hz (default: 100 Hz)")
@@ -1304,8 +1318,9 @@ def parse_args():
     ap.add_argument("--flowrate_cut",       type=float, default=8.0,      help="Upper inlet flowrate limit for figures in mL/s (default: 8.0)")
     ap.add_argument("--power_SPL_db_min",   type=float, default=0.0,      help="Lower SPL power limit for spectrogram colormap in dB (default: 20)")
     ap.add_argument("--power_SPL_db_max",   type=float, default=120.0,    help="Upper SPL power limit for spectrogram colormap in dB (default: 120)")
-    ap.add_argument("--phase_detection_db", type=float, default=0.0,      help="dB threshold above the noise floor used to detect onset of each spectral phase (default: 0 dB)")
-    ap.add_argument("--plots_xaxis_variable",  type=str,   default=flowrate,  choices=["flowrate", "reynolds", "time"], help="X-axis for spectral plots: 'flowrate' (mL/s), 'reynolds' (inlet Re number), or 'time' (ms). (default: time)")
+    ap.add_argument("--ramp_slope",         type=float, default=None,     help="Ramp slope [mL/s2] used to convert time bins to inlet flowrate Q = ramp_slope * t. If not given, parsed from input_folder name (expects 'rampSlope<N>mLs2').")
+    ap.add_argument("--ramp_offset",        type=float, default=0.1,        help="Offset of the flow-rate ramp [mL/s2]: Q = ramp_slope * t + ramp_offset (default: 2.0)")
+    ap.add_argument("--plots_xaxis_variable",  type=str,   default="flowrate",  choices=["flowrate", "reynolds", "time"], help="X-axis for spectral plots: 'flowrate' (mL/s), 'reynolds' (inlet Re number), or 'time' (ms). (default: time)")
    
     return ap.parse_args()
 
@@ -1363,7 +1378,8 @@ def main():
         "stft_scaling": args.stft_scaling}
     
     spectral_analysis_params = {
-        "ramp_slope":         ramp_slope,
+        "phase_detection_db": args.phase_detection_db,
+        "pressure_ref":         args.pressure_ref,
         "cutoff_db":          args.cutoff_db,
         "freq_min":           args.freq_min,
         "freq_low":           args.freq_low,
@@ -1374,7 +1390,12 @@ def main():
         "flowrate_cut":       args.flowrate_cut,
         "SPL_db_min":         args.power_SPL_db_min,
         "SPL_db_max":         args.power_SPL_db_max,
-        "phase_detection_db": args.phase_detection_db}
+        "plots_xaxis_var":    args.plots_xaxis_variable,
+        "dynamic_viscosity":  args.dynamic_viscosity,
+        "density":            args.density,
+        "ramp_slope":         ramp_slope,
+        "ramp_offset":        args.ramp_offset,
+        }
 
     # Load mesh
     mesh_file = list(Path(mesh_folder).glob('*.h5'))[0]
