@@ -671,8 +671,8 @@ def filter_raw_spectrogram(spectrogram_data, spectral_analysis_params):
     # Unpack parameters
     cutoff_db     = spectral_analysis_params.get("cutoff_db")
     freq_max      = spectral_analysis_params.get("freq_max")
-    flowrate_min  = spectral_analysis_params.get("Q_min")
-    flowrate_max  = spectral_analysis_params.get("Q_max")
+    flowrate_min  = spectral_analysis_params.get("flowrate_min")
+    flowrate_max  = spectral_analysis_params.get("flowrate_max")
     ramp_slope    = spectral_analysis_params.get("ramp_slope")
     ramp_offset   = spectral_analysis_params.get("ramp_offset")
     pressure_ref  = spectral_analysis_params.get("pressure_ref")
@@ -715,7 +715,7 @@ def filter_raw_spectrogram(spectrogram_data, spectral_analysis_params):
     return spec_filt
 
 
-def extract_metrics_from_spectrogram_column(freqs, spec_col_linear, spec_col_db, f_min, f_low, f_mid, f_max, pressure_ref):
+def extract_metrics_from_spectrogram_column(freqs, spec_col_linear, spec_col_db, f_min, f_low, f_mid, f_max, pressure_ref, detection_db=None):
     """
     Compute simple metrics for one spectrogram column (one time).
     spec_col_linear: 1D array of averaged power (n_freq,) in Pascals.
@@ -788,13 +788,17 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_linear, spec_col_db,
     centroid_denominator = np.sum(spec_col_linear)
     centroid_freq        = centroid_numerator/(centroid_denominator+epsilon)
 
-    # spec_col_linear = 10.0**(spec_col_b/10.0)    
+    # spec_col_linear = 10.0**(spec_col_b/10.0)
     # centroid_freq = np.sum(freqs * spec_col_linear) / np.sum(spec_col_linear)
+
+    # Percentage of frequency bins whose power exceeds the detection threshold
+    frac_bins_above_threshold = np.mean(spec_col_db > detection_db) * 100.0
 
     spec_col_metrics = dict(mean_power_lowFreq_db  = mean_power_lowFreq_db,
                             mean_power_midFreq_db  = mean_power_midFreq_db,
                             mean_power_highFreq_db = mean_power_highFreq_db,
-                            centroid_freq       = centroid_freq)
+                            centroid_freq          = centroid_freq,
+                            frac_bins_above_threshold = frac_bins_above_threshold)
 
     return spec_col_metrics
 
@@ -838,7 +842,7 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
 
     # Loop over each frame (column) and calculate spectral metrics for it
     for col in range(n_cols):
-        metrics_column = extract_metrics_from_spectrogram_column(freqs, spec_linear[:, col], spec_db[:, col], f_min, f_low, f_mid, f_max, pressure_ref)
+        metrics_column = extract_metrics_from_spectrogram_column(freqs, spec_linear[:, col], spec_db[:, col], f_min, f_low, f_mid, f_max, pressure_ref, detection_db)
         
         # Append the metrics for each column to the overall metrics array
         for key, value in metrics_column.items():
@@ -854,7 +858,7 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
     Q_phases = np.full(3, np.nan) # Initialize Qphases as NaNs
 
     # PHASE 1: First rise in midFreq power
-    idx_nonzero_midFreq_power = np.where(spectral_metrics['mean_power_midFreq_db'] > detection_db+0.1)[0] # array of indices of positive midFreq powers
+    idx_nonzero_midFreq_power = np.where(spectral_metrics['mean_power_midFreq_db'] > detection_db)[0] # array of indices of positive midFreq powers
     #idx_nonzero_spectral_centroid = np.where(spectral_metrics['centroid_freq'] > 1)[0]  # array of indices of positive spectral centroid
 
     if len(idx_nonzero_midFreq_power) > 0:
@@ -862,7 +866,7 @@ def classify_spectrogram_phases(spectrogram_data, spectral_analysis_params):
         #Q_phases[0] = bins_Q[idx_nonzero_spectral_centroid[0]]  # first rise in centroid
 
     # PHASE 2: First rise in highFreq power
-    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq_db'] > detection_db+0.1)[0] # array of indices of positive highFreq powers
+    idx_nonzero_highFreq_power = np.where(spectral_metrics['mean_power_highFreq_db'] > detection_db)[0] # array of indices of positive highFreq powers
 
     if len(idx_nonzero_highFreq_power) > 0:
         Q_phases[1] = bins_Q[idx_nonzero_highFreq_power[0]] # first rise in power
@@ -910,9 +914,10 @@ def prepare_plot_xaxis(spectrogram_data, Q_phases, spectral_analysis_params, pip
 
     else:
         x_vals   = bins
-        x_min    = 1
-        x_cut    = 5
-        x_phases = Q_phases/spectral_analysis_params["ramp_slope"]
+        x_min    = 0
+        x_cut    = 0.9
+        ramp_slope = spectral_analysis_params["ramp_slope"]
+        x_phases = Q_phases / ramp_slope if ramp_slope != 0 else Q_phases
         x_label  = "Time (s)"
 
     return x_vals, x_min, x_cut, x_label, x_phases
@@ -978,10 +983,16 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     ax[1].set_ylabel('Mean Power (dB SPL)', fontweight='bold', labelpad=20, fontsize=font_size)
     #ax[1].legend(loc = 'upper left', fontsize=font_size)
 
-    # ------------------------ Subplot 2: Spectral Centroid ----------------------------
-    ax[2].plot(x_vals, spectral_metrics['centroid_freq'], linewidth = 4, color='black')
+    # ------------------------ Subplot 2: Spectral Centroid + fraction of bins above threshold ----------------------------
+    ax[2].plot(x_vals, spectral_metrics['centroid_freq'], linewidth=4, color='black', label='centroid')
     ax[2].set_ylim([-1, 300])
     ax[2].set_ylabel('Centroid (Hz)', fontweight='bold', fontsize=font_size, labelpad=10)
+
+    ax2_twin = ax[2].twinx()
+    ax2_twin.plot(x_vals, spectral_metrics['frac_bins_above_threshold'], linewidth=3, color='tab:orange', linestyle='--', label='% bins > threshold')
+    ax2_twin.set_ylim([0, 100])
+    ax2_twin.set_ylabel('Bins above threshold (%)', fontweight='bold', fontsize=font_size, labelpad=10, color='tab:orange')
+    ax2_twin.tick_params(axis='y', colors='tab:orange', direction='in')
 
 
     #------- Common x-axis settings
@@ -1313,9 +1324,9 @@ def parse_args():
     ap.add_argument("--freq_low",           type=float, default=100,      help="Upper threshold for low-frequency band in Hz (default: 100 Hz)")
     ap.add_argument("--freq_mid",           type=float, default=1000,     help="Upper threshold for mid-frequency band in Hz (default: 1000 Hz)")
     ap.add_argument("--freq_max",           type=float, default=3000,     help="Maximum frequency to filter spectrogram in Hz (default: 3000 Hz)")
-    ap.add_argument("--flowrate_min",       type=float, default=2.0,      help="Lower inlet flowrate limit for analysis window in mL/s (default: 2.0)")
-    ap.add_argument("--flowrate_max",       type=float, default=10.0,     help="Upper inlet flowrate limit for analysis window in mL/s (default: 10.0)")
-    ap.add_argument("--flowrate_cut",       type=float, default=8.0,      help="Upper inlet flowrate limit for figures in mL/s (default: 8.0)")
+    ap.add_argument("--flowrate_min",       type=float, default=None,      help="Lower inlet flowrate limit for analysis window in mL/s (default: 2.0)")
+    ap.add_argument("--flowrate_max",       type=float, default=None,     help="Upper inlet flowrate limit for analysis window in mL/s (default: 10.0)")
+    ap.add_argument("--flowrate_cut",       type=float, default=None,      help="Upper inlet flowrate limit for figures in mL/s (default: 8.0)")
     ap.add_argument("--power_SPL_db_min",   type=float, default=0.0,      help="Lower SPL power limit for spectrogram colormap in dB (default: 20)")
     ap.add_argument("--power_SPL_db_max",   type=float, default=120.0,    help="Upper SPL power limit for spectrogram colormap in dB (default: 120)")
     ap.add_argument("--ramp_slope",         type=float, default=None,     help="Ramp slope [mL/s2] used to convert time bins to inlet flowrate Q = ramp_slope * t. If not given, parsed from input_folder name (expects 'rampSlope<N>mLs2').")
