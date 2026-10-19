@@ -315,8 +315,8 @@ def short_time_fourier(data,
                         n_fft:         int,
                         pad_mode:      str,
                         detrend:       str,
+                        stft_scaling:  str,
                         hp_cutoff:     float = None,   # high-pass cutoff in Hz, None = disabled
-                        stft_scaling:  str   = 'psd',
                         ):
 
     """
@@ -572,7 +572,7 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params, pressure_ref):
     window_type   = STFT_params.get("window_type")
     detrend       = STFT_params.get("detrend")
     hp_cutoff     = STFT_params.get("hp_cutoff")
-    stft_scaling  = STFT_params.get("stft_scaling", "psd")
+    stft_scaling  = STFT_params.get("stft_scaling")
     #cutoff_db     = STFT_params.get("cutoff_db")
     #cutoff_freq   = STFT_params.get("cutoff_freq")
 
@@ -592,7 +592,7 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params, pressure_ref):
     # Note: All the below S arrays have shape (n_freq, n_frames)
 
     # Compute FFT for first point. # Pass data as row vectors
-    freqs, bins, Z0 = short_time_fourier(signal[0][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend, hp_cutoff, stft_scaling)
+    freqs, bins, Z0 = short_time_fourier(signal[0][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend, stft_scaling, hp_cutoff)
     power_sum = np.zeros_like(Z0, dtype=np.float64)
 
     # Case 1: Single point ROI
@@ -603,7 +603,7 @@ def calculate_mean_spectrogram(var_name, var_array, STFT_params, pressure_ref):
     else:
         for point in range(n_points):
             # Pass data as row vectors
-            _, _, Z_point = short_time_fourier(signal[point][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend, hp_cutoff, stft_scaling)
+            _, _, Z_point = short_time_fourier(signal[point][None,:], sampling_rate, window_type, window_length, overlap_frac, n_fft, pad_mode, detrend, stft_scaling, hp_cutoff)
             power_point = np.abs(Z_point)**2
             power_sum += power_point 
             
@@ -792,13 +792,17 @@ def extract_metrics_from_spectrogram_column(freqs, spec_col_linear, spec_col_db,
     # centroid_freq = np.sum(freqs * spec_col_linear) / np.sum(spec_col_linear)
 
     # Percentage of frequency bins whose power exceeds the detection threshold
-    frac_bins_above_threshold = np.mean(spec_col_db > detection_db) * 100.0
+    frac_bins_above_threshold_low = np.mean(spec_col_db[lowFreq_band] > detection_db) * 100.0
+    frac_bins_above_threshold_mid = np.mean(spec_col_db[midFreq_band] > detection_db) * 100.0
+    frac_bins_above_threshold_high = np.mean(spec_col_db[highFreq_band] > detection_db) * 100.0
 
     spec_col_metrics = dict(mean_power_lowFreq_db  = mean_power_lowFreq_db,
                             mean_power_midFreq_db  = mean_power_midFreq_db,
                             mean_power_highFreq_db = mean_power_highFreq_db,
                             centroid_freq          = centroid_freq,
-                            frac_bins_above_threshold = frac_bins_above_threshold)
+                            frac_bins_above_threshold_low = frac_bins_above_threshold_low,
+                            frac_bins_above_threshold_mid = frac_bins_above_threshold_mid,
+                            frac_bins_above_threshold_high = frac_bins_above_threshold_high)
 
     return spec_col_metrics
 
@@ -914,8 +918,8 @@ def prepare_plot_xaxis(spectrogram_data, Q_phases, spectral_analysis_params, pip
 
     else:
         x_vals   = bins
-        x_min    = 0
-        x_cut    = 0.9
+        x_min    = 0.25
+        x_cut    = 0.75
         ramp_slope = spectral_analysis_params["ramp_slope"]
         x_phases = Q_phases / ramp_slope if ramp_slope != 0 else Q_phases
         x_label  = "Time (s)"
@@ -988,11 +992,11 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     ax[2].set_ylim([-1, 300])
     ax[2].set_ylabel('Centroid (Hz)', fontweight='bold', fontsize=font_size, labelpad=10)
 
-    ax2_twin = ax[2].twinx()
-    ax2_twin.plot(x_vals, spectral_metrics['frac_bins_above_threshold'], linewidth=3, color='tab:orange', linestyle='--', label='% bins > threshold')
-    ax2_twin.set_ylim([0, 100])
-    ax2_twin.set_ylabel('Bins above threshold (%)', fontweight='bold', fontsize=font_size, labelpad=10, color='tab:orange')
-    ax2_twin.tick_params(axis='y', colors='tab:orange', direction='in')
+    # ax2_twin = ax[2].twinx()
+    # ax2_twin.plot(x_vals, spectral_metrics['frac_bins_above_threshold'], linewidth=3, color='tab:orange', linestyle='--', label='% bins > threshold')
+    # ax2_twin.set_ylim([0, 100])
+    # ax2_twin.set_ylabel('Bins above threshold (%)', fontweight='bold', fontsize=font_size, labelpad=10, color='tab:orange')
+    # ax2_twin.tick_params(axis='y', colors='tab:orange', direction='in')
 
 
     #------- Common x-axis settings
@@ -1007,10 +1011,44 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     if flag_plot_phases:
         for (phase, xphase) in enumerate(x_phases, start=1):
             if not np.isnan(xphase):
-                print(f'Start of Phase {phase} = {x_label} = {xphase:.2f}')
+                idx = np.argmin(np.abs(x_vals - xphase))
+                print(f'Start of Phase {phase}: {x_label} = {xphase:.2f} | '
+                      f'Fraction of bins above threshold: '
+                      f'lowFreq: {spectral_metrics["frac_bins_above_threshold_low"][idx]:.2f}, '
+                      f'midFreq: {spectral_metrics["frac_bins_above_threshold_mid"][idx]:.2f}, '
+                      f'highFreq: {spectral_metrics["frac_bins_above_threshold_high"][idx]:.2f}')
+
                 for a in ax:
                     a.axvline(xphase, color="darkgray", linestyle="solid", linewidth=3, zorder = 5, alpha=0.8)
 
+
+    # ------------------------ Supplementary Plot: Fraction of bins above threshold ----------------------------
+    # plt.rc('axes',   titlesize=16)     # fontsize of the title
+    # plt.rc('font',   size=font_size)          # controls default text size
+    # plt.rc('xtick',  labelsize=font_size)    # fontsize of the x tick labels
+    # plt.rc('ytick',  labelsize=font_size)    # fontsize of the y tick labels
+    # plt.rc('legend', fontsize=font_size)    # fontsize of the legend
+    # plt.rc('axes',   labelsize=18)     # fontsize of the x and y labels
+
+    # # For horizontal plotting:
+    # fig2, ax2 = plt.subplots(1, 1, figsize=(8, 6)) #(20,5)
+    # fig2.suptitle(plot_title, fontweight='bold', y=0.99)             # y adds distance to the title's location
+    # ax2.plot(x_vals, spectral_metrics['frac_bins_above_threshold_low'], linewidth=3, color='tab:green', linestyle='--', label='lowFreq')
+    # ax2.plot(x_vals, spectral_metrics['frac_bins_above_threshold_mid'], linewidth=3, color='tab:blue', linestyle='--', label='midFreq')
+    # ax2.plot(x_vals, spectral_metrics['frac_bins_above_threshold_high'], linewidth=3, color='tab:red', linestyle='--', label='highFreq')
+    
+    # ax2.set_xlim([x_min, x_cut])
+    # ax2.set_ylim([0, 100])
+    # ax2.set_xlabel(x_label, fontweight='bold', labelpad=10)
+    # ax2.set_ylabel('Bins above threshold (%)', fontweight='bold', fontsize=font_size, labelpad=10, color='black')
+    # ax2.tick_params(axis='y', colors='black', direction='in')
+    # ax2.legend(loc = 'upper left', fontsize=8)
+
+    # #--------- Adding phase lines
+    # if flag_plot_phases:
+    #     for (phase, xphase) in enumerate(x_phases, start=1):
+    #         if not np.isnan(xphase):
+    #             ax2.axvline(xphase, color="darkgray", linestyle="solid", linewidth=3, zorder=5, alpha=0.8)
 
     #----- For customizing the colorbar and axis for figures ----
     
@@ -1030,9 +1068,13 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     #cbar.set_label('Power (dB)', rotation=270, labelpad=15, size=16, fontweight='bold')
     
 
-    plt.tight_layout()
-    plt.savefig(Path(output_folder_imgs) / f"{plot_title}.png")#, transparent=True)
+    fig.tight_layout()
+    fig.savefig(Path(output_folder_imgs) / f"{plot_title}.png")#, transparent=True)
     plt.close(fig)
+
+    fig2.tight_layout()
+    fig2.savefig(Path(output_folder_imgs) / f"{plot_title}_supp.png")#, transparent=True)
+    plt.close(fig2)
 
 
 def compute_and_save_spectrogram_for_all_ROIs(
@@ -1076,9 +1118,7 @@ def compute_and_save_spectrogram_for_all_ROIs(
     sampling_rate = timesteps_per_cyc / period_seconds / save_freq # Hz
     STFT_params["sampling_rate"] = sampling_rate 
 
-    print (f"Computing {spec_quantity} spectrograms for {ROI_type} ROIs with STFT parameters: \n"
-           f"window_length (samples) = {window_length} \n"
-           f"overlap_fraction        = {overlap_frac} \n")
+    print (f"Computing {spec_quantity} spectrograms for {ROI_type} ROIs with STFT parameters ... \n")
 
 
     #----------------- Case 1: CSV mode --------------------
@@ -1324,9 +1364,9 @@ def parse_args():
     ap.add_argument("--freq_low",           type=float, default=100,      help="Upper threshold for low-frequency band in Hz (default: 100 Hz)")
     ap.add_argument("--freq_mid",           type=float, default=1000,     help="Upper threshold for mid-frequency band in Hz (default: 1000 Hz)")
     ap.add_argument("--freq_max",           type=float, default=3000,     help="Maximum frequency to filter spectrogram in Hz (default: 3000 Hz)")
-    ap.add_argument("--flowrate_min",       type=float, default=None,      help="Lower inlet flowrate limit for analysis window in mL/s (default: 2.0)")
-    ap.add_argument("--flowrate_max",       type=float, default=None,     help="Upper inlet flowrate limit for analysis window in mL/s (default: 10.0)")
-    ap.add_argument("--flowrate_cut",       type=float, default=None,      help="Upper inlet flowrate limit for figures in mL/s (default: 8.0)")
+    ap.add_argument("--flowrate_min",       type=float, default=2.0,      help="Lower inlet flowrate limit for analysis window in mL/s (default: 2.0)")
+    ap.add_argument("--flowrate_max",       type=float, default=10.0,     help="Upper inlet flowrate limit for analysis window in mL/s (default: 10.0)")
+    ap.add_argument("--flowrate_cut",       type=float, default=8.0,      help="Upper inlet flowrate limit for figures in mL/s (default: 8.0)")
     ap.add_argument("--power_SPL_db_min",   type=float, default=0.0,      help="Lower SPL power limit for spectrogram colormap in dB (default: 20)")
     ap.add_argument("--power_SPL_db_max",   type=float, default=120.0,    help="Upper SPL power limit for spectrogram colormap in dB (default: 120)")
     ap.add_argument("--ramp_slope",         type=float, default=None,     help="Ramp slope [mL/s2] used to convert time bins to inlet flowrate Q = ramp_slope * t. If not given, parsed from input_folder name (expects 'rampSlope<N>mLs2').")
@@ -1385,8 +1425,8 @@ def main():
         "window_type": args.window_type,
         "pad_mode": args.pad_mode,
         "detrend": args.detrend,
-        "hp_cutoff": args.hp_cutoff,
-        "stft_scaling": args.stft_scaling}
+        "stft_scaling": args.stft_scaling,
+        "hp_cutoff": args.hp_cutoff}
     
     spectral_analysis_params = {
         "phase_detection_db": args.phase_detection_db,
