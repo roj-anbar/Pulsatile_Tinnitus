@@ -1072,9 +1072,9 @@ def plot_spectrogram_and_metrics(output_folder_imgs, case_name, spectrogram_data
     fig.savefig(Path(output_folder_imgs) / f"{plot_title}.png")#, transparent=True)
     plt.close(fig)
 
-    fig2.tight_layout()
-    fig2.savefig(Path(output_folder_imgs) / f"{plot_title}_supp.png")#, transparent=True)
-    plt.close(fig2)
+    # fig2.tight_layout()
+    # fig2.savefig(Path(output_folder_imgs) / f"{plot_title}_supp.png")#, transparent=True)
+    # plt.close(fig2)
 
 
 def compute_and_save_spectrogram_for_all_ROIs(
