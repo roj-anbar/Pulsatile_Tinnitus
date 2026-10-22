@@ -6,10 +6,10 @@ Creates a new output directory with symlinks to the selected HDF5 files
 (no copying) and writes a new XDMF that ParaView can open directly.
 
 Usage:
-    python resample_cfd_results.py <xdmf_file> <output_dir> <n> [--start S]
+    python resample_cfd_results.py --input_xdmf <xdmf> --output_path <dir> --stride <n> [--start S]
 
 Example (every 10th step):
-    python resample_cfd_results.py results/run.xdmf results/run_every10 10
+    python resample_cfd_results.py --input_xdmf results/run.xdmf --output_path results/run_every10 --stride 10
 """
 
 import argparse
@@ -23,16 +23,10 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Resample CFD results to every nth timestep"
     )
-    parser.add_argument("xdmf", help="Path to the source XDMF file")
-    parser.add_argument("output_dir", help="Output directory for resampled results")
-    parser.add_argument("n", type=int, help="Keep every nth timestep (e.g. 10)")
-    parser.add_argument(
-        "--start",
-        type=int,
-        default=0,
-        metavar="S",
-        help="Index into the timestep list to start from (default: 0)",
-    )
+    parser.add_argument("--input_xdmf",  help="Path to the source XDMF file")
+    parser.add_argument("--output_path", help="Output directory for resampled results")
+    parser.add_argument("--stride",      type=int, help="Keep every nth timestep (e.g. 10)")
+    parser.add_argument("--start",       type=int, default=0, metavar="S", help="Index into the timestep list to start from (default: 0)")
     return parser.parse_args()
 
 
@@ -44,10 +38,10 @@ def extract_h5_filenames(text):
 def main():
     args = parse_args()
 
-    xdmf_path = Path(args.xdmf).resolve()
+    xdmf_path = Path(args.input_xdmf).resolve()
     src_dir = xdmf_path.parent
-    out_dir = Path(args.output_dir).resolve()
-    n = args.n
+    out_dir = Path(args.output_path).resolve()
+    n = args.stride
     start = args.start
 
     if not xdmf_path.exists():
